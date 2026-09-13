@@ -15,9 +15,9 @@ contract rather than by a speculative wrapper.
 | 1186--1494 | command reference ownership and command recording | `command/record.c` (allocation and all command reference release paths extracted and linked by `core.c`) |
 | 1496--1765 | logical device initialization, shutdown, generation, adapter, and display queries | `device/logical_device.c` |
 | 1767--2211 | pipeline and bind-group creation; resource and shader module creation/inspection is extracted | `resource/resources.c`, `shader/modules.c`, `pipeline/pipelines.c`, `pipeline/bind_groups.c` |
-| 2213--3337 | graphics pipeline and graphics bind-group creation are extracted; remaining pipeline-facing draw/render logic stays in `core.c` | `pipeline/graphics.c`, `pipeline/pipelines.c`, `pipeline/bind_groups.c` |
+| 2213--3337 | graphics pipeline and graphics bind-group creation are extracted | `pipeline/graphics.c`, `pipeline/pipelines.c`, `pipeline/bind_groups.c` |
 | 3339--4016 | queue and command-list state recording; copy and dispatch recording is extracted | `command/commands.c`; image transition and compute/graphics barrier recording is extracted to `sync/barriers.c` |
-| 4018--4887 | render-pass setup and attachment/state validation are extracted; remaining draw/pass-close logic stays in `core.c` | `presentation/render_pass.c` |
+| 4018--4887 | render-pass setup and attachment/state validation are extracted; draw/pass-close is in `command/draw.c` | `presentation/render_pass.c`, `command/draw.c` |
 | 4962--5988 | raster state, draw encoding, and pass close are extracted; present encoding is also extracted | `command/draw.c`, `presentation/present.c` |
 | 5990--7681 | backend command translation and submit-time validation are extracted | `queue/submit.c`; fence creation/value/wait is extracted and linked by `sync/fences.c` |
 | 7703--end | public typed object destruction is extracted; core shutdown cleanup remains in `core.c` | `core/object_lifetime.c` |
