@@ -23,6 +23,7 @@ ringpu_sources = files(
   'src/presentation/present.c',
   'src/presentation/render_pass.c',
   'src/pipeline/pipelines.c',
+  'src/queue/submit.c',
   'src/pipeline/graphics.c',
   'src/resource/resources.c',
   'src/shader/modules.c',

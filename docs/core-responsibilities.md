@@ -19,7 +19,7 @@ contract rather than by a speculative wrapper.
 | 3339--4016 | queue and command-list state recording; copy and dispatch recording is extracted | `command/commands.c`; image transition and compute/graphics barrier recording is extracted to `sync/barriers.c` |
 | 4018--4887 | render-pass setup and attachment/state validation are extracted; remaining draw/pass-close logic stays in `core.c` | `presentation/render_pass.c` |
 | 4962--5988 | raster state, draw encoding, and pass close are extracted; present encoding is also extracted | `command/draw.c`, `presentation/present.c` |
-| 5990--7681 | backend command translation and submit-time validation | `backend/submit.c`; fence creation/value/wait is extracted and linked by `sync/fences.c` |
+| 5990--7681 | backend command translation and submit-time validation are extracted | `queue/submit.c`; fence creation/value/wait is extracted and linked by `sync/fences.c` |
 | 7703--end | typed object destruction and final resource cleanup | `core/object_lifetime.c` |
 
 The public `RinGpuRuntime` wrapper is already separated in `src/runtime.c`;
