@@ -18,7 +18,7 @@ contract rather than by a speculative wrapper.
 | 2213--3337 | graphics pipeline and graphics bind-group creation are extracted; remaining pipeline-facing draw/render logic stays in `core.c` | `pipeline/graphics.c`, `pipeline/pipelines.c`, `pipeline/bind_groups.c` |
 | 3339--4016 | queue and command-list state recording; copy and dispatch recording is extracted | `command/commands.c`; image transition and compute/graphics barrier recording is extracted to `sync/barriers.c` |
 | 4018--4887 | render-pass setup and attachment/state validation are extracted; remaining draw/pass-close logic stays in `core.c` | `presentation/render_pass.c` |
-| 4962--5988 | raster state, draw encoding, and pass close; present encoding is extracted to `presentation/present.c` | `command/draw.c`, `presentation/present.c` |
+| 4962--5988 | raster state, draw encoding, and pass close are extracted; present encoding is also extracted | `command/draw.c`, `presentation/present.c` |
 | 5990--7681 | backend command translation and submit-time validation | `backend/submit.c`; fence creation/value/wait is extracted and linked by `sync/fences.c` |
 | 7703--end | typed object destruction and final resource cleanup | `core/object_lifetime.c` |
 
