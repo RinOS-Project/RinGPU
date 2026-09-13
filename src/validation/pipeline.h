@@ -4,6 +4,9 @@
 
 #include "../core/core.h"
 
+int ringpu_finite_float(float value);
+int ringpu_blend_constants_valid(uint32_t color_format,
+                                 const float* constants);
 int ringpu_blend_factor_valid(uint32_t factor);
 int ringpu_blend_source_factor_valid(uint32_t factor);
 int ringpu_blend_factor_v2_valid(uint32_t factor);

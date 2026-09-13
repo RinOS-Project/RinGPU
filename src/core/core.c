@@ -12,8 +12,6 @@
 #define RIN_GPU_COMMAND_EXECUTABLE 2u
 #define RIN_GPU_SHADER_CACHE_INDEX_NONE UINT32_MAX
 
-static int ringpu_finite_float(float value);
-
 static int ringpu_core_ready(const RinGpuCore* core) {
     if (!core || !core->initialized) return RIN_GPU_ERROR_INVALID_ARGUMENT;
     if (core->device_lost) return RIN_GPU_ERROR_DEVICE_LOST;
@@ -315,24 +313,6 @@ static const RinGpuDisplayInfoV1* ringpu_find_display(
         }
     }
     return NULL;
-}
-
-static int ringpu_blend_constants_valid(uint32_t color_format,
-                                        const float* constants) {
-    if (constants == NULL || !ringpu_finite_float(constants[0]) ||
-        !ringpu_finite_float(constants[1]) ||
-        !ringpu_finite_float(constants[2]) ||
-        !ringpu_finite_float(constants[3])) {
-        return 0;
-    }
-    /* Float color targets must preserve finite blend constants outside the
-     * normalized range. Fixed-point targets remain deliberately bounded. */
-    return color_format == RIN_GPU_FORMAT_RGBA16_FLOAT ||
-           color_format == RIN_GPU_FORMAT_RGBA32_FLOAT ||
-           (constants[0] >= 0.0f && constants[0] <= 1.0f &&
-            constants[1] >= 0.0f && constants[1] <= 1.0f &&
-            constants[2] >= 0.0f && constants[2] <= 1.0f &&
-            constants[3] >= 0.0f && constants[3] <= 1.0f);
 }
 
 static void ringpu_release_graphics_bind_group_reference(
@@ -3876,11 +3856,6 @@ int ringpu_command_graphics_barrier(
         sizeof(command->value.graphics_barrier);
     list->value.command_list.count++;
     return RIN_GPU_OK;
-}
-
-static int ringpu_finite_float(float value) {
-    return value == value && value <= 3.402823466e+38f &&
-           value >= -3.402823466e+38f;
 }
 
 static int ringpu_raster_state_valid(const RinGpuRasterStateV1* state) {

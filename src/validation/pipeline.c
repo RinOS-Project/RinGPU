@@ -2,6 +2,31 @@
 #include "pipeline.h"
 #include "resource.h"
 
+int ringpu_finite_float(float value)
+{
+    return value == value && value <= 3.402823466e+38f &&
+           value >= -3.402823466e+38f;
+}
+
+int ringpu_blend_constants_valid(uint32_t color_format,
+                                 const float* constants)
+{
+    if (constants == NULL || !ringpu_finite_float(constants[0]) ||
+        !ringpu_finite_float(constants[1]) ||
+        !ringpu_finite_float(constants[2]) ||
+        !ringpu_finite_float(constants[3])) {
+        return 0;
+    }
+    /* Float color targets preserve finite blend constants outside the
+     * normalized range. Fixed-point targets remain deliberately bounded. */
+    return color_format == RIN_GPU_FORMAT_RGBA16_FLOAT ||
+           color_format == RIN_GPU_FORMAT_RGBA32_FLOAT ||
+           (constants[0] >= 0.0f && constants[0] <= 1.0f &&
+            constants[1] >= 0.0f && constants[1] <= 1.0f &&
+            constants[2] >= 0.0f && constants[2] <= 1.0f &&
+            constants[3] >= 0.0f && constants[3] <= 1.0f);
+}
+
 int ringpu_blend_factor_valid(uint32_t factor)
 {
     return factor >= RIN_GPU_BLEND_ZERO &&
