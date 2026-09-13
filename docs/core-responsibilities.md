@@ -14,7 +14,7 @@ contract rather than by a speculative wrapper.
 | 584--1179 | vertex attribute/binding and shader varying layout validation | `validation/graphics_layout.c` (extracted and linked by `core.c`); render-state validation remains in `core.c` |
 | 1186--1494 | command reference ownership and command recording | `command/record.c` (allocation and all command reference release paths extracted and linked by `core.c`) |
 | 1496--1765 | logical device initialization, shutdown, generation, adapter, and display queries | `device/logical_device.c` |
-| 1767--2211 | buffer/image/sampler/shader object creation and inspection | `resource/resources.c`, `shader/modules.c` |
+| 1767--2211 | shader object creation and inspection; buffer/image/sampler creation and inspection is extracted | `resource/resources.c`, `shader/modules.c` |
 | 2213--3337 | compute/graphics pipeline and bind-group creation | `pipeline/pipelines.c`, `pipeline/bind_groups.c` |
 | 3339--4016 | queue, command-list, copy, readback, and dispatch recording | `command/commands.c`; image transition and compute/graphics barrier recording is extracted to `sync/barriers.c` |
 | 4018--4887 | render-pass setup and attachment/state validation | `presentation/render_pass.c` |
