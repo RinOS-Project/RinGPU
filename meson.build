@@ -20,6 +20,7 @@ ringpu_sources = files(
   'src/device/fault_policy.c',
   'src/memory/memory_runtime.c',
   'src/presentation/present.c',
+  'src/presentation/render_pass.c',
   'src/pipeline/pipelines.c',
   'src/pipeline/graphics.c',
   'src/resource/resources.c',
