@@ -15,7 +15,7 @@ contract rather than by a speculative wrapper.
 | 1186--1494 | command reference ownership and command recording | `command/record.c` (allocation and all command reference release paths extracted and linked by `core.c`) |
 | 1496--1765 | logical device initialization, shutdown, generation, adapter, and display queries | `device/logical_device.c` |
 | 1767--2211 | pipeline and bind-group creation; resource and shader module creation/inspection is extracted | `resource/resources.c`, `shader/modules.c`, `pipeline/pipelines.c`, `pipeline/bind_groups.c` |
-| 2213--3337 | graphics pipeline and graphics bind-group creation; compute pipeline and compute bind-group creation is extracted | `pipeline/pipelines.c`, `pipeline/bind_groups.c` |
+| 2213--3337 | graphics bind-group creation; compute and graphics pipeline creation plus compute bind-group creation is extracted | `pipeline/graphics.c`, `pipeline/pipelines.c`, `pipeline/bind_groups.c` |
 | 3339--4016 | queue and command-list state recording; copy and dispatch recording is extracted | `command/commands.c`; image transition and compute/graphics barrier recording is extracted to `sync/barriers.c` |
 | 4018--4887 | render-pass setup and attachment/state validation | `presentation/render_pass.c` |
 | 4962--5988 | raster state, draw encoding, and pass close; present encoding is extracted to `presentation/present.c` | `command/draw.c`, `presentation/present.c` |

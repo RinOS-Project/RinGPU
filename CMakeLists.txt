@@ -24,6 +24,7 @@ set(RINGPU_SOURCES
     src/memory/memory_runtime.c
     src/presentation/present.c
     src/pipeline/pipelines.c
+    src/pipeline/graphics.c
     src/resource/resources.c
     src/shader/modules.c
     src/capability/cross_process_capability.c)
