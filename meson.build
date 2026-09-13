@@ -18,6 +18,7 @@ ringpu_sources = files(
   'src/device/device_runtime.c',
   'src/device/fault_policy.c',
   'src/memory/memory_runtime.c',
+  'src/presentation/present.c',
   'src/capability/cross_process_capability.c',
 )
 
