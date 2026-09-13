@@ -64,7 +64,8 @@ static int descriptor_valid(const RinGpuCrossProcessCapabilityDescV1* desc)
            desc->owner_process_id != 0u && desc->device_generation != 0u &&
            desc->resource_id != 0u && desc->rights != 0u &&
            (desc->rights & ~RIN_GPU_CROSS_PROCESS_RIGHT_MASK) == 0u &&
-           desc->reserved[0] == 0u && desc->reserved[1] == 0u;
+           desc->reserved[0] == 0u && desc->reserved[1] == 0u &&
+           desc->reserved[2] == 0u;
 }
 
 static int token_valid(const RinGpuCrossProcessCapabilityTokenV1* token)
@@ -74,7 +75,8 @@ static int token_valid(const RinGpuCrossProcessCapabilityTokenV1* token)
            token->token != 0u && token->owner_process_id != 0u &&
            token->device_generation != 0u && token->rights != 0u &&
            (token->rights & ~RIN_GPU_CROSS_PROCESS_RIGHT_MASK) == 0u &&
-           token->reserved[0] == 0u && token->reserved[1] == 0u;
+           token->reserved[0] == 0u && token->reserved[1] == 0u &&
+           token->reserved[2] == 0u;
 }
 
 static int request_valid(const RinGpuCrossProcessCapabilityRequestV1* request)
@@ -84,7 +86,8 @@ static int request_valid(const RinGpuCrossProcessCapabilityRequestV1* request)
            request->token != 0u && request->process_id != 0u &&
            request->device_generation != 0u &&
            (request->required_rights & ~RIN_GPU_CROSS_PROCESS_RIGHT_MASK) == 0u &&
-           request->reserved[0] == 0u && request->reserved[1] == 0u;
+           request->reserved[0] == 0u && request->reserved[1] == 0u &&
+           request->reserved[2] == 0u;
 }
 
 static uint64_t take_request_id(
