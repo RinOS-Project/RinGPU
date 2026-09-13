@@ -22,6 +22,7 @@ set(RINGPU_SOURCES
     src/device/fault_policy.c
     src/memory/memory_runtime.c
     src/presentation/present.c
+    src/pipeline/pipelines.c
     src/resource/resources.c
     src/shader/modules.c
     src/capability/cross_process_capability.c)
