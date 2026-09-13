@@ -3,6 +3,7 @@ project('RinGPU', 'c', version: '1.0.0', default_options: ['c_std=c11', 'warning
 inc = include_directories('include', 'src/core', 'src/validation', 'src/device',
                           'src/memory', 'src/software', 'src/capability')
 ringpu_sources = files(
+  'src/command/commands.c',
   'src/command/record.c',
   'src/core/core.c',
   'src/core/object_table.c',
