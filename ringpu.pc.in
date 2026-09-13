@@ -1,0 +1,10 @@
+prefix=@CMAKE_INSTALL_PREFIX@
+exec_prefix=${prefix}
+libdir=${exec_prefix}/@CMAKE_INSTALL_LIBDIR@
+includedir=${prefix}/@CMAKE_INSTALL_INCLUDEDIR@
+
+Name: ringpu
+Description: RinOS portable GPU runtime and RSH1 validator
+Version: @PROJECT_VERSION@
+Libs: -L${libdir} -lRinGPU
+Cflags: -I${includedir}
