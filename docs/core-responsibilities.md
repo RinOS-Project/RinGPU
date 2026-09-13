@@ -20,7 +20,7 @@ contract rather than by a speculative wrapper.
 | 4018--4887 | render-pass setup and attachment/state validation are extracted; remaining draw/pass-close logic stays in `core.c` | `presentation/render_pass.c` |
 | 4962--5988 | raster state, draw encoding, and pass close are extracted; present encoding is also extracted | `command/draw.c`, `presentation/present.c` |
 | 5990--7681 | backend command translation and submit-time validation are extracted | `queue/submit.c`; fence creation/value/wait is extracted and linked by `sync/fences.c` |
-| 7703--end | typed object destruction and final resource cleanup | `core/object_lifetime.c` |
+| 7703--end | public typed object destruction is extracted; core shutdown cleanup remains in `core.c` | `core/object_lifetime.c` |
 
 The public `RinGpuRuntime` wrapper is already separated in `src/runtime.c`;
 the extraction work above must preserve that opaque boundary and keep the
