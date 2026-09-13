@@ -166,6 +166,15 @@ int ringpu_runtime_create_queue(RinGpuRuntime* runtime,
     return ringpu_create_queue(&runtime->core, desc, queue_out);
 }
 
+int ringpu_runtime_create_fence(RinGpuRuntime* runtime,
+                                uint64_t initial_value,
+                                RinGpuHandle* fence_out)
+{
+    if (runtime == NULL || runtime->initialized != RIN_GPU_RUNTIME_VERSION)
+        return RIN_GPU_ERROR_STATE;
+    return ringpu_create_fence(&runtime->core, initial_value, fence_out);
+}
+
 int ringpu_runtime_create_command_list(
     RinGpuRuntime* runtime, const RinGpuCommandListDescV1* desc,
     RinGpuHandle* command_list_out)
@@ -449,6 +458,25 @@ int ringpu_runtime_command_present(RinGpuRuntime* runtime,
     if (runtime == NULL || runtime->initialized != RIN_GPU_RUNTIME_VERSION)
         return RIN_GPU_ERROR_STATE;
     return ringpu_command_present(&runtime->core, command_list, present);
+}
+
+int ringpu_runtime_wait_fence(RinGpuRuntime* runtime, RinGpuHandle fence,
+                              uint64_t value, uint64_t timeout_ns)
+{
+    if (runtime == NULL || runtime->initialized != RIN_GPU_RUNTIME_VERSION)
+        return RIN_GPU_ERROR_STATE;
+    return ringpu_wait_fence(&runtime->core, fence, value, timeout_ns);
+}
+
+int ringpu_runtime_readback_image(
+    RinGpuRuntime* runtime, RinGpuHandle image,
+    const RinGpuImageReadbackV1* readback, void* destination,
+    uint64_t destination_size)
+{
+    if (runtime == NULL || runtime->initialized != RIN_GPU_RUNTIME_VERSION)
+        return RIN_GPU_ERROR_STATE;
+    return ringpu_readback_image(&runtime->core, image, readback, destination,
+                                 destination_size);
 }
 
 int ringpu_runtime_destroy_object(RinGpuRuntime* runtime,

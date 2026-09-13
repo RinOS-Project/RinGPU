@@ -32,6 +32,7 @@ int main(void)
     RinGpuImageTransitionV1 transition = {0};
     RinGpuSubmitInfoV1 submit = {0};
     RinGpuHandle queue = 0u;
+    RinGpuHandle fence = 0u;
     RinGpuHandle command_list = 0u;
     RinGpuHandle image = 0u;
     uint64_t generation = 0u;
@@ -83,6 +84,9 @@ int main(void)
         ringpu_runtime_create_command_list(runtime, &command_desc,
                                            &command_list) != RIN_GPU_OK)
         return 2;
+    if (ringpu_runtime_create_fence(runtime, 1u, &fence) != RIN_GPU_OK ||
+        ringpu_runtime_wait_fence(runtime, fence, 1u, 0u) != RIN_GPU_OK)
+        return 8;
 
     image_desc.abi_version = RIN_GPU_ABI_VERSION;
     image_desc.struct_size = sizeof(image_desc);
@@ -97,6 +101,9 @@ int main(void)
     image_desc.usage = RIN_GPU_IMAGE_COLOR_TARGET | RIN_GPU_IMAGE_PRESENT;
     if (ringpu_runtime_create_image(runtime, &image_desc, &image) != RIN_GPU_OK)
         return 3;
+    if (ringpu_runtime_readback_image(runtime, image, NULL, NULL, 0u) !=
+        RIN_GPU_ERROR_INVALID_ARGUMENT)
+        return 9;
 
     transition.abi_version = RIN_GPU_ABI_VERSION;
     transition.struct_size = sizeof(transition);
