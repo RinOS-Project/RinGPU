@@ -34,6 +34,7 @@ int main(void)
     RinGpuHandle queue = 0u;
     RinGpuHandle command_list = 0u;
     RinGpuHandle image = 0u;
+    uint64_t generation = 0u;
 
     desc.struct_size = sizeof(desc);
     desc.version = RIN_GPU_RUNTIME_VERSION;
@@ -66,6 +67,11 @@ int main(void)
     desc.acquire_image = acquire;
     if (ringpu_runtime_software_surface_create(&desc, &runtime) != RIN_GPU_OK)
         return 1;
+    if (ringpu_runtime_get_device_generation(runtime, &generation) !=
+            RIN_GPU_OK ||
+        generation != desc.device_generation ||
+        ringpu_runtime_device_lost(runtime))
+        return 6;
 
     queue_desc.abi_version = RIN_GPU_ABI_VERSION;
     queue_desc.struct_size = sizeof(queue_desc);
@@ -107,6 +113,9 @@ int main(void)
     submit.command_list = command_list;
     if (ringpu_runtime_queue_submit(runtime, queue, &submit) != RIN_GPU_OK)
         return 5;
+    ringpu_runtime_mark_device_lost(runtime);
+    if (!ringpu_runtime_device_lost(runtime))
+        return 7;
     ringpu_runtime_destroy(runtime);
     return 0;
 }

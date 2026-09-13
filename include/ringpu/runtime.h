@@ -46,6 +46,16 @@ int ringpu_runtime_software_surface_create(
     RinGpuRuntime** runtime_out);
 void ringpu_runtime_destroy(RinGpuRuntime* runtime);
 int ringpu_runtime_device_lost(const RinGpuRuntime* runtime);
+void ringpu_runtime_mark_device_lost(RinGpuRuntime* runtime);
+int ringpu_runtime_get_device_generation(const RinGpuRuntime* runtime,
+                                         uint64_t* generation_out);
+
+int ringpu_runtime_create_buffer(RinGpuRuntime* runtime,
+                                 const RinGpuBufferDescV1* desc,
+                                 RinGpuHandle* buffer_out);
+int ringpu_runtime_upload_buffer(RinGpuRuntime* runtime,
+                                 RinGpuHandle buffer, uint64_t destination_offset,
+                                 const void* source, uint64_t size_bytes);
 
 int ringpu_runtime_create_queue(RinGpuRuntime* runtime,
                                 const RinGpuQueueDescV1* desc,
@@ -56,6 +66,51 @@ int ringpu_runtime_create_command_list(
 int ringpu_runtime_create_image(RinGpuRuntime* runtime,
                                 const RinGpuImageDescV1* desc,
                                 RinGpuHandle* image_out);
+int ringpu_runtime_upload_image(RinGpuRuntime* runtime, RinGpuHandle image,
+                                const RinGpuImageUploadV1* upload,
+                                const void* source, uint64_t source_size);
+int ringpu_runtime_create_sampler(RinGpuRuntime* runtime,
+                                  const RinGpuSamplerDescV1* desc,
+                                  RinGpuHandle* sampler_out);
+int ringpu_runtime_create_shader_module(RinGpuRuntime* runtime,
+                                        const void* rin_shader_ir,
+                                        uint64_t shader_size,
+                                        RinGpuHandle* shader_module_out);
+int ringpu_runtime_create_graphics_pipeline_vertex(
+    RinGpuRuntime* runtime, const RinGpuGraphicsPipelineVertexDescV1* desc,
+    const RinGpuVertexAttributeV1* attributes, uint32_t attribute_count,
+    RinGpuHandle* pipeline_out);
+int ringpu_runtime_create_graphics_pipeline_vertex_bindings(
+    RinGpuRuntime* runtime, const RinGpuGraphicsPipelineVertexDescV1* desc,
+    const RinGpuVertexAttributeV2* attributes, uint32_t attribute_count,
+    const RinGpuVertexBufferLayoutV1* vertex_bindings,
+    uint32_t vertex_binding_count, RinGpuHandle* pipeline_out);
+int ringpu_runtime_create_graphics_pipeline_native(
+    RinGpuRuntime* runtime, const RinGpuGraphicsPipelineNativeDescV1* desc,
+    const RinGpuVertexAttributeV1* attributes, uint32_t attribute_count,
+    const RinGpuVaryingV1* varyings, uint32_t varying_count,
+    RinGpuHandle* pipeline_out);
+int ringpu_runtime_create_graphics_pipeline_native_v2(
+    RinGpuRuntime* runtime, const RinGpuGraphicsPipelineNativeDescV2* desc,
+    const RinGpuVertexAttributeV1* attributes, uint32_t attribute_count,
+    const RinGpuVaryingV1* varyings, uint32_t varying_count,
+    RinGpuHandle* pipeline_out);
+int ringpu_runtime_create_graphics_pipeline_native_vertex_bindings(
+    RinGpuRuntime* runtime, const RinGpuGraphicsPipelineNativeDescV1* desc,
+    const RinGpuVertexAttributeV2* attributes, uint32_t attribute_count,
+    const RinGpuVertexBufferLayoutV1* vertex_bindings,
+    uint32_t vertex_binding_count, const RinGpuVaryingV1* varyings,
+    uint32_t varying_count, RinGpuHandle* pipeline_out);
+int ringpu_runtime_create_graphics_pipeline_native_vertex_bindings_v2(
+    RinGpuRuntime* runtime, const RinGpuGraphicsPipelineNativeDescV2* desc,
+    const RinGpuVertexAttributeV2* attributes, uint32_t attribute_count,
+    const RinGpuVertexBufferLayoutV1* vertex_bindings,
+    uint32_t vertex_binding_count, const RinGpuVaryingV1* varyings,
+    uint32_t varying_count, RinGpuHandle* pipeline_out);
+int ringpu_runtime_create_graphics_bind_group_typed(
+    RinGpuRuntime* runtime, RinGpuHandle pipeline,
+    const RinGpuGraphicsBindingV1* bindings, uint32_t binding_count,
+    RinGpuHandle* bind_group_out);
 int ringpu_runtime_command_list_reset(RinGpuRuntime* runtime,
                                       RinGpuHandle command_list);
 int ringpu_runtime_command_list_close(RinGpuRuntime* runtime,
@@ -63,6 +118,46 @@ int ringpu_runtime_command_list_close(RinGpuRuntime* runtime,
 int ringpu_runtime_command_transition_image(
     RinGpuRuntime* runtime, RinGpuHandle command_list, RinGpuHandle image,
     const RinGpuImageTransitionV1* transition);
+int ringpu_runtime_command_begin_render_pass(
+    RinGpuRuntime* runtime, RinGpuHandle command_list,
+    const RinGpuRenderPassDescV1* render_pass);
+int ringpu_runtime_command_begin_render_pass_mrt(
+    RinGpuRuntime* runtime, RinGpuHandle command_list,
+    const RinGpuRenderPassMrtDescV1* render_pass);
+int ringpu_runtime_command_begin_render_pass_depth(
+    RinGpuRuntime* runtime, RinGpuHandle command_list,
+    const RinGpuRenderPassDepthDescV1* render_pass);
+int ringpu_runtime_command_begin_render_pass_depth_stencil(
+    RinGpuRuntime* runtime, RinGpuHandle command_list,
+    const RinGpuRenderPassDepthStencilDescV1* render_pass);
+int ringpu_runtime_command_bind_graphics_resources(
+    RinGpuRuntime* runtime, RinGpuHandle command_list,
+    RinGpuHandle bind_group);
+int ringpu_runtime_command_set_raster_state(
+    RinGpuRuntime* runtime, RinGpuHandle command_list,
+    const RinGpuRasterStateV1* state);
+int ringpu_runtime_command_draw(RinGpuRuntime* runtime,
+                                RinGpuHandle command_list,
+                                const RinGpuDrawV1* draw);
+int ringpu_runtime_command_draw_vertices(
+    RinGpuRuntime* runtime, RinGpuHandle command_list,
+    const RinGpuDrawVerticesV1* draw);
+int ringpu_runtime_command_draw_vertices_v2(
+    RinGpuRuntime* runtime, RinGpuHandle command_list,
+    const RinGpuDrawVerticesV2* draw);
+int ringpu_runtime_command_draw_indexed(
+    RinGpuRuntime* runtime, RinGpuHandle command_list,
+    const RinGpuDrawIndexedV1* draw);
+int ringpu_runtime_command_draw_indexed_v2(
+    RinGpuRuntime* runtime, RinGpuHandle command_list,
+    const RinGpuDrawIndexedV2* draw);
+int ringpu_runtime_command_end_render_pass(RinGpuRuntime* runtime,
+                                           RinGpuHandle command_list);
+int ringpu_runtime_command_present(RinGpuRuntime* runtime,
+                                   RinGpuHandle command_list,
+                                   const RinGpuPresentV1* present);
+int ringpu_runtime_destroy_object(RinGpuRuntime* runtime,
+                                  RinGpuHandle object);
 int ringpu_runtime_queue_submit(RinGpuRuntime* runtime, RinGpuHandle queue,
                                 const RinGpuSubmitInfoV1* submit);
 
