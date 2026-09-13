@@ -31,7 +31,8 @@ set(RINGPU_SOURCES
     src/pipeline/graphics.c
     src/resource/resources.c
     src/shader/modules.c
-    src/capability/cross_process_capability.c)
+    src/capability/cross_process_capability.c
+    src/capability/cross_process_capability_ipc.c)
 
 if(RINGPU_BUILD_SHARED)
     add_library(RinGPU SHARED ${RINGPU_SOURCES})
@@ -43,6 +44,7 @@ add_library(RinGPU::RinGPU ALIAS RinGPU)
 target_compile_features(RinGPU PUBLIC c_std_11)
 target_include_directories(RinGPU
     PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+           $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../RinOS-SDK/include>
            $<INSTALL_INTERFACE:include>
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/core
             ${CMAKE_CURRENT_SOURCE_DIR}/src/validation
@@ -82,6 +84,10 @@ if(RINGPU_BUILD_TESTS)
     add_executable(ringpu-runtime-test tests/ringpu_runtime_test.c)
     target_link_libraries(ringpu-runtime-test PRIVATE RinGPU::RinGPU)
     add_test(NAME ringpu-runtime COMMAND ringpu-runtime-test)
+    add_executable(ringpu-cross-process-ipc-test
+                   tests/ringpu_cross_process_ipc_test.c)
+    target_link_libraries(ringpu-cross-process-ipc-test PRIVATE RinGPU::RinGPU)
+    add_test(NAME ringpu-cross-process-ipc COMMAND ringpu-cross-process-ipc-test)
 endif()
 
 if(RINGPU_BUILD_DIFFERENTIAL_TESTS)

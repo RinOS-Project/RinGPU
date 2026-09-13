@@ -1,7 +1,8 @@
 project('RinGPU', 'c', version: '1.0.0', default_options: ['c_std=c11', 'warning_level=3'])
 
-inc = include_directories('include', 'src/core', 'src/validation', 'src/device',
-                          'src/memory', 'src/software', 'src/capability')
+inc = include_directories('include', '../../RinOS-SDK/include', 'src/core',
+                          'src/validation', 'src/device', 'src/memory',
+                          'src/software', 'src/capability')
 ringpu_sources = files(
   'src/command/commands.c',
   'src/command/draw.c',
@@ -29,6 +30,7 @@ ringpu_sources = files(
   'src/resource/resources.c',
   'src/shader/modules.c',
   'src/capability/cross_process_capability.c',
+  'src/capability/cross_process_capability_ipc.c',
 )
 
 ringpu = library('RinGPU', ringpu_sources, include_directories: inc,
@@ -45,6 +47,9 @@ if get_option('buildtype') != 'plain'
                                    dependencies: ringpu_dep))
   test('ringpu-runtime', executable('ringpu-runtime-test', 'tests/ringpu_runtime_test.c',
                                    dependencies: ringpu_dep))
+  test('ringpu-cross-process-ipc', executable('ringpu-cross-process-ipc-test',
+                                              'tests/ringpu_cross_process_ipc_test.c',
+                                              dependencies: ringpu_dep))
   if get_option('build_differential_tests')
     test('ringpu-differential', executable('ringpu-differential-test',
                                           'tests/differential/differential_test.c',

@@ -10,7 +10,7 @@ through an include path into the public build.
 | `core.c`, `core.h` | B: split | The versioned public ABI is in `include/ringpu/ringpu.h`; the copied core is portable runtime policy and owns no PCI/MMIO object. |
 | `device_runtime.*`, `fault_policy.*` | B | Logical device records, bounded feature flags, and recovery policy only. Physical adapter discovery remains a backend concern. |
 | `memory_runtime.*` | B | Allocation accounting and resource lifetime policy; no physical address or kernel pointer is exposed. |
-| `cross_process_capability.*` | B | Opaque, generation-bound capability validation; process transport is supplied by OS-Core. |
+| `cross_process_capability.*` | B | Opaque, generation-bound capability validation; the client wire format and transport use the versioned RinOS-SDK IPC ABI, while the capability authority remains in OS-Core. |
 | `diagnostics.*`, `shader.c` | A | Portable diagnostic records and RSH1 validation. |
 | `software_backend.*` | A | Host software backend using the same portable runtime record contracts. |
 | `differential.*` | D | Test/support only; not linked into the public runtime target. |

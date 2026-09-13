@@ -20,9 +20,11 @@ meson setup build-meson
 meson test -C build-meson
 ```
 
-The installed public headers are under `ringpu/`. `src/` contains the
-portable implementation and backend-internal records; it is intentionally
-not an OS-Core include path.
+The installed public headers are under `ringpu/`. The cross-process capability
+header also consumes the versioned `rin/gpu_capability.h` and `rin/ipc.h`
+headers from RinOS-SDK; install or expose RinOS-SDK alongside RinGPU. `src/`
+contains the portable implementation and backend-internal records; it is
+intentionally not an OS-Core include path.
 
 The public version is `RINGPU_API_VERSION == 1`.  ABI records use an explicit
 `struct_size`, version, and reserved fields; handles are opaque integers and
