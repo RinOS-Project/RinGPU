@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include "core.h"
+#include "../validation/resource.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -225,96 +226,6 @@ static void ringpu_release_slot(RinGpuObjectSlot* slot) {
     slot->generation++;
     if (slot->generation == 0u) slot->generation = 1u;
     memset(&slot->value, 0, sizeof(slot->value));
-}
-
-static int ringpu_range(uint64_t offset, uint64_t size, uint64_t limit) {
-    return size != 0u && offset <= limit && size <= limit - offset;
-}
-
-static int ringpu_buffer_upload_ready(const RinGpuObjectSlot* slot) {
-    return slot && slot->value.buffer.cpu_upload_pending == 0u;
-}
-
-static int ringpu_image_upload_ready(const RinGpuObjectSlot* slot) {
-    return slot && slot->value.image.cpu_upload_pending == 0u;
-}
-
-static int ringpu_multiply_u64(uint64_t left, uint64_t right,
-                               uint64_t* result) {
-    if (!result || (left != 0u && right > UINT64_MAX / left)) return 0;
-    *result = left * right;
-    return 1;
-}
-
-static uint32_t ringpu_image_format_bytes(uint32_t format) {
-    switch (format) {
-    case RIN_GPU_FORMAT_R8_UNORM:
-    case RIN_GPU_FORMAT_S8_UINT:
-        return 1u;
-    case RIN_GPU_FORMAT_RGB565_UNORM:
-    case RIN_GPU_FORMAT_RGBA4_UNORM:
-    case RIN_GPU_FORMAT_RGB5_A1_UNORM:
-        return 2u;
-    case RIN_GPU_FORMAT_RGBA8_UNORM:
-    case RIN_GPU_FORMAT_BGRA8_UNORM:
-    case RIN_GPU_FORMAT_D32_FLOAT:
-        return 4u;
-    case RIN_GPU_FORMAT_D32_FLOAT_S8_UINT:
-        return 8u;
-    case RIN_GPU_FORMAT_RGBA16_FLOAT:
-        return 8u;
-    case RIN_GPU_FORMAT_RGBA32_FLOAT:
-        return 16u;
-    default:
-        return 0u;
-    }
-}
-
-static int ringpu_color_format(uint32_t format) {
-    return format == RIN_GPU_FORMAT_R8_UNORM ||
-           format == RIN_GPU_FORMAT_RGB565_UNORM ||
-           format == RIN_GPU_FORMAT_RGBA4_UNORM ||
-           format == RIN_GPU_FORMAT_RGB5_A1_UNORM ||
-           format == RIN_GPU_FORMAT_RGBA8_UNORM ||
-           format == RIN_GPU_FORMAT_BGRA8_UNORM ||
-           format == RIN_GPU_FORMAT_RGBA16_FLOAT ||
-           format == RIN_GPU_FORMAT_RGBA32_FLOAT;
-}
-
-static int ringpu_sampled_image_format(uint32_t format) {
-    return ringpu_color_format(format);
-}
-
-static int ringpu_primitive_topology_valid(uint32_t topology) {
-    return topology == RIN_GPU_PRIMITIVE_TRIANGLE_LIST ||
-           topology == RIN_GPU_PRIMITIVE_POINT_LIST ||
-           topology == RIN_GPU_PRIMITIVE_LINE_LIST ||
-           topology == RIN_GPU_PRIMITIVE_LINE_STRIP ||
-           topology == RIN_GPU_PRIMITIVE_LINE_LOOP ||
-           topology == RIN_GPU_PRIMITIVE_TRIANGLE_STRIP ||
-           topology == RIN_GPU_PRIMITIVE_TRIANGLE_FAN;
-}
-
-static int ringpu_depth_stencil_format(uint32_t format) {
-    return format == RIN_GPU_FORMAT_D32_FLOAT ||
-           format == RIN_GPU_FORMAT_D32_FLOAT_S8_UINT ||
-           format == RIN_GPU_FORMAT_S8_UINT;
-}
-
-/* A three-target pass can select one physical aspect from a D32S8 image. */
-static int ringpu_depth_aspect_format(uint32_t format) {
-    return format == RIN_GPU_FORMAT_D32_FLOAT ||
-           format == RIN_GPU_FORMAT_D32_FLOAT_S8_UINT;
-}
-
-static int ringpu_stencil_aspect_format(uint32_t format) {
-    return format == RIN_GPU_FORMAT_S8_UINT ||
-           format == RIN_GPU_FORMAT_D32_FLOAT_S8_UINT;
-}
-
-static int ringpu_scanout_format(uint32_t format) {
-    return format == RIN_GPU_FORMAT_RGBA8_UNORM ||
-           format == RIN_GPU_FORMAT_BGRA8_UNORM;
 }
 
 static int ringpu_fixed_name_valid(const char* name, uint32_t capacity) {
