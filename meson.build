@@ -5,6 +5,7 @@ inc = include_directories('include', 'src/core', 'src/validation', 'src/device',
 ringpu_sources = files(
   'src/command/record.c',
   'src/core/core.c',
+  'src/core/object_table.c',
   'src/runtime.c',
   'src/validation/diagnostics.c',
   'src/validation/graphics_layout.c',

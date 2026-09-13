@@ -8,6 +8,7 @@ option(RINGPU_BUILD_DIFFERENTIAL_TESTS "Build RinGPU differential support tests"
 set(RINGPU_SOURCES
     src/command/record.c
     src/core/core.c
+    src/core/object_table.c
     src/runtime.c
     src/validation/diagnostics.c
     src/validation/graphics_layout.c
