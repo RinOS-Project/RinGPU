@@ -23,6 +23,7 @@ set(RINGPU_SOURCES
     src/memory/memory_runtime.c
     src/presentation/present.c
     src/resource/resources.c
+    src/shader/modules.c
     src/capability/cross_process_capability.c)
 
 if(RINGPU_BUILD_SHARED)

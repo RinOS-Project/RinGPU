@@ -7,6 +7,7 @@
 
 #define RIN_GPU_COMMAND_RECORDING 1u
 #define RIN_GPU_COMMAND_EXECUTABLE 2u
+#define RIN_GPU_SHADER_CACHE_INDEX_NONE UINT32_MAX
 
 #include <ringpu/ringpu.h>
 
@@ -831,6 +832,8 @@ _Static_assert(sizeof(RinGpuBackendCommandV1) == 856u,
 int ringpu_core_init(RinGpuCore* core, const RinGpuCoreConfigV1* config);
 void ringpu_core_shutdown(RinGpuCore* core);
 void ringpu_core_mark_device_lost(RinGpuCore* core);
+uint64_t ringpu_core_device_generation(
+    const RinGpuDiagnosticsRuntime* diagnostics);
 int ringpu_core_ready(const RinGpuCore* core);
 void ringpu_core_diagnostic(RinGpuCore* core, uint32_t type,
                             uint64_t resource_cookie, uint64_t queue_cookie,
