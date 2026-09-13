@@ -10,7 +10,7 @@ contract rather than by a speculative wrapper.
 | --- | --- | --- |
 | 1--228 | core readiness, diagnostics, generation-bound handles, object-slot allocation, and shader-cache lifetime | `core/object_table.c`, `core/shader_cache.c` |
 | 230--319 | bounded arithmetic, resource upload readiness, format, primitive, image allocation, transfer-layout, and image-state validation | `validation/resource.c` (extracted and linked by `core.c`) |
-| 320--554 | display records, blend/sampler/raster enum validation | `validation/pipeline.c` (extracted and linked by `core.c`) |
+| 320--554 | display records, blend/sampler/raster state validation | `validation/pipeline.c` (extracted and linked by `core.c`) |
 | 584--1179 | vertex attribute/binding and shader varying layout validation | `validation/graphics_layout.c` (extracted and linked by `core.c`); render-state validation remains in `core.c` |
 | 1186--1494 | command reference ownership and command recording | `command/record.c` (record allocation extracted and linked by `core.c`); reference ownership remains in `core.c` |
 | 1496--1765 | logical device initialization, shutdown, generation, adapter, and display queries | `device/logical_device.c` |

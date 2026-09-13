@@ -27,6 +27,90 @@ int ringpu_blend_constants_valid(uint32_t color_format,
             constants[3] >= 0.0f && constants[3] <= 1.0f);
 }
 
+int ringpu_raster_state_valid(const RinGpuRasterStateV1* state)
+{
+    const RinGpuViewportV1* viewport;
+    const RinGpuScissorV1* scissor;
+
+    if (!state || !ringpu_versioned(state->abi_version, state->struct_size,
+                                    sizeof(*state)) ||
+        (state->struct_size != sizeof(RinGpuRasterStateV1) &&
+         state->struct_size != sizeof(RinGpuRasterStateV2) &&
+         state->struct_size != sizeof(RinGpuRasterStateV3) &&
+         state->struct_size != sizeof(RinGpuRasterStateV4) &&
+         state->struct_size != sizeof(RinGpuRasterStateV5)) ||
+        state->flags != 0u || state->reserved != 0u) {
+        return 0;
+    }
+    if (state->struct_size == sizeof(RinGpuRasterStateV2) ||
+        state->struct_size == sizeof(RinGpuRasterStateV3) ||
+        state->struct_size == sizeof(RinGpuRasterStateV4) ||
+        state->struct_size == sizeof(RinGpuRasterStateV5)) {
+        const RinGpuRasterStateV2* extended =
+            (const RinGpuRasterStateV2*)(const void*)state;
+        if (extended->polygon_offset_fill_enabled > 1u ||
+            extended->reserved0 != 0u ||
+            !ringpu_finite_float(extended->polygon_offset_factor) ||
+            !ringpu_finite_float(extended->polygon_offset_units)) {
+            return 0;
+        }
+    }
+    if (state->struct_size == sizeof(RinGpuRasterStateV3) ||
+        state->struct_size == sizeof(RinGpuRasterStateV4) ||
+        state->struct_size == sizeof(RinGpuRasterStateV5)) {
+        const RinGpuRasterStateV3* extended =
+            (const RinGpuRasterStateV3*)(const void*)state;
+        if (!ringpu_finite_float(extended->line_width) ||
+            extended->line_width < 1.0f || extended->line_width > 64.0f ||
+            extended->reserved1 != 0u) {
+            return 0;
+        }
+    }
+    if (state->struct_size == sizeof(RinGpuRasterStateV4) ||
+        state->struct_size == sizeof(RinGpuRasterStateV5)) {
+        const RinGpuRasterStateV4* extended =
+            (const RinGpuRasterStateV4*)(const void*)state;
+        if (extended->sample_coverage_enabled > 1u ||
+            extended->sample_coverage_invert > 1u ||
+            !ringpu_finite_float(extended->sample_coverage_value) ||
+            extended->sample_coverage_value < 0.0f ||
+            extended->sample_coverage_value > 1.0f ||
+            extended->reserved2 != 0u) {
+            return 0;
+        }
+    }
+    if (state->struct_size == sizeof(RinGpuRasterStateV5)) {
+        const RinGpuRasterStateV5* extended =
+            (const RinGpuRasterStateV5*)(const void*)state;
+        if (extended->dither_enabled > 1u || extended->reserved3 != 0u)
+            return 0;
+    }
+    viewport = &state->viewport;
+    scissor = &state->scissor;
+    if (!ringpu_versioned(viewport->abi_version, viewport->struct_size,
+                          sizeof(*viewport)) ||
+        !ringpu_finite_float(viewport->x) ||
+        !ringpu_finite_float(viewport->y) ||
+        !ringpu_finite_float(viewport->width) ||
+        !ringpu_finite_float(viewport->height) ||
+        !ringpu_finite_float(viewport->min_depth) ||
+        !ringpu_finite_float(viewport->max_depth) ||
+        viewport->width <= 0.0f || viewport->height <= 0.0f ||
+        viewport->min_depth < 0.0f || viewport->min_depth > 1.0f ||
+        viewport->max_depth < 0.0f || viewport->max_depth > 1.0f ||
+        viewport->flags != 0u || viewport->reserved != 0u ||
+        !ringpu_versioned(scissor->abi_version, scissor->struct_size,
+                          sizeof(*scissor)) || scissor->enabled > 1u ||
+        scissor->flags != 0u || scissor->reserved0 != 0u ||
+        scissor->reserved1 != 0u) {
+        return 0;
+    }
+    if (scissor->enabled == 0u)
+        return scissor->x == 0 && scissor->y == 0 &&
+               scissor->width == 0u && scissor->height == 0u;
+    return scissor->x >= 0 && scissor->y >= 0;
+}
+
 int ringpu_blend_factor_valid(uint32_t factor)
 {
     return factor >= RIN_GPU_BLEND_ZERO &&
