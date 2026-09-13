@@ -4,6 +4,7 @@
 #include "../validation/graphics_layout.h"
 #include "../validation/pipeline.h"
 #include "../validation/resource.h"
+#include "../validation/shader.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -1263,118 +1264,6 @@ int ringpu_get_shader_info(const RinGpuCore* core,
                                RIN_GPU_OBJECT_SHADER_MODULE, NULL, &slot);
     if (result != RIN_GPU_OK) return result;
     *info = slot->value.shader_module.info;
-    return RIN_GPU_OK;
-}
-
-static int ringpu_shader_resource_layout(const RinGpuObjectSlot* shader,
-                                         uint32_t* access,
-                                         uint32_t* kinds) {
-    const RinShaderHeaderV1* header;
-    const RinShaderInstructionV1* instructions;
-    if (!shader || !access || !kinds ||
-        shader->type != RIN_GPU_OBJECT_SHADER_MODULE ||
-        !shader->value.shader_module.rin_shader_ir ||
-        shader->value.shader_module.shader_size < sizeof(*header)) {
-        return RIN_GPU_ERROR_STATE;
-    }
-    header = (const RinShaderHeaderV1*)
-        shader->value.shader_module.rin_shader_ir;
-    instructions = (const RinShaderInstructionV1*)(
-        shader->value.shader_module.rin_shader_ir + sizeof(*header));
-    memset(access, 0, RIN_SHADER_MAX_RESOURCES * sizeof(*access));
-    memset(kinds, 0, RIN_SHADER_MAX_RESOURCES * sizeof(*kinds));
-    for (uint32_t index = 0u; index < header->instruction_count; index++) {
-        if (instructions[index].opcode == RIN_SHADER_OP_LOAD_RESOURCE_I32 ||
-            instructions[index].opcode == RIN_SHADER_OP_LOAD_RESOURCE_F32) {
-            if (kinds[instructions[index].resource] !=
-                    RIN_SHADER_RESOURCE_NONE &&
-                kinds[instructions[index].resource] !=
-                    RIN_SHADER_RESOURCE_STORAGE_BUFFER) {
-                return RIN_GPU_ERROR_SHADER_INVALID;
-            }
-            kinds[instructions[index].resource] =
-                RIN_SHADER_RESOURCE_STORAGE_BUFFER;
-            access[instructions[index].resource] |= RIN_GPU_RESOURCE_READ;
-        } else if (instructions[index].opcode ==
-                       RIN_SHADER_OP_STORE_RESOURCE_I32 ||
-                   instructions[index].opcode ==
-                       RIN_SHADER_OP_STORE_RESOURCE_F32) {
-            if (kinds[instructions[index].resource] !=
-                    RIN_SHADER_RESOURCE_NONE &&
-                kinds[instructions[index].resource] !=
-                    RIN_SHADER_RESOURCE_STORAGE_BUFFER) {
-                return RIN_GPU_ERROR_SHADER_INVALID;
-            }
-            kinds[instructions[index].resource] =
-                RIN_SHADER_RESOURCE_STORAGE_BUFFER;
-            access[instructions[index].resource] |= RIN_GPU_RESOURCE_WRITE;
-        } else if (instructions[index].opcode ==
-                       RIN_SHADER_OP_SAMPLE_IMAGE_I32 ||
-                   instructions[index].opcode ==
-                       RIN_SHADER_OP_SAMPLE_IMAGE_F32 ||
-                   instructions[index].opcode ==
-                       RIN_SHADER_OP_SAMPLE_IMAGE_2D_I32 ||
-                   instructions[index].opcode ==
-                       RIN_SHADER_OP_SAMPLE_IMAGE_2D_F32) {
-            uint32_t image = instructions[index].resource;
-            uint32_t sampler = instructions[index].immediate;
-            if ((kinds[image] != RIN_SHADER_RESOURCE_NONE &&
-                 kinds[image] != RIN_SHADER_RESOURCE_SAMPLED_IMAGE) ||
-                (kinds[sampler] != RIN_SHADER_RESOURCE_NONE &&
-                 kinds[sampler] != RIN_SHADER_RESOURCE_SAMPLER)) {
-                return RIN_GPU_ERROR_SHADER_INVALID;
-            }
-            kinds[image] = RIN_SHADER_RESOURCE_SAMPLED_IMAGE;
-            kinds[sampler] = RIN_SHADER_RESOURCE_SAMPLER;
-            access[image] |= RIN_GPU_RESOURCE_READ;
-        } else if (instructions[index].opcode ==
-                       RIN_SHADER_OP_SAMPLE_IMAGE_2D_LOD_F32 ||
-                   instructions[index].opcode ==
-                       RIN_SHADER_OP_SAMPLE_IMAGE_2D_BIAS_F32 ||
-                   instructions[index].opcode ==
-                       RIN_SHADER_OP_SAMPLE_IMAGE_2D_GRAD_F32) {
-            uint32_t image = RIN_SHADER_SAMPLE_2D_LOD_IMAGE_BINDING(
-                instructions[index].resource);
-            uint32_t sampler = RIN_SHADER_SAMPLE_2D_LOD_SAMPLER_BINDING(
-                instructions[index].resource);
-            if ((kinds[image] != RIN_SHADER_RESOURCE_NONE &&
-                 kinds[image] != RIN_SHADER_RESOURCE_SAMPLED_IMAGE) ||
-                (kinds[sampler] != RIN_SHADER_RESOURCE_NONE &&
-                 kinds[sampler] != RIN_SHADER_RESOURCE_SAMPLER)) {
-                return RIN_GPU_ERROR_SHADER_INVALID;
-            }
-            kinds[image] = RIN_SHADER_RESOURCE_SAMPLED_IMAGE;
-            kinds[sampler] = RIN_SHADER_RESOURCE_SAMPLER;
-            access[image] |= RIN_GPU_RESOURCE_READ;
-        } else if (instructions[index].opcode ==
-                       RIN_SHADER_OP_SAMPLE_COMPARE_I32 ||
-                   instructions[index].opcode ==
-                       RIN_SHADER_OP_SAMPLE_COMPARE_F32) {
-            uint32_t image = instructions[index].resource;
-            uint32_t sampler = instructions[index].immediate;
-            if ((kinds[image] != RIN_SHADER_RESOURCE_NONE &&
-                 kinds[image] !=
-                     RIN_SHADER_RESOURCE_SAMPLED_DEPTH_IMAGE) ||
-                (kinds[sampler] != RIN_SHADER_RESOURCE_NONE &&
-                 kinds[sampler] !=
-                     RIN_SHADER_RESOURCE_COMPARISON_SAMPLER)) {
-                return RIN_GPU_ERROR_SHADER_INVALID;
-            }
-            kinds[image] = RIN_SHADER_RESOURCE_SAMPLED_DEPTH_IMAGE;
-            kinds[sampler] = RIN_SHADER_RESOURCE_COMPARISON_SAMPLER;
-            access[image] |= RIN_GPU_RESOURCE_READ;
-        }
-    }
-    for (uint32_t resource = 0u; resource < header->resource_count;
-         resource++) {
-        if (kinds[resource] == RIN_SHADER_RESOURCE_NONE ||
-            (!ringpu_graphics_sampler_kind(kinds[resource]) &&
-             access[resource] == 0u) ||
-            (ringpu_graphics_sampler_kind(kinds[resource]) &&
-             access[resource] != 0u)) {
-            return RIN_GPU_ERROR_SHADER_INVALID;
-        }
-    }
     return RIN_GPU_OK;
 }
 
