@@ -6,6 +6,7 @@ option(RINGPU_BUILD_TESTS "Build RinGPU host tests" ON)
 option(RINGPU_BUILD_DIFFERENTIAL_TESTS "Build RinGPU differential support tests" OFF)
 
 set(RINGPU_SOURCES
+    src/command/record.c
     src/core/core.c
     src/runtime.c
     src/validation/diagnostics.c
