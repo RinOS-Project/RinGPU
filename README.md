@@ -23,3 +23,7 @@ meson test -C build-meson
 The installed public headers are under `ringpu/`. `src/` contains the
 portable implementation and backend-internal records; it is intentionally
 not an OS-Core include path.
+
+The public version is `RINGPU_API_VERSION == 1`.  ABI records use an explicit
+`struct_size`, version, and reserved fields; handles are opaque integers and
+are never process pointers or physical addresses.

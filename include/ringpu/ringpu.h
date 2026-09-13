@@ -4,9 +4,10 @@
 
 #include <stdint.h>
 
+#include "version.h"
 #include "rin_shader.h"
 
-#define RIN_GPU_ABI_VERSION 1u
+#define RIN_GPU_ABI_VERSION RINGPU_ABI_VERSION
 #define RIN_GPU_ADAPTER_NAME_MAX 64u
 #define RIN_GPU_DISPLAY_NAME_MAX 64u
 #define RIN_GPU_MAX_DISPLAYS 16u
