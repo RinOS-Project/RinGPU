@@ -10,7 +10,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Configure
-        run: cmake -S . -B build -DRINGPU_BUILD_TESTS=ON
+        run: cmake -S . -B build -DRINGPU_BUILD_TESTS=ON -DRINGPU_BUILD_DIFFERENTIAL_TESTS=ON
       - name: Build
         run: cmake --build build --parallel
       - name: Test

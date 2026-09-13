@@ -28,4 +28,11 @@ if get_option('buildtype') != 'plain'
                                    dependencies: ringpu_dep))
   test('ringpu-runtime', executable('ringpu-runtime-test', 'tests/ringpu_runtime_test.c',
                                    dependencies: ringpu_dep))
+  if get_option('build_differential_tests')
+    test('ringpu-differential', executable('ringpu-differential-test',
+                                          'tests/differential/differential_test.c',
+                                          'tests/differential/differential.c',
+                                          include_directories: inc,
+                                          dependencies: ringpu_dep))
+  endif
 endif

@@ -3,6 +3,7 @@ project(RinGPU VERSION 1.0.0 LANGUAGES C)
 
 option(RINGPU_BUILD_SHARED "Build RinGPU as a shared library" OFF)
 option(RINGPU_BUILD_TESTS "Build RinGPU host tests" ON)
+option(RINGPU_BUILD_DIFFERENTIAL_TESTS "Build RinGPU differential support tests" OFF)
 
 set(RINGPU_SOURCES
     src/core/core.c
@@ -64,4 +65,14 @@ if(RINGPU_BUILD_TESTS)
     add_executable(ringpu-runtime-test tests/ringpu_runtime_test.c)
     target_link_libraries(ringpu-runtime-test PRIVATE RinGPU::RinGPU)
     add_test(NAME ringpu-runtime COMMAND ringpu-runtime-test)
+endif()
+
+if(RINGPU_BUILD_DIFFERENTIAL_TESTS)
+    add_executable(ringpu-differential-test
+                   tests/differential/differential_test.c
+                   tests/differential/differential.c)
+    target_include_directories(ringpu-differential-test
+                               PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests/differential)
+    target_link_libraries(ringpu-differential-test PRIVATE RinGPU::RinGPU)
+    add_test(NAME ringpu-differential COMMAND ringpu-differential-test)
 endif()

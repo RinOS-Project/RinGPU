@@ -1,0 +1,4 @@
+option('build_differential_tests',
+       type: 'boolean',
+       value: false,
+       description: 'Build differential comparison support tests')
