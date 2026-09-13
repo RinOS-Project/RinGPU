@@ -6,6 +6,11 @@ int ringpu_range(uint64_t offset, uint64_t size, uint64_t limit)
     return size != 0u && offset <= limit && size <= limit - offset;
 }
 
+int ringpu_versioned(uint32_t version, uint32_t size, uint32_t required_size)
+{
+    return version == RIN_GPU_ABI_VERSION && size >= required_size;
+}
+
 int ringpu_buffer_upload_ready(const RinGpuObjectSlot* slot)
 {
     return slot != NULL && slot->value.buffer.cpu_upload_pending == 0u;

@@ -9,6 +9,8 @@ set(RINGPU_SOURCES
     src/core/core.c
     src/runtime.c
     src/validation/diagnostics.c
+    src/validation/graphics_layout.c
+    src/validation/pipeline.c
     src/validation/resource.c
     src/validation/shader.c
     src/software/software_backend.c
