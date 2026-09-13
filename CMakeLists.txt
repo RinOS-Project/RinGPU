@@ -16,6 +16,7 @@ set(RINGPU_SOURCES
     src/validation/resource.c
     src/validation/shader.c
     src/software/software_backend.c
+    src/sync/barriers.c
     src/sync/fences.c
     src/device/device_runtime.c
     src/device/fault_policy.c

@@ -5,6 +5,9 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#define RIN_GPU_COMMAND_RECORDING 1u
+#define RIN_GPU_COMMAND_EXECUTABLE 2u
+
 #include <ringpu/ringpu.h>
 
 #include "../validation/diagnostics.h"
