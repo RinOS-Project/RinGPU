@@ -69,6 +69,8 @@ typedef struct RinGpuCrossProcessCapabilityIpcClientV1 {
 
 int rin_gpu_cross_process_capability_ipc_init(
     RinGpuCrossProcessCapabilityIpcClientV1* client, RinChannel channel);
+int rin_gpu_cross_process_capability_ipc_connect(
+    RinGpuCrossProcessCapabilityIpcClientV1* client);
 int rin_gpu_cross_process_capability_ipc_issue(
     RinGpuCrossProcessCapabilityIpcClientV1* client,
     const RinGpuCrossProcessCapabilityDescV1* desc,

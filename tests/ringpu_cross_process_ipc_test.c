@@ -9,6 +9,17 @@ static uint8_t response_bytes[128];
 static uint64_t response_size;
 static RinResult receive_result;
 
+RinResult rin_service_connect_v1(RinStringV1 name, RinChannel* channel)
+{
+    static const char expected_name[] = RIN_GPU_CAPABILITY_SERVICE_NAME;
+    assert(name.size == sizeof(expected_name) - 1u);
+    assert(memcmp((const void*)(uintptr_t)name.address, expected_name,
+                  (size_t)name.size) == 0);
+    assert(channel != NULL);
+    *channel = UINT64_C(7);
+    return RIN_SUCCESS;
+}
+
 RinResult rin_channel_send_v1(
     RinChannel channel, const RinIpcMessageV1* message)
 {
@@ -64,6 +75,8 @@ int main(void)
     RinGpuCrossProcessCapabilityTokenV1 token;
 
     memset(&client, 0, sizeof(client));
+    assert(rin_gpu_cross_process_capability_ipc_connect(&client) ==
+           RIN_GPU_CROSS_PROCESS_OK);
     assert(rin_gpu_cross_process_capability_ipc_init(&client, 0u) ==
            RIN_GPU_CROSS_PROCESS_INVALID_ARGUMENT);
     assert(rin_gpu_cross_process_capability_ipc_init(&client, UINT64_C(7)) ==

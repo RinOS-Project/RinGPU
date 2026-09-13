@@ -204,6 +204,22 @@ int rin_gpu_cross_process_capability_ipc_init(
     return RIN_GPU_CROSS_PROCESS_OK;
 }
 
+int rin_gpu_cross_process_capability_ipc_connect(
+    RinGpuCrossProcessCapabilityIpcClientV1* client)
+{
+    static const char service_name[] = RIN_GPU_CAPABILITY_SERVICE_NAME;
+    RinStringV1 name;
+    RinChannel channel = RIN_HANDLE_INVALID;
+    RinResult result;
+
+    if (client == NULL) return RIN_GPU_CROSS_PROCESS_INVALID_ARGUMENT;
+    name.address = (uint64_t)(uintptr_t)service_name;
+    name.size = sizeof(service_name) - 1u;
+    result = rin_service_connect_v1(name, &channel);
+    if (result != RIN_SUCCESS) return map_sdk_result(result);
+    return rin_gpu_cross_process_capability_ipc_init(client, channel);
+}
+
 int rin_gpu_cross_process_capability_ipc_issue(
     RinGpuCrossProcessCapabilityIpcClientV1* client,
     const RinGpuCrossProcessCapabilityDescV1* desc,
