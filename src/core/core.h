@@ -828,6 +828,10 @@ _Static_assert(sizeof(RinGpuBackendCommandV1) == 856u,
 int ringpu_core_init(RinGpuCore* core, const RinGpuCoreConfigV1* config);
 void ringpu_core_shutdown(RinGpuCore* core);
 void ringpu_core_mark_device_lost(RinGpuCore* core);
+int ringpu_core_ready(const RinGpuCore* core);
+void ringpu_core_diagnostic(RinGpuCore* core, uint32_t type,
+                            uint64_t resource_cookie, uint64_t queue_cookie,
+                            uint64_t value0, uint64_t value1, int status);
 /* Returns the generation currently owned by the core's diagnostics/runtime
  * source.  This remains readable while a core is lost so an embedding can
  * label the replacement transaction without treating the old core as usable.

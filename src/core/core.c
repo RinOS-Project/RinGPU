@@ -6,6 +6,7 @@
 #include "../validation/pipeline.h"
 #include "../validation/resource.h"
 #include "../validation/shader.h"
+#include "../sync/fences.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -14,16 +15,16 @@
 #define RIN_GPU_COMMAND_EXECUTABLE 2u
 #define RIN_GPU_SHADER_CACHE_INDEX_NONE UINT32_MAX
 
-static int ringpu_core_ready(const RinGpuCore* core) {
+int ringpu_core_ready(const RinGpuCore* core) {
     if (!core || !core->initialized) return RIN_GPU_ERROR_INVALID_ARGUMENT;
     if (core->device_lost) return RIN_GPU_ERROR_DEVICE_LOST;
     return RIN_GPU_OK;
 }
 
-static void ringpu_core_diagnostic(RinGpuCore* core, uint32_t type,
-                                   uint64_t resource_cookie,
-                                   uint64_t queue_cookie, uint64_t value0,
-                                   uint64_t value1, int status) {
+void ringpu_core_diagnostic(RinGpuCore* core, uint32_t type,
+                            uint64_t resource_cookie,
+                            uint64_t queue_cookie, uint64_t value0,
+                            uint64_t value1, int status) {
     if (!core || !core->diagnostics) return;
     (void)rin_gpu_diagnostics_record_simple(
         core->diagnostics, type, 0u, resource_cookie, queue_cookie, value0,
@@ -2073,21 +2074,6 @@ int ringpu_create_command_list(RinGpuCore* core,
     if (result == RIN_GPU_OK) {
         slot->value.command_list.capabilities = desc->capabilities;
         slot->value.command_list.state = RIN_GPU_COMMAND_RECORDING;
-    }
-    return result;
-}
-
-int ringpu_create_fence(RinGpuCore* core, uint64_t initial_value,
-                        RinGpuHandle* fence) {
-    RinGpuObjectSlot* slot;
-    int result = ringpu_core_ready(core);
-    if (result != RIN_GPU_OK) return result;
-    if (!fence) return RIN_GPU_ERROR_INVALID_ARGUMENT;
-    result = ringpu_allocate(core, RIN_GPU_OBJECT_FENCE, fence, &slot);
-    if (result == RIN_GPU_OK) {
-        slot->value.fence.value = initial_value;
-        ringpu_core_diagnostic(core, RIN_GPU_DIAGNOSTIC_FENCE, *fence, 0u,
-                               initial_value, 0u, RIN_GPU_OK);
     }
     return result;
 }
@@ -6096,37 +6082,6 @@ int ringpu_queue_submit(RinGpuCore* core, RinGpuHandle queue,
     if (result != RIN_GPU_OK) return result;
     if (fence) fence->value.fence.value = submit->signal_value;
     return RIN_GPU_OK;
-}
-
-int ringpu_fence_value(const RinGpuCore* core, RinGpuHandle fence,
-                       uint64_t* value) {
-    const RinGpuObjectSlot* slot;
-    int result = ringpu_core_ready(core);
-    if (result != RIN_GPU_OK) return result;
-    if (!value) return RIN_GPU_ERROR_INVALID_ARGUMENT;
-    result = ringpu_slot_const(core, fence, RIN_GPU_OBJECT_FENCE, NULL, &slot);
-    if (result != RIN_GPU_OK) return result;
-    *value = slot->value.fence.value;
-    return RIN_GPU_OK;
-}
-
-int ringpu_wait_fence(RinGpuCore* core, RinGpuHandle fence,
-                      uint64_t value, uint64_t timeout_ns) {
-    RinGpuObjectSlot* slot;
-    int result = ringpu_core_ready(core);
-
-    if (result != RIN_GPU_OK) return result;
-    result = ringpu_slot(core, fence, RIN_GPU_OBJECT_FENCE, NULL, &slot);
-    if (result != RIN_GPU_OK) return result;
-    if (value == 0u || value > slot->value.fence.value)
-        return RIN_GPU_ERROR_INVALID_ARGUMENT;
-    if (!core->backend.wait_for_completion)
-        return RIN_GPU_ERROR_UNSUPPORTED;
-    result = core->backend.wait_for_completion(core->backend_context,
-                                               timeout_ns);
-    ringpu_core_diagnostic(core, RIN_GPU_DIAGNOSTIC_QUEUE_WAIT, fence, 0u,
-                           value, timeout_ns, result);
-    return result;
 }
 
 int ringpu_destroy(RinGpuCore* core, RinGpuHandle object) {
