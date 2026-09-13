@@ -4,6 +4,7 @@ inc = include_directories('include', 'src/core', 'src/validation', 'src/device',
                           'src/memory', 'src/software', 'src/capability')
 ringpu_sources = files(
   'src/core/core.c',
+  'src/runtime.c',
   'src/validation/diagnostics.c',
   'src/validation/shader.c',
   'src/software/software_backend.c',
@@ -24,5 +25,7 @@ if get_option('buildtype') != 'plain'
   test('ringpu-abi', executable('ringpu-abi-test', 'tests/ringpu_abi_test.c',
                                 dependencies: ringpu_dep))
   test('ringpu-shader', executable('ringpu-shader-test', 'tests/ringpu_shader_test.c',
+                                   dependencies: ringpu_dep))
+  test('ringpu-runtime', executable('ringpu-runtime-test', 'tests/ringpu_runtime_test.c',
                                    dependencies: ringpu_dep))
 endif

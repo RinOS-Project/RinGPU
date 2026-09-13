@@ -27,3 +27,10 @@ not an OS-Core include path.
 The public version is `RINGPU_API_VERSION == 1`.  ABI records use an explicit
 `struct_size`, version, and reserved fields; handles are opaque integers and
 are never process pointers or physical addresses.
+
+`ringpu/runtime.h` is the supported host integration seam for a software
+surface.  It keeps `RinGpuCore`, diagnostics, and software-backend records
+opaque while exposing the queue, command-list, image, transition, and submit
+operations needed by a compatibility layer such as RinGL.  Consumers should
+link the exported `RinGPU::RinGPU` target (or the installed `ringpu` package)
+and must not include `src/` headers.

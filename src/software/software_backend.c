@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include "software_backend.h"
+#include "../core/core.h"
 
 #include <float.h>
 #include <limits.h>

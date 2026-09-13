@@ -6,6 +6,7 @@ option(RINGPU_BUILD_TESTS "Build RinGPU host tests" ON)
 
 set(RINGPU_SOURCES
     src/core/core.c
+    src/runtime.c
     src/validation/diagnostics.c
     src/validation/shader.c
     src/software/software_backend.c
@@ -60,4 +61,7 @@ if(RINGPU_BUILD_TESTS)
     add_executable(ringpu-shader-test tests/ringpu_shader_test.c)
     target_link_libraries(ringpu-shader-test PRIVATE RinGPU::RinGPU)
     add_test(NAME ringpu-shader COMMAND ringpu-shader-test)
+    add_executable(ringpu-runtime-test tests/ringpu_runtime_test.c)
+    target_link_libraries(ringpu-runtime-test PRIVATE RinGPU::RinGPU)
+    add_test(NAME ringpu-runtime COMMAND ringpu-runtime-test)
 endif()
