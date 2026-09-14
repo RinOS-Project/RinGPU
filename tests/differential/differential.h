@@ -33,6 +33,15 @@ typedef enum RinGpuDifferentialCategory {
 #define RIN_GPU_DIFFERENTIAL_FLAG_DERIVATIVE UINT32_C(1u << 6)
 #define RIN_GPU_DIFFERENTIAL_FLAG_TEXTURE_FILTER UINT32_C(1u << 7)
 
+#define RIN_GPU_DIFFERENTIAL_BACKEND_STATS_VERSION 1u
+#define RIN_GPU_DIFFERENTIAL_BACKEND_FIELD_COMMAND_COUNTERS UINT32_C(1u << 0)
+#define RIN_GPU_DIFFERENTIAL_BACKEND_FIELD_PRESENT_DIGEST UINT32_C(1u << 1)
+#define RIN_GPU_DIFFERENTIAL_BACKEND_FIELD_DETERMINISTIC_SEED UINT32_C(1u << 2)
+#define RIN_GPU_DIFFERENTIAL_BACKEND_FIELDS_KNOWN \
+    (RIN_GPU_DIFFERENTIAL_BACKEND_FIELD_COMMAND_COUNTERS | \
+     RIN_GPU_DIFFERENTIAL_BACKEND_FIELD_PRESENT_DIGEST | \
+     RIN_GPU_DIFFERENTIAL_BACKEND_FIELD_DETERMINISTIC_SEED)
+
 typedef struct RinGpuDifferentialPolicyV1 {
     uint32_t struct_size;
     uint32_t version;
@@ -54,6 +63,28 @@ typedef struct RinGpuDifferentialReportV1 {
     uint64_t mismatched_values;
     uint64_t reserved[2];
 } RinGpuDifferentialReportV1;
+
+/* Backend-neutral observation record. A software or hardware adapter fills
+ * only fields it actually measured and advertises them through valid_fields.
+ * The comparator rejects zero/unknown masks and mismatched masks, so an
+ * unsupported hardware observation cannot become a false match. */
+typedef struct RinGpuDifferentialBackendStatsV1 {
+    uint32_t struct_size;
+    uint32_t version;
+    uint32_t valid_fields;
+    uint32_t reserved0;
+    uint64_t submitted_commands;
+    uint64_t copy_commands;
+    uint64_t draw_commands;
+    uint64_t dispatch_commands;
+    uint64_t transition_commands;
+    uint64_t barrier_commands;
+    uint64_t present_commands;
+    uint64_t output_hash;
+    uint64_t output_hash_count;
+    uint64_t deterministic_seed;
+    uint64_t reserved[2];
+} RinGpuDifferentialBackendStatsV1;
 
 #include <ringpu/software.h>
 
@@ -80,9 +111,15 @@ int rin_gpu_differential_compare_f32(
     uint64_t count, const RinGpuDifferentialPolicyV1* policy,
     RinGpuDifferentialReportV1* report);
 
-/* Compares command counters and the deterministic presentation digest from
- * two real backend runs.  No missing or unsupported backend result can be
- * converted into a match. */
+/* Compares observations from two real backend runs. Both backends must
+ * advertise the same non-empty set of measured fields; a missing digest or
+ * counter set is an explicit mismatch rather than an implicit match. */
+int rin_gpu_differential_compare_backend_snapshot(
+    const RinGpuDifferentialBackendStatsV1* expected,
+    const RinGpuDifferentialBackendStatsV1* actual,
+    RinGpuDifferentialReportV1* report);
+
+/* Compatibility adapter for the software backend's existing stats record. */
 int rin_gpu_differential_compare_backend_stats(
     const struct RinGpuSoftwareBackendStatsV1* expected,
     const struct RinGpuSoftwareBackendStatsV1* actual,
@@ -93,11 +130,15 @@ static_assert(sizeof(RinGpuDifferentialPolicyV1) == 48u,
               "RinGPU differential policy drift");
 static_assert(sizeof(RinGpuDifferentialReportV1) == 48u,
               "RinGPU differential report drift");
+static_assert(sizeof(RinGpuDifferentialBackendStatsV1) == 112u,
+              "RinGPU differential backend stats drift");
 #else
 _Static_assert(sizeof(RinGpuDifferentialPolicyV1) == 48u,
                "RinGPU differential policy drift");
 _Static_assert(sizeof(RinGpuDifferentialReportV1) == 48u,
                "RinGPU differential report drift");
+_Static_assert(sizeof(RinGpuDifferentialBackendStatsV1) == 112u,
+               "RinGPU differential backend stats drift");
 #endif
 
 #endif /* RINGPU_DIFFERENTIAL_H */

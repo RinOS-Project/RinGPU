@@ -70,13 +70,14 @@ static void test_float_tolerance_by_category(void) {
 }
 
 static void test_reference_stats(void) {
-    RinGpuSoftwareBackendStatsV1 expected;
-    RinGpuSoftwareBackendStatsV1 actual;
+    RinGpuDifferentialBackendStatsV1 expected;
+    RinGpuDifferentialBackendStatsV1 actual;
     RinGpuDifferentialReportV1 report;
 
     memset(&expected, 0, sizeof(expected));
     expected.struct_size = sizeof(expected);
-    expected.version = RIN_GPU_SOFTWARE_BACKEND_VERSION;
+    expected.version = RIN_GPU_DIFFERENTIAL_BACKEND_STATS_VERSION;
+    expected.valid_fields = RIN_GPU_DIFFERENTIAL_BACKEND_FIELDS_KNOWN;
     expected.submitted_commands = 3u;
     expected.present_commands = 1u;
     expected.output_hash = UINT64_C(0x1234);
@@ -84,14 +85,21 @@ static void test_reference_stats(void) {
     expected.deterministic_seed = UINT64_C(0x55);
     actual = expected;
     assert(rin_gpu_differential_report_init(&report) == 0);
-    assert(rin_gpu_differential_compare_backend_stats(&expected, &actual,
-                                                      &report) == 0);
+    assert(rin_gpu_differential_compare_backend_snapshot(&expected, &actual,
+                                                         &report) == 0);
     actual.output_hash++;
-    assert(rin_gpu_differential_compare_backend_stats(&expected, &actual,
-                                                      &report) ==
+    assert(rin_gpu_differential_compare_backend_snapshot(&expected, &actual,
+                                                         &report) ==
            RIN_GPU_DIFFERENTIAL_MISMATCH);
     assert((report.mismatch_flags & RIN_GPU_DIFFERENTIAL_FLAG_RESOURCE_STATE) !=
            0u);
+
+    actual = expected;
+    actual.valid_fields &=
+        ~RIN_GPU_DIFFERENTIAL_BACKEND_FIELD_PRESENT_DIGEST;
+    assert(rin_gpu_differential_compare_backend_snapshot(&expected, &actual,
+                                                         &report) ==
+           RIN_GPU_DIFFERENTIAL_MISMATCH);
 }
 
 static void test_fence_and_state_order(void) {

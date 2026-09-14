@@ -196,43 +196,113 @@ int rin_gpu_differential_compare_f32(
                     : RIN_GPU_DIFFERENTIAL_MATCH;
 }
 
+static int backend_stats_valid(
+    const RinGpuDifferentialBackendStatsV1* stats) {
+    if (!stats || stats->struct_size < sizeof(*stats) ||
+        stats->version != RIN_GPU_DIFFERENTIAL_BACKEND_STATS_VERSION ||
+        stats->reserved0 != 0u || stats->valid_fields == 0u ||
+        (stats->valid_fields & ~RIN_GPU_DIFFERENTIAL_BACKEND_FIELDS_KNOWN) !=
+            0u || stats->reserved[0] != 0u || stats->reserved[1] != 0u)
+        return 0;
+    if ((stats->valid_fields &
+         RIN_GPU_DIFFERENTIAL_BACKEND_FIELD_PRESENT_DIGEST) != 0u &&
+        stats->output_hash_count == 0u)
+        return 0;
+    return 1;
+}
+
+int rin_gpu_differential_compare_backend_snapshot(
+    const RinGpuDifferentialBackendStatsV1* expected,
+    const RinGpuDifferentialBackendStatsV1* actual,
+    RinGpuDifferentialReportV1* report) {
+    uint64_t expected_values[10];
+    uint64_t actual_values[10];
+    uint64_t count = 0u;
+    uint32_t fields;
+    if (!backend_stats_valid(expected) || !backend_stats_valid(actual) ||
+        !report_valid(report))
+        return RIN_GPU_DIFFERENTIAL_INVALID_ARGUMENT;
+    if (expected->valid_fields != actual->valid_fields) {
+        record_result(RIN_GPU_DIFFERENTIAL_RESOURCE_STATE, 1, report);
+        return RIN_GPU_DIFFERENTIAL_MISMATCH;
+    }
+    fields = expected->valid_fields;
+    if ((fields & RIN_GPU_DIFFERENTIAL_BACKEND_FIELD_COMMAND_COUNTERS) != 0u) {
+        expected_values[count] = expected->submitted_commands;
+        actual_values[count++] = actual->submitted_commands;
+        expected_values[count] = expected->copy_commands;
+        actual_values[count++] = actual->copy_commands;
+        expected_values[count] = expected->draw_commands;
+        actual_values[count++] = actual->draw_commands;
+        expected_values[count] = expected->dispatch_commands;
+        actual_values[count++] = actual->dispatch_commands;
+        expected_values[count] = expected->transition_commands;
+        actual_values[count++] = actual->transition_commands;
+        expected_values[count] = expected->barrier_commands;
+        actual_values[count++] = actual->barrier_commands;
+        expected_values[count] = expected->present_commands;
+        actual_values[count++] = actual->present_commands;
+    }
+    if ((fields & RIN_GPU_DIFFERENTIAL_BACKEND_FIELD_PRESENT_DIGEST) != 0u) {
+        expected_values[count] = expected->output_hash;
+        actual_values[count++] = actual->output_hash;
+        expected_values[count] = expected->output_hash_count;
+        actual_values[count++] = actual->output_hash_count;
+    }
+    if ((fields & RIN_GPU_DIFFERENTIAL_BACKEND_FIELD_DETERMINISTIC_SEED) != 0u) {
+        expected_values[count] = expected->deterministic_seed;
+        actual_values[count++] = actual->deterministic_seed;
+    }
+    return rin_gpu_differential_compare_u64(
+        RIN_GPU_DIFFERENTIAL_RESOURCE_STATE, expected_values, actual_values,
+        count, report);
+}
+
 int rin_gpu_differential_compare_backend_stats(
     const struct RinGpuSoftwareBackendStatsV1* expected,
     const struct RinGpuSoftwareBackendStatsV1* actual,
     RinGpuDifferentialReportV1* report) {
-    const RinGpuSoftwareBackendStatsV1* left =
-        (const RinGpuSoftwareBackendStatsV1*)expected;
-    const RinGpuSoftwareBackendStatsV1* right =
-        (const RinGpuSoftwareBackendStatsV1*)actual;
-    const uint64_t expected_values[] = {
-        left ? left->submitted_commands : 0u,
-        left ? left->copy_commands : 0u,
-        left ? left->draw_commands : 0u,
-        left ? left->dispatch_commands : 0u,
-        left ? left->transition_commands : 0u,
-        left ? left->barrier_commands : 0u,
-        left ? left->present_commands : 0u,
-        left ? left->output_hash : 0u,
-        left ? left->output_hash_count : 0u,
-        left ? left->deterministic_seed : 0u};
-    const uint64_t actual_values[] = {
-        right ? right->submitted_commands : 0u,
-        right ? right->copy_commands : 0u,
-        right ? right->draw_commands : 0u,
-        right ? right->dispatch_commands : 0u,
-        right ? right->transition_commands : 0u,
-        right ? right->barrier_commands : 0u,
-        right ? right->present_commands : 0u,
-        right ? right->output_hash : 0u,
-        right ? right->output_hash_count : 0u,
-        right ? right->deterministic_seed : 0u};
-    if (!left || !right || left->struct_size < sizeof(*left) ||
-        right->struct_size < sizeof(*right) ||
-        left->version != RIN_GPU_SOFTWARE_BACKEND_VERSION ||
-        right->version != RIN_GPU_SOFTWARE_BACKEND_VERSION ||
-        !report_valid(report))
+    RinGpuDifferentialBackendStatsV1 left;
+    RinGpuDifferentialBackendStatsV1 right;
+    if (!expected || !actual || expected->struct_size < sizeof(*expected) ||
+        actual->struct_size < sizeof(*actual) ||
+        expected->version < RIN_GPU_SOFTWARE_BACKEND_VERSION ||
+        actual->version < RIN_GPU_SOFTWARE_BACKEND_VERSION)
         return RIN_GPU_DIFFERENTIAL_INVALID_ARGUMENT;
-    return rin_gpu_differential_compare_u64(
-        RIN_GPU_DIFFERENTIAL_RESOURCE_STATE, expected_values, actual_values,
-        sizeof(expected_values) / sizeof(expected_values[0]), report);
+    memset(&left, 0, sizeof(left));
+    memset(&right, 0, sizeof(right));
+    left.struct_size = sizeof(left);
+    right.struct_size = sizeof(right);
+    left.version = RIN_GPU_DIFFERENTIAL_BACKEND_STATS_VERSION;
+    right.version = RIN_GPU_DIFFERENTIAL_BACKEND_STATS_VERSION;
+    left.valid_fields =
+        RIN_GPU_DIFFERENTIAL_BACKEND_FIELD_COMMAND_COUNTERS |
+        RIN_GPU_DIFFERENTIAL_BACKEND_FIELD_DETERMINISTIC_SEED;
+    right.valid_fields = left.valid_fields;
+    if (expected->output_hash_count != 0u)
+        left.valid_fields |= RIN_GPU_DIFFERENTIAL_BACKEND_FIELD_PRESENT_DIGEST;
+    if (actual->output_hash_count != 0u)
+        right.valid_fields |= RIN_GPU_DIFFERENTIAL_BACKEND_FIELD_PRESENT_DIGEST;
+    left.submitted_commands = expected->submitted_commands;
+    left.copy_commands = expected->copy_commands;
+    left.draw_commands = expected->draw_commands;
+    left.dispatch_commands = expected->dispatch_commands;
+    left.transition_commands = expected->transition_commands;
+    left.barrier_commands = expected->barrier_commands;
+    left.present_commands = expected->present_commands;
+    left.output_hash = expected->output_hash;
+    left.output_hash_count = expected->output_hash_count;
+    left.deterministic_seed = expected->deterministic_seed;
+    right.submitted_commands = actual->submitted_commands;
+    right.copy_commands = actual->copy_commands;
+    right.draw_commands = actual->draw_commands;
+    right.dispatch_commands = actual->dispatch_commands;
+    right.transition_commands = actual->transition_commands;
+    right.barrier_commands = actual->barrier_commands;
+    right.present_commands = actual->present_commands;
+    right.output_hash = actual->output_hash;
+    right.output_hash_count = actual->output_hash_count;
+    right.deterministic_seed = actual->deterministic_seed;
+    return rin_gpu_differential_compare_backend_snapshot(&left, &right,
+                                                         report);
 }
