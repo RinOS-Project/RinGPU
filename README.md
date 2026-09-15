@@ -30,6 +30,11 @@ The public version is `RINGPU_API_VERSION == 1`.  ABI records use an explicit
 `struct_size`, version, and reserved fields; handles are opaque integers and
 are never process pointers or physical addresses.
 
+`ringpu_shader_validate_resource()` is the bounded public resource-catalog
+adapter for RSH1 shader blobs. It copies a `TYPE_SHADER` entry into
+caller-owned storage and validates it without filesystem access or hidden
+allocation; the catalog/path authority remains with the application.
+
 `ringpu/runtime.h` is the supported host integration seam for a software
 surface.  It keeps `RinGpuCore`, diagnostics, and software-backend records
 opaque while exposing the queue, command-list, image, transition, and submit
