@@ -1,6 +1,7 @@
 project('RinGPU', 'c', version: '1.0.0', default_options: ['c_std=c11', 'warning_level=3'])
 
-inc = include_directories('include', '../../RinOS-SDK/include', 'src/core',
+inc = include_directories('include', '../rinresource/include',
+                          '../../RinOS-SDK/include', 'src/core',
                           'src/validation', 'src/device', 'src/memory',
                           'src/software', 'src/capability')
 ringpu_sources = files(
@@ -45,6 +46,9 @@ if get_option('buildtype') != 'plain'
                                 dependencies: ringpu_dep))
   test('ringpu-shader', executable('ringpu-shader-test', 'tests/ringpu_shader_test.c',
                                    dependencies: ringpu_dep))
+  test('ringpu-shader-resource',
+       executable('ringpu-shader-resource-test',
+                  'tests/ringpu_shader_resource_test.c', dependencies: ringpu_dep))
   test('ringpu-runtime', executable('ringpu-runtime-test', 'tests/ringpu_runtime_test.c',
                                    dependencies: ringpu_dep))
   test('ringpu-cross-process-ipc', executable('ringpu-cross-process-ipc-test',

@@ -1004,3 +1004,39 @@ done:
     free(incoming);
     return result;
 }
+
+int ringpu_shader_validate_resource(
+    const RinResourceCatalogV1* catalog, uint32_t resource_id,
+    RinResourceCatalogReadPathFunction read_path, void* context,
+    uint8_t* storage, uint64_t storage_capacity, uint64_t* storage_size,
+    RinShaderInfoV1* info) {
+    RinResourceCatalogStatus status;
+    int result;
+
+    if (storage_size == NULL || info == NULL) {
+        if (storage_size != NULL) *storage_size = 0u;
+        if (info != NULL) memset(info, 0, sizeof(*info));
+        return RIN_SHADER_ERROR_INVALID_ARGUMENT;
+    }
+    *storage_size = 0u;
+    memset(info, 0, sizeof(*info));
+    if (storage_capacity > SIZE_MAX ||
+        (storage_capacity != 0u && storage == NULL))
+        return RIN_SHADER_ERROR_INVALID_ARGUMENT;
+
+    status = rin_resource_catalog_load(
+        catalog, RIN_RESOURCE_CATALOG_TYPE_SHADER, resource_id, read_path,
+        context, storage, storage_capacity, storage_size);
+    if (status != RIN_RESOURCE_CATALOG_OK || *storage_size > SIZE_MAX ||
+        *storage_size == 0u) {
+        *storage_size = 0u;
+        return status == RIN_RESOURCE_CATALOG_BUFFER_TOO_SMALL
+            ? RIN_SHADER_ERROR_BOUNDS : RIN_SHADER_ERROR_INVALID_ARGUMENT;
+    }
+    result = ringpu_shader_validate(storage, (size_t)*storage_size, info);
+    if (result != RIN_SHADER_OK) {
+        *storage_size = 0u;
+        memset(info, 0, sizeof(*info));
+    }
+    return result;
+}

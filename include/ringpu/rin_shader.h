@@ -5,6 +5,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "rinresource/loader.h"
+
 #define RIN_SHADER_MAGIC UINT32_C(0x31485352) /* "RSH1" */
 #define RIN_SHADER_IR_VERSION 1u
 #define RIN_SHADER_MAX_INSTRUCTIONS 65536u
@@ -284,6 +286,15 @@ typedef struct RinShaderInfoV1 {
 
 int ringpu_shader_validate(const void* shader, size_t shader_size,
                            RinShaderInfoV1* info);
+
+/* Resolve one public shader resource into caller-owned storage and validate
+ * the RSH1 bytes. No filesystem or allocation is performed by the catalog
+ * loader; storage_size and info are cleared before any failure is returned. */
+int ringpu_shader_validate_resource(
+    const RinResourceCatalogV1* catalog, uint32_t resource_id,
+    RinResourceCatalogReadPathFunction read_path, void* context,
+    uint8_t* storage, uint64_t storage_capacity, uint64_t* storage_size,
+    RinShaderInfoV1* info);
 
 #if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
 _Static_assert(sizeof(RinShaderHeaderV1) == 64u,

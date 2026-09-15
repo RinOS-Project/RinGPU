@@ -44,6 +44,7 @@ add_library(RinGPU::RinGPU ALIAS RinGPU)
 target_compile_features(RinGPU PUBLIC c_std_11)
 target_include_directories(RinGPU
     PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+           $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../rinresource/include>
            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../RinOS-SDK/include>
            $<INSTALL_INTERFACE:include>
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/core
@@ -81,6 +82,10 @@ if(RINGPU_BUILD_TESTS)
     add_executable(ringpu-shader-test tests/ringpu_shader_test.c)
     target_link_libraries(ringpu-shader-test PRIVATE RinGPU::RinGPU)
     add_test(NAME ringpu-shader COMMAND ringpu-shader-test)
+    add_executable(ringpu-shader-resource-test
+                   tests/ringpu_shader_resource_test.c)
+    target_link_libraries(ringpu-shader-resource-test PRIVATE RinGPU::RinGPU)
+    add_test(NAME ringpu-shader-resource COMMAND ringpu-shader-resource-test)
     add_executable(ringpu-runtime-test tests/ringpu_runtime_test.c)
     target_link_libraries(ringpu-runtime-test PRIVATE RinGPU::RinGPU)
     add_test(NAME ringpu-runtime COMMAND ringpu-runtime-test)
