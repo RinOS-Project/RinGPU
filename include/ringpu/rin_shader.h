@@ -5,7 +5,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "rinresource/loader.h"
+#include "../../../rinresource/include/rinresource/loader.h"
 
 #define RIN_SHADER_MAGIC UINT32_C(0x31485352) /* "RSH1" */
 #define RIN_SHADER_IR_VERSION 1u
