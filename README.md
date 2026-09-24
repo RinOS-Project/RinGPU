@@ -41,3 +41,19 @@ opaque while exposing the queue, command-list, image, transition, and submit
 operations needed by a compatibility layer such as RinGL.  Consumers should
 link the exported `RinGPU::RinGPU` target (or the installed `ringpu` package)
 and must not include `src/` headers.
+
+## Public API contract
+
+| Requirement | Contract |
+| --- | --- |
+| Purpose | Portable RinOS GPU runtime boundary for versioned records, opaque handles, validators, diagnostics, software execution, and presentation policy. |
+| Supported API | Installed headers under include/ringpu; see ringpu.h, runtime.h, software.h, presentation.h, compatibility.h, and capability APIs. |
+| Unsupported API | Physical discovery and privileged execution are OS-Core backend duties; unexposed hardware features are unsupported. |
+| ownership | Handles are opaque integers, never pointers or physical addresses. Caller owns supplied buffers and resources. |
+| thread-safety | Synchronize shared device, queue, command-list, and resource mutation; independent objects are separate. |
+| limits | RINGPU_API_VERSION is 1; records are sized/versioned and resource/command bounds are declared in headers. |
+| errors | Public result codes distinguish invalid, unsupported, and exhausted-resource paths; failures do not report success. |
+| ABI stability | Public records carry struct_size, version, and reserved fields. Preserve the declared API version. |
+| security | RSH1 resources are validated from caller data without filesystem authority; src headers are private. |
+| build | README provides standalone CMake and Meson builds; enable RINGPU_BUILD_TESTS for host tests. |
+| test | Use CTest or meson test as shown in the README. No tests/builds were run for this README update. |
