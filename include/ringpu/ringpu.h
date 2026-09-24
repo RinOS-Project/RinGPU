@@ -6,6 +6,8 @@
 
 #include "version.h"
 #include "rin_shader.h"
+#include "presentation.h"
+#include "spirv_frontend.h"
 
 #define RIN_GPU_ABI_VERSION RINGPU_ABI_VERSION
 #define RIN_GPU_ADAPTER_NAME_MAX 64u

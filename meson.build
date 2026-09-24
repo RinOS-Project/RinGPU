@@ -23,6 +23,7 @@ ringpu_sources = files(
   'src/device/device_runtime.c',
   'src/device/fault_policy.c',
   'src/memory/memory_runtime.c',
+  'src/presentation/presentation.c',
   'src/presentation/present.c',
   'src/presentation/render_pass.c',
   'src/pipeline/pipelines.c',
@@ -30,6 +31,7 @@ ringpu_sources = files(
   'src/pipeline/graphics.c',
   'src/resource/resources.c',
   'src/shader/modules.c',
+  'src/shader/spirv_frontend.c',
   'src/capability/cross_process_capability.c',
   'src/capability/cross_process_capability_ipc.c',
 )
