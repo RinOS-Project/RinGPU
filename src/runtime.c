@@ -138,6 +138,14 @@ int ringpu_runtime_get_device_generation(const RinGpuRuntime* runtime,
     return ringpu_get_device_generation(&runtime->core, generation_out);
 }
 
+int ringpu_runtime_get_adapter_info(const RinGpuRuntime* runtime,
+                                    RinGpuAdapterInfoV1* info)
+{
+    if (runtime == NULL || runtime->initialized != RIN_GPU_RUNTIME_VERSION)
+        return RIN_GPU_ERROR_STATE;
+    return ringpu_get_adapter_info(&runtime->core, info);
+}
+
 int ringpu_runtime_create_buffer(RinGpuRuntime* runtime,
                                  const RinGpuBufferDescV1* desc,
                                  RinGpuHandle* buffer_out)
