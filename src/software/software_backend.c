@@ -8313,6 +8313,25 @@ static int sw_read_index(const SwBuffer* index_buffer, uint32_t index_format,
     return RIN_GPU_OK;
 }
 
+static int sw_index_restart_value(uint32_t index_format,
+                                  uint32_t* value_out)
+{
+    if (!value_out) return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    if (index_format == RIN_GPU_INDEX_UINT8) {
+        *value_out = UINT8_MAX;
+        return RIN_GPU_OK;
+    }
+    if (index_format == RIN_GPU_INDEX_UINT16) {
+        *value_out = UINT16_MAX;
+        return RIN_GPU_OK;
+    }
+    if (index_format == RIN_GPU_INDEX_UINT32) {
+        *value_out = UINT32_MAX;
+        return RIN_GPU_OK;
+    }
+    return RIN_GPU_ERROR_INVALID_ARGUMENT;
+}
+
 static int sw_rebase_vertex_index(uint32_t raw_index, int32_t base_vertex,
                                   uint32_t vertex_count,
                                   uint32_t* vertex_index_out)
@@ -8414,6 +8433,8 @@ static int sw_draw_indexed_with_base_vertex_in_pass(
     uint32_t fragment_outputs;
     uint32_t index_bytes;
     uint32_t triangle_count;
+    uint32_t restart_index = 0u;
+    int restart_enabled;
     int result;
 
     if (!draw) return RIN_GPU_ERROR_INVALID_ARGUMENT;
@@ -8429,6 +8450,13 @@ static int sw_draw_indexed_with_base_vertex_in_pass(
         pipeline->desc.vertex_binding_count == 0u &&
         pipeline->desc.vertex_stride == 0u ? 0u : 1u;
     index_bytes = sw_index_format_bytes(draw->index_format);
+    restart_enabled = pipeline != NULL &&
+        (pipeline->desc.flags & RIN_GPU_GRAPHICS_PIPELINE_NATIVE_PRIMITIVE_RESTART) != 0u;
+    if (restart_enabled &&
+        sw_index_restart_value(draw->index_format, &restart_index) !=
+            RIN_GPU_OK) {
+        return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    }
     if (render_pass == NULL) {
         if (draw->mip_level != 0u || draw->array_layer != 0u)
             return RIN_GPU_ERROR_UNSUPPORTED;
@@ -8455,10 +8483,12 @@ static int sw_draw_indexed_with_base_vertex_in_pass(
     }
     if (!sw_draw_work_is_bounded(draw->index_count, draw->instance_count))
         return RIN_GPU_ERROR_UNSUPPORTED;
-    result = sw_primitive_count(pipeline->desc.primitive_topology,
-                               draw->index_count, &triangle_count);
-    if (result != RIN_GPU_OK)
-        return result;
+    if (!restart_enabled) {
+        result = sw_primitive_count(pipeline->desc.primitive_topology,
+                                   draw->index_count, &triangle_count);
+        if (result != RIN_GPU_OK)
+            return result;
+    }
     if (image->allocation_desc.mip_levels != 0u) {
         result = sw_color_target_valid(render_pass->color);
         if (result != RIN_GPU_OK)
@@ -8489,6 +8519,8 @@ static int sw_draw_indexed_with_base_vertex_in_pass(
                                    draw->index_offset, draw->first_index, index,
                                    &vertex_index);
             if (result != RIN_GPU_OK) return result;
+            if (restart_enabled && vertex_index == restart_index)
+                continue;
             result = sw_rebase_vertex_index(vertex_index, base_vertex,
                                             draw->vertex_count, &vertex_index);
             if (result != RIN_GPU_OK) return result;
@@ -8503,15 +8535,58 @@ static int sw_draw_indexed_with_base_vertex_in_pass(
 
         for (uint32_t instance = 0u; instance < draw->instance_count;
              ++instance) {
-            for (uint32_t index = 0u; index < triangle_count; ++index) {
-                result = sw_draw_indexed_primitive(
-                    pipeline, render_pass, &vertex_bindings, index_buffer,
-                    draw->index_format, draw->index_offset, draw->first_index,
-                    draw->index_count, base_vertex, draw->vertex_count, index,
-                    instance, draw->first_instance, bind_group, vertex_outputs,
-                    fragment_inputs,
-                    fragment_outputs, pass != 0u, &fragment_invocations);
-                if (result != RIN_GPU_OK) return result;
+            if (!restart_enabled) {
+                for (uint32_t index = 0u; index < triangle_count; ++index) {
+                    result = sw_draw_indexed_primitive(
+                        pipeline, render_pass, &vertex_bindings, index_buffer,
+                        draw->index_format, draw->index_offset,
+                        draw->first_index, draw->index_count, base_vertex,
+                        draw->vertex_count, index, instance,
+                        draw->first_instance, bind_group, vertex_outputs,
+                        fragment_inputs, fragment_outputs, pass != 0u,
+                        &fragment_invocations);
+                    if (result != RIN_GPU_OK) return result;
+                }
+            } else {
+                uint32_t segment_start = 0u;
+
+                for (uint32_t scan = 0u; scan <= draw->index_count; ++scan) {
+                    uint32_t raw_index = restart_index;
+                    uint32_t segment_count;
+                    int boundary = scan == draw->index_count;
+
+                    if (!boundary) {
+                        result = sw_read_index(
+                            index_buffer, draw->index_format,
+                            draw->index_offset, draw->first_index, scan,
+                            &raw_index);
+                        if (result != RIN_GPU_OK) return result;
+                        boundary = raw_index == restart_index;
+                    }
+                    if (!boundary) continue;
+                    if (scan > segment_start) {
+                        result = sw_primitive_count(
+                            pipeline->desc.primitive_topology,
+                            scan - segment_start, &segment_count);
+                        if (result != RIN_GPU_OK) return result;
+                        for (uint32_t index = 0u; index < segment_count;
+                             ++index) {
+                            result = sw_draw_indexed_primitive(
+                                pipeline, render_pass, &vertex_bindings,
+                                index_buffer, draw->index_format,
+                                draw->index_offset,
+                                draw->first_index + segment_start,
+                                scan - segment_start, base_vertex,
+                                draw->vertex_count, index, instance,
+                                draw->first_instance, bind_group,
+                                vertex_outputs, fragment_inputs,
+                                fragment_outputs, pass != 0u,
+                                &fragment_invocations);
+                            if (result != RIN_GPU_OK) return result;
+                        }
+                    }
+                    segment_start = scan + 1u;
+                }
             }
         }
     }

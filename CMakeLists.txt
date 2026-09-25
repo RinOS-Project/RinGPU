@@ -101,6 +101,11 @@ if(RINGPU_BUILD_TESTS)
                    tests/ringpu_cross_process_ipc_test.c)
     target_link_libraries(ringpu-cross-process-ipc-test PRIVATE RinGPU::RinGPU)
     add_test(NAME ringpu-cross-process-ipc COMMAND ringpu-cross-process-ipc-test)
+    add_executable(ringpu-primitive-restart-test
+                   tests/ringpu_primitive_restart_test.c)
+    target_link_libraries(ringpu-primitive-restart-test PRIVATE RinGPU::RinGPU)
+    add_test(NAME ringpu-primitive-restart
+             COMMAND ringpu-primitive-restart-test)
 endif()
 
 if(RINGPU_BUILD_DIFFERENTIAL_TESTS)
