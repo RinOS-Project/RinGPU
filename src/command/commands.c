@@ -231,8 +231,9 @@ int ringpu_command_blit_image(RinGpuCore* core, RinGpuHandle command_list,
         (source_desc->usage & RIN_GPU_IMAGE_COPY_SOURCE) == 0u ||
         !ringpu_image_upload_ready(destination_slot) ||
         !ringpu_image_upload_ready(source_slot) ||
-        destination_desc->format != source_desc->format ||
         !ringpu_color_format(destination_desc->format) ||
+        !ringpu_color_format(source_desc->format) ||
+        destination_desc->format == RIN_GPU_FORMAT_BC1_RGBA_UNORM ||
         destination_desc->dimension != RIN_GPU_IMAGE_DIMENSION_2D ||
         source_desc->dimension != RIN_GPU_IMAGE_DIMENSION_2D ||
         destination_desc->sample_count != 1u ||

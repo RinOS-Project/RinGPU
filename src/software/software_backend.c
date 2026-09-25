@@ -5615,8 +5615,9 @@ static int sw_blit_image(const RinGpuBackendImageBlitV1* blit)
         destination_view.desc.depth != 1u || source_view.desc.depth != 1u ||
         destination_view.desc.sample_count != 1u ||
         source_view.desc.sample_count != 1u ||
-        destination_view.desc.format != source_view.desc.format ||
+        destination_view.desc.format == RIN_GPU_FORMAT_BC1_RGBA_UNORM ||
         !ringpu_color_format(destination_view.desc.format) ||
+        !ringpu_color_format(source_view.desc.format) ||
         sw_image_bytes_per_pixel(destination_view.desc.format) == 0u ||
         !destination_view.bytes || !source_view.bytes ||
         blit->blit.source_x > source_view.desc.width ||

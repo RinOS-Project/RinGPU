@@ -133,6 +133,7 @@ int main(void)
     RinGpuQueueDescV1 queue_desc;
     RinGpuCommandListDescV1 command_desc;
     RinGpuImageDescV1 srgb_desc;
+    RinGpuImageDescV1 source_desc;
     RinGpuImageUploadV1 upload;
     RinGpuImageReadbackV1 readback;
     RinGpuImageClearV1 clear;
@@ -154,8 +155,9 @@ int main(void)
     if (!make_core(&core, &backend))
         return 1;
     image_desc(&srgb_desc, RIN_GPU_FORMAT_RGBA8_SRGB);
+    image_desc(&source_desc, RIN_GPU_FORMAT_RGBA8_UNORM);
     if (ringpu_create_image(&core, &srgb_desc, &clear_image) != RIN_GPU_OK ||
-        ringpu_create_image(&core, &srgb_desc, &source_image) != RIN_GPU_OK ||
+        ringpu_create_image(&core, &source_desc, &source_image) != RIN_GPU_OK ||
         ringpu_create_image(&core, &srgb_desc, &destination_image) !=
             RIN_GPU_OK) {
         goto done;
@@ -239,8 +241,8 @@ int main(void)
     if (ringpu_readback_image(&core, destination_image, &readback,
                               destination_pixels,
                               sizeof(destination_pixels)) != RIN_GPU_OK ||
-        destination_pixels[0] != 128u || destination_pixels[1] != 64u ||
-        destination_pixels[2] != 32u || destination_pixels[3] != 255u) {
+        destination_pixels[0] != 188u || destination_pixels[1] != 137u ||
+        destination_pixels[2] != 99u || destination_pixels[3] != 255u) {
         goto done;
     }
     result = 0;
