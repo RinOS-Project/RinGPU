@@ -14,6 +14,9 @@ int ringpu_bind_buffer_memory(
 int ringpu_upload_buffer(RinGpuCore* core, RinGpuHandle buffer,
                          uint64_t destination_offset, const void* source,
                          uint64_t size_bytes);
+int ringpu_readback_buffer(RinGpuCore* core, RinGpuHandle buffer,
+                           uint64_t source_offset, void* destination,
+                           uint64_t size_bytes);
 int ringpu_create_image(RinGpuCore* core, const RinGpuImageDescV1* desc,
                         RinGpuHandle* image);
 int ringpu_bind_image_memory(

@@ -1102,6 +1102,20 @@ int ringpu_software_backend_bind_image(
     return RIN_GPU_OK;
 }
 
+static int sw_readback_buffer(void* opaque, uint64_t cookie,
+                              uint64_t source_offset, void* destination,
+                              uint64_t size_bytes)
+{
+    SwBuffer* buffer = (SwBuffer*)(uintptr_t)cookie;
+    (void)opaque;
+    if (!buffer || !destination || size_bytes == 0u ||
+        source_offset > buffer->size_bytes ||
+        size_bytes > buffer->size_bytes - source_offset)
+        return RIN_GPU_ERROR_BOUNDS;
+    memcpy(destination, buffer->bytes + source_offset, (size_t)size_bytes);
+    return RIN_GPU_OK;
+}
+
 static int sw_multiply_u64(uint64_t left, uint64_t right, uint64_t* value)
 {
     if (!value || (left != 0u && right > UINT64_MAX / left))
@@ -10734,6 +10748,7 @@ static const RinGpuBackendOpsV1 g_sw_ops = {
     .create_buffer = sw_create_buffer,
     .destroy_buffer = sw_destroy_buffer,
     .upload_buffer = sw_upload_buffer,
+    .readback_buffer = sw_readback_buffer,
     .create_image = sw_create_image,
     .destroy_image = sw_destroy_image,
     .upload_image = sw_upload_image,

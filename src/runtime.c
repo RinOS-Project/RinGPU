@@ -175,6 +175,16 @@ int ringpu_runtime_upload_buffer(RinGpuRuntime* runtime,
                                 source, size_bytes);
 }
 
+int ringpu_runtime_readback_buffer(RinGpuRuntime* runtime,
+                                   RinGpuHandle buffer, uint64_t source_offset,
+                                   void* destination, uint64_t size_bytes)
+{
+    if (runtime == NULL || runtime->initialized != RIN_GPU_RUNTIME_VERSION)
+        return RIN_GPU_ERROR_STATE;
+    return ringpu_readback_buffer(&runtime->core, buffer, source_offset,
+                                  destination, size_bytes);
+}
+
 int ringpu_runtime_create_queue(RinGpuRuntime* runtime,
                                 const RinGpuQueueDescV1* desc,
                                 RinGpuHandle* queue_out)

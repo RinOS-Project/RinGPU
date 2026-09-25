@@ -452,6 +452,31 @@ int ringpu_upload_buffer(RinGpuCore* core, RinGpuHandle buffer,
     return RIN_GPU_OK;
 }
 
+int ringpu_readback_buffer(RinGpuCore* core, RinGpuHandle buffer,
+                           uint64_t source_offset, void* destination,
+                           uint64_t size_bytes)
+{
+    RinGpuObjectSlot* slot;
+    int result = ringpu_core_ready(core);
+
+    if (result != RIN_GPU_OK) return result;
+    if (!destination || size_bytes == 0u) return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    result = ringpu_slot(core, buffer, RIN_GPU_OBJECT_BUFFER, NULL, &slot);
+    if (result != RIN_GPU_OK) return result;
+    if ((slot->value.buffer.flags & RIN_GPU_BUFFER_CPU_VISIBLE) == 0u ||
+        !core->backend.readback_buffer) {
+        return RIN_GPU_ERROR_STATE;
+    }
+    if (slot->value.buffer.cpu_upload_pending != 0u)
+        return RIN_GPU_ERROR_BUSY;
+    if (!ringpu_range(source_offset, size_bytes,
+                      slot->value.buffer.size_bytes))
+        return RIN_GPU_ERROR_BOUNDS;
+    return core->backend.readback_buffer(
+        core->backend_context, slot->value.buffer.backend_cookie,
+        source_offset, destination, size_bytes);
+}
+
 int ringpu_create_image(RinGpuCore* core, const RinGpuImageDescV1* desc,
                         RinGpuHandle* image)
 {

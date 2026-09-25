@@ -609,6 +609,10 @@ typedef struct RinGpuBackendOpsV1 {
     int (*upload_buffer)(void* context, uint64_t cookie,
                          uint64_t destination_offset, const void* source,
                          uint64_t size_bytes);
+    /* Optional: reads a canonical CPU-visible buffer range after completion. */
+    int (*readback_buffer)(void* context, uint64_t cookie,
+                           uint64_t source_offset, void* destination,
+                           uint64_t size_bytes);
     int (*create_image)(void* context, const RinGpuImageDescV1* desc,
                         uint64_t allocation_bytes, uint64_t* cookie);
     void (*destroy_image)(void* context, uint64_t cookie);

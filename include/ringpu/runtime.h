@@ -62,6 +62,9 @@ int ringpu_runtime_bind_buffer_memory(
 int ringpu_runtime_upload_buffer(RinGpuRuntime* runtime,
                                  RinGpuHandle buffer, uint64_t destination_offset,
                                  const void* source, uint64_t size_bytes);
+int ringpu_runtime_readback_buffer(
+    RinGpuRuntime* runtime, RinGpuHandle buffer, uint64_t source_offset,
+    void* destination, uint64_t size_bytes);
 
 int ringpu_runtime_create_queue(RinGpuRuntime* runtime,
                                 const RinGpuQueueDescV1* desc,
