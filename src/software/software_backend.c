@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 #include "software_backend.h"
 #include "../core/core.h"
+#include "../validation/resource.h"
 
 #include <float.h>
 #include <limits.h>
@@ -600,8 +601,20 @@ struct RinGpuSoftwareBackend {
 static uint32_t sw_image_bytes_per_pixel(uint32_t format);
 static int sw_multiply_u64(uint64_t left, uint64_t right, uint64_t* value);
 static int sw_add_u64(uint64_t left, uint64_t right, uint64_t* value);
+static int sw_f32_finite(float value);
 static int sw_image_select_subresource(SwImage* image, uint32_t mip_level,
                                        uint32_t array_layer);
+static int sw_image_pixel_offset(const SwImage* image, uint32_t x,
+                                 uint32_t y, uint32_t bytes_per_pixel,
+                                 uint64_t* offset_out);
+static int sw_depth_target_valid(const SwImage* image);
+static int sw_stencil_target_valid(const SwImage* image);
+static void sw_store_color_components(SwImage* image, uint32_t x,
+                                      uint32_t y, const float color[4],
+                                      uint32_t write_mask);
+static int sw_store_depth(SwImage* image, uint32_t x, uint32_t y, float depth);
+static int sw_store_stencil(SwImage* image, uint32_t x, uint32_t y,
+                            uint8_t stencil);
 static int sw_image_select_mip(SwImage* image, uint32_t mip_level);
 static void sw_initialize_render_pass(SwRenderPass* destination,
                                       SwImage* color, SwImage* depth,
@@ -1591,6 +1604,125 @@ static int sw_copy_buffer(const RinGpuBackendBufferCopyV1* copy)
     }
     memcpy(destination->bytes + copy->destination_offset,
            source->bytes + copy->source_offset, (size_t)copy->size_bytes);
+    return RIN_GPU_OK;
+}
+
+static int sw_clear_buffer(const RinGpuBackendBufferClearV1* clear)
+{
+    SwBuffer* destination;
+
+    if (!clear || clear->reserved != 0u || clear->size_bytes == 0u ||
+        (clear->offset & UINT64_C(3)) != 0u ||
+        (clear->size_bytes & UINT64_C(3)) != 0u) {
+        return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    }
+    destination = (SwBuffer*)(uintptr_t)clear->destination_cookie;
+    if (!destination || !destination->bytes)
+        return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    if (clear->offset > destination->size_bytes ||
+        clear->size_bytes > destination->size_bytes - clear->offset) {
+        return RIN_GPU_ERROR_BOUNDS;
+    }
+    for (uint64_t offset = 0u; offset < clear->size_bytes; offset += 4u) {
+        memcpy(destination->bytes + clear->offset + offset,
+               &clear->pattern, sizeof(clear->pattern));
+    }
+    return RIN_GPU_OK;
+}
+
+static int sw_clear_color_valid(uint32_t format,
+                                const RinGpuBackendImageClearV1* clear)
+{
+    if (!clear || !ringpu_color_format(format) ||
+        !sw_f32_finite(clear->color_red) ||
+        !sw_f32_finite(clear->color_green) ||
+        !sw_f32_finite(clear->color_blue) ||
+        !sw_f32_finite(clear->color_alpha)) {
+        return 0;
+    }
+    if (format == RIN_GPU_FORMAT_RGBA16_FLOAT ||
+        format == RIN_GPU_FORMAT_RGBA32_FLOAT) {
+        return 1;
+    }
+    return clear->color_red >= 0.0f && clear->color_red <= 1.0f &&
+           clear->color_green >= 0.0f && clear->color_green <= 1.0f &&
+           clear->color_blue >= 0.0f && clear->color_blue <= 1.0f &&
+           clear->color_alpha >= 0.0f && clear->color_alpha <= 1.0f;
+}
+
+static int sw_clear_image(const RinGpuBackendImageClearV1* clear)
+{
+    SwImage* destination;
+    SwImage view;
+    uint32_t known_aspects = RIN_GPU_IMAGE_CLEAR_KNOWN_ASPECTS;
+    int color;
+    int depth;
+    int stencil;
+    int result;
+
+    if (!clear || clear->flags != 0u || clear->reserved != 0u ||
+        clear->aspects == 0u || (clear->aspects & ~known_aspects) != 0u ||
+        clear->stencil > UINT32_C(0xff)) {
+        return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    }
+    destination = (SwImage*)(uintptr_t)clear->destination_cookie;
+    if (!destination)
+        return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    view = *destination;
+    result = sw_image_select_subresource(&view, clear->mip_level,
+                                         clear->array_layer);
+    if (result != RIN_GPU_OK)
+        return result;
+    if (view.desc.dimension != RIN_GPU_IMAGE_DIMENSION_2D ||
+        view.desc.depth != 1u || view.desc.sample_count != 1u ||
+        view.desc.width == 0u || view.desc.height == 0u) {
+        return RIN_GPU_ERROR_UNSUPPORTED;
+    }
+    color = (clear->aspects & RIN_GPU_IMAGE_CLEAR_COLOR) != 0u;
+    depth = (clear->aspects & RIN_GPU_IMAGE_CLEAR_DEPTH) != 0u;
+    stencil = (clear->aspects & RIN_GPU_IMAGE_CLEAR_STENCIL) != 0u;
+    if (color && !sw_clear_color_valid(view.desc.format, clear))
+        return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    if (depth && (!ringpu_depth_aspect_format(view.desc.format) ||
+                  !sw_f32_finite(clear->depth) || clear->depth < 0.0f ||
+                  clear->depth > 1.0f)) {
+        return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    }
+    if (stencil && !ringpu_stencil_aspect_format(view.desc.format))
+        return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    if (color && sw_image_bytes_per_pixel(view.desc.format) == 0u)
+        return RIN_GPU_ERROR_UNSUPPORTED;
+    if (depth && sw_depth_target_valid(&view) != RIN_GPU_OK)
+        return RIN_GPU_ERROR_UNSUPPORTED;
+    if (stencil && sw_stencil_target_valid(&view) != RIN_GPU_OK)
+        return RIN_GPU_ERROR_UNSUPPORTED;
+    for (uint32_t y = 0u; y < view.desc.height; ++y) {
+        for (uint32_t x = 0u; x < view.desc.width; ++x) {
+            if (color) {
+                uint64_t offset;
+
+                if (!sw_image_pixel_offset(
+                        &view, x, y,
+                        sw_image_bytes_per_pixel(view.desc.format), &offset)) {
+                    return RIN_GPU_ERROR_BOUNDS;
+                }
+                sw_store_color_components(
+                    &view, x, y,
+                    (const float[4]){clear->color_red, clear->color_green,
+                                    clear->color_blue, clear->color_alpha},
+                    RIN_GPU_COLOR_WRITE_ALL);
+            }
+            if (depth) {
+                result = sw_store_depth(&view, x, y, clear->depth);
+                if (result != RIN_GPU_OK) return result;
+            }
+            if (stencil) {
+                result = sw_store_stencil(&view, x, y,
+                                          (uint8_t)clear->stencil);
+                if (result != RIN_GPU_OK) return result;
+            }
+        }
+    }
     return RIN_GPU_OK;
 }
 
@@ -4729,6 +4861,11 @@ static void sw_store_color_components(SwImage* image, uint32_t x, uint32_t y,
     if (!sw_image_pixel_offset(image, x, y, bytes_per_pixel, &offset))
         return;
     pixel = image->bytes + offset;
+    if (image->desc.format == RIN_GPU_FORMAT_R8_UNORM) {
+        if ((write_mask & RIN_GPU_COLOR_WRITE_RED) != 0u)
+            pixel[0] = sw_color_byte(color[0]);
+        return;
+    }
     if (image->desc.format == RIN_GPU_FORMAT_RGBA32_FLOAT) {
         for (uint32_t component = 0u; component < 4u; ++component) {
             if ((write_mask & (RIN_GPU_COLOR_WRITE_RED << component)) != 0u) {
@@ -8563,10 +8700,26 @@ static int sw_submit(void* opaque, const RinGpuBackendCommandV1* commands,
                 return result;
             ++delta.copy_commands;
             break;
+        case RIN_GPU_BACKEND_COMMAND_CLEAR_BUFFER:
+            if (active_pass.color != NULL)
+                return RIN_GPU_ERROR_STATE;
+            result = sw_clear_buffer(&command->value.buffer_clear);
+            if (result != RIN_GPU_OK)
+                return result;
+            ++delta.copy_commands;
+            break;
         case RIN_GPU_BACKEND_COMMAND_COPY_IMAGE:
             if (active_pass.color != NULL)
                 return RIN_GPU_ERROR_STATE;
             result = sw_copy_image(&command->value.image_copy);
+            if (result != RIN_GPU_OK)
+                return result;
+            ++delta.copy_commands;
+            break;
+        case RIN_GPU_BACKEND_COMMAND_CLEAR_IMAGE:
+            if (active_pass.color != NULL)
+                return RIN_GPU_ERROR_STATE;
+            result = sw_clear_image(&command->value.image_clear);
             if (result != RIN_GPU_OK)
                 return result;
             ++delta.copy_commands;

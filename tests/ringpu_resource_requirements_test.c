@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: MIT */
 #include <stdio.h>
+#include <stdint.h>
 #include <string.h>
 
 #include "../src/core/core.h"
@@ -73,9 +74,19 @@ int main(void)
     RinGpuCommandListDescV1 command_desc;
     RinGpuSubmitInfoV1 submit;
     RinGpuSubmitInfoV2 submit_v2;
+    RinGpuBufferClearV1 buffer_clear;
+    RinGpuImageClearV1 image_clear;
+    RinGpuImageUploadV1 upload;
+    RinGpuImageReadbackV1 readback;
+    RinGpuImageTransitionV1 transition;
     RinGpuHandle queue = 0u;
     RinGpuHandle command_list = 0u;
+    RinGpuHandle clear_command_list = 0u;
+    RinGpuHandle buffer = 0u;
+    RinGpuHandle image = 0u;
     RinGpuHandle fence = 0u;
+    uint8_t image_source[64u * 32u * 4u] = {0};
+    uint8_t image_readback[64u * 32u * 4u] = {0};
     int result = 1;
 
     memset(&core, 0, sizeof(core));
@@ -130,38 +141,113 @@ int main(void)
     queue_desc.abi_version = RIN_GPU_ABI_VERSION;
     queue_desc.struct_size = sizeof(queue_desc);
     queue_desc.capabilities = RIN_GPU_QUEUE_COPY;
+    buffer_desc.size_bytes = 16u;
+    buffer_desc.usage = RIN_GPU_BUFFER_COPY_DESTINATION;
+    buffer_desc.flags = 0u;
     memset(&command_desc, 0, sizeof(command_desc));
     command_desc.abi_version = RIN_GPU_ABI_VERSION;
     command_desc.struct_size = sizeof(command_desc);
     command_desc.capabilities = RIN_GPU_QUEUE_COPY;
     if (ringpu_create_queue(&core, &queue_desc, &queue) != RIN_GPU_OK ||
+        ringpu_create_buffer(&core, &buffer_desc, &buffer) != RIN_GPU_OK) {
+        goto done;
+    }
+    image_desc.flags = RIN_GPU_IMAGE_CPU_VISIBLE |
+                       RIN_GPU_IMAGE_CPU_READABLE;
+    if (ringpu_create_image(&core, &image_desc, &image) != RIN_GPU_OK) {
+        goto done;
+    }
+    memset(&upload, 0, sizeof(upload));
+    upload.abi_version = RIN_GPU_ABI_VERSION;
+    upload.struct_size = sizeof(upload);
+    upload.width = image_desc.width;
+    upload.height = image_desc.height;
+    upload.depth = 1u;
+    if (ringpu_upload_image(&core, image, &upload, image_source,
+                            sizeof(image_source)) != RIN_GPU_OK ||
+        ringpu_create_command_list(&core, &command_desc,
+                                   &clear_command_list) != RIN_GPU_OK ||
         ringpu_create_command_list(&core, &command_desc, &command_list) !=
             RIN_GPU_OK ||
-        ringpu_command_list_close(&core, command_list) != RIN_GPU_OK ||
         ringpu_create_fence(&core, 0u, &fence) != RIN_GPU_OK) {
+        goto done;
+    }
+    memset(&buffer_clear, 0, sizeof(buffer_clear));
+    buffer_clear.abi_version = RIN_GPU_ABI_VERSION;
+    buffer_clear.struct_size = sizeof(buffer_clear);
+    buffer_clear.size_bytes = buffer_desc.size_bytes;
+    buffer_clear.pattern = UINT32_C(0xa5c33c5a);
+    if (ringpu_command_clear_buffer(&core, clear_command_list, buffer,
+                                    &buffer_clear) != RIN_GPU_OK) {
+        goto done;
+    }
+    memset(&image_clear, 0, sizeof(image_clear));
+    image_clear.abi_version = RIN_GPU_ABI_VERSION;
+    image_clear.struct_size = sizeof(image_clear);
+    image_clear.aspects = RIN_GPU_IMAGE_CLEAR_COLOR;
+    image_clear.color_red = 0.25f;
+    image_clear.color_green = 0.5f;
+    image_clear.color_blue = 0.75f;
+    image_clear.color_alpha = 1.0f;
+    if (ringpu_command_clear_image(&core, clear_command_list, image,
+                                   &image_clear) != RIN_GPU_OK) {
+        goto done;
+    }
+    memset(&transition, 0, sizeof(transition));
+    transition.abi_version = RIN_GPU_ABI_VERSION;
+    transition.struct_size = sizeof(transition);
+    transition.mip_level_count = 1u;
+    transition.array_layer_count = 1u;
+    transition.before_state = RIN_GPU_IMAGE_STATE_COPY_DESTINATION;
+    transition.after_state = RIN_GPU_IMAGE_STATE_COPY_SOURCE;
+    if (ringpu_command_transition_image(&core, clear_command_list, image,
+                                        &transition) != RIN_GPU_OK ||
+        ringpu_command_list_close(&core, clear_command_list) != RIN_GPU_OK) {
         goto done;
     }
     memset(&submit, 0, sizeof(submit));
     submit.abi_version = RIN_GPU_ABI_VERSION;
     submit.struct_size = sizeof(submit);
-    submit.command_list = command_list;
+    submit.command_list = clear_command_list;
     submit.signal_fence = fence;
     submit.signal_value = 1u;
-    if (ringpu_queue_submit(&core, queue, &submit) != RIN_GPU_OK) goto done;
+    if (ringpu_queue_submit(&core, queue, &submit) != RIN_GPU_OK ||
+        ringpu_wait_fence(&core, fence, 1u, 0u) != RIN_GPU_OK) {
+        goto done;
+    }
+    memset(&readback, 0, sizeof(readback));
+    readback.abi_version = RIN_GPU_ABI_VERSION;
+    readback.struct_size = sizeof(readback);
+    readback.width = image_desc.width;
+    readback.height = image_desc.height;
+    readback.depth = 1u;
+    if (ringpu_readback_image(&core, image, &readback, image_readback,
+                              sizeof(image_readback)) != RIN_GPU_OK ||
+        image_readback[0] != 191u || image_readback[1] != 128u ||
+        image_readback[2] != 64u || image_readback[3] != 255u ||
+        ringpu_command_list_close(&core, command_list) != RIN_GPU_OK) {
+        goto done;
+    }
+    submit.command_list = command_list;
+    submit.signal_value = 2u;
+    if (ringpu_queue_submit(&core, queue, &submit) != RIN_GPU_OK) {
+        goto done;
+    }
     memset(&submit_v2, 0, sizeof(submit_v2));
     submit_v2.base.abi_version = RIN_GPU_ABI_VERSION;
     submit_v2.base.struct_size = sizeof(submit_v2.base);
     submit_v2.base.command_list = command_list;
     submit_v2.base.signal_fence = fence;
-    submit_v2.base.signal_value = 2u;
+    submit_v2.base.signal_value = 3u;
     submit_v2.wait_count = 1u;
     submit_v2.waits[0].abi_version = RIN_GPU_ABI_VERSION;
     submit_v2.waits[0].struct_size = sizeof(submit_v2.waits[0]);
     submit_v2.waits[0].fence = fence;
     submit_v2.waits[0].value = 1u;
-    if (ringpu_queue_submit_v2(&core, queue, &submit_v2) != RIN_GPU_OK)
+    if (ringpu_queue_submit_v2(&core, queue, &submit_v2) != RIN_GPU_OK) {
         goto done;
-    submit_v2.base.signal_value = 3u;
+    }
+    submit_v2.base.signal_value = 4u;
     submit_v2.waits[0].value = 4u;
     if (ringpu_queue_submit_v2(&core, queue, &submit_v2) !=
         RIN_GPU_ERROR_BUSY) {

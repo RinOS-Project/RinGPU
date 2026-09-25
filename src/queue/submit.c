@@ -208,6 +208,31 @@ static int ringpu_queue_submit_internal(
                 command->value.buffer_copy.source_offset;
             commands[index].value.buffer_copy.size_bytes =
                 command->value.buffer_copy.size_bytes;
+        } else if (command->type == RIN_GPU_BACKEND_COMMAND_CLEAR_BUFFER) {
+            const RinGpuBufferClearV1* clear = &command->value.buffer_clear;
+
+            result = ringpu_slot(core, command->destination,
+                                 RIN_GPU_OBJECT_BUFFER, NULL, &destination);
+            if (result != RIN_GPU_OK) break;
+            if ((destination->value.buffer.usage &
+                 RIN_GPU_BUFFER_COPY_DESTINATION) == 0u ||
+                !ringpu_buffer_upload_ready(destination) ||
+                !ringpu_versioned(clear->abi_version, clear->struct_size,
+                                  sizeof(*clear)) || clear->flags != 0u ||
+                clear->reserved != 0u || clear->size_bytes == 0u ||
+                (clear->offset & UINT64_C(3)) != 0u ||
+                (clear->size_bytes & UINT64_C(3)) != 0u ||
+                !ringpu_range(clear->offset, clear->size_bytes,
+                              destination->value.buffer.size_bytes)) {
+                result = RIN_GPU_ERROR_STATE;
+                break;
+            }
+            commands[index].value.buffer_clear.destination_cookie =
+                destination->value.buffer.backend_cookie;
+            commands[index].value.buffer_clear.offset = clear->offset;
+            commands[index].value.buffer_clear.size_bytes = clear->size_bytes;
+            commands[index].value.buffer_clear.pattern = clear->pattern;
+            commands[index].value.buffer_clear.reserved = clear->reserved;
         } else if (command->type == RIN_GPU_BACKEND_COMMAND_COPY_IMAGE) {
             result = ringpu_slot(core, command->destination,
                                  RIN_GPU_OBJECT_IMAGE, &destination_index,
@@ -250,6 +275,54 @@ static int ringpu_queue_submit_internal(
                 source->value.image.backend_cookie;
             commands[index].value.image_copy.region =
                 command->value.image_copy;
+        } else if (command->type == RIN_GPU_BACKEND_COMMAND_CLEAR_IMAGE) {
+            const RinGpuImageClearV1* clear = &command->value.image_clear;
+            RinGpuBackendImageClearV1* backend_clear =
+                &commands[index].value.image_clear;
+            uint32_t subresource;
+
+            result = ringpu_slot(core, command->destination,
+                                 RIN_GPU_OBJECT_IMAGE, &destination_index,
+                                 &destination);
+            if (result != RIN_GPU_OK) break;
+            result = ringpu_stage_image_states(
+                destination, destination_index, staged_states);
+            if (result != RIN_GPU_OK) break;
+            destination_states = staged_states[destination_index];
+            if (!ringpu_versioned(clear->abi_version, clear->struct_size,
+                                  sizeof(*clear)) || clear->flags != 0u ||
+                clear->reserved != 0u || clear->aspects == 0u ||
+                (clear->aspects & ~RIN_GPU_IMAGE_CLEAR_KNOWN_ASPECTS) != 0u ||
+                clear->mip_level >= destination->value.image.descriptor.mip_levels ||
+                clear->array_layer >= destination->value.image.descriptor.array_layers ||
+                !ringpu_range(
+                    clear->array_layer * destination->value.image.descriptor.mip_levels +
+                        clear->mip_level,
+                    1u, destination->value.image.subresource_count)) {
+                result = RIN_GPU_ERROR_STATE;
+                break;
+            }
+            subresource = clear->array_layer *
+                destination->value.image.descriptor.mip_levels +
+                clear->mip_level;
+            if (destination_states[subresource] !=
+                RIN_GPU_IMAGE_STATE_COPY_DESTINATION) {
+                result = RIN_GPU_ERROR_STATE;
+                break;
+            }
+            backend_clear->destination_cookie =
+                destination->value.image.backend_cookie;
+            backend_clear->mip_level = clear->mip_level;
+            backend_clear->array_layer = clear->array_layer;
+            backend_clear->aspects = clear->aspects;
+            backend_clear->flags = clear->flags;
+            backend_clear->color_red = clear->color_red;
+            backend_clear->color_green = clear->color_green;
+            backend_clear->color_blue = clear->color_blue;
+            backend_clear->color_alpha = clear->color_alpha;
+            backend_clear->depth = clear->depth;
+            backend_clear->stencil = clear->stencil;
+            backend_clear->reserved = clear->reserved;
         } else if (command->type ==
                    RIN_GPU_BACKEND_COMMAND_TRANSITION_IMAGE) {
             const RinGpuImageTransitionV1* transition =

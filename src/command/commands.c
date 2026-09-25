@@ -3,6 +3,8 @@
 
 #include "record.h"
 #include "../core/object_table.h"
+#include "../presentation/render_pass.h"
+#include "../validation/pipeline.h"
 #include "../validation/resource.h"
 
 int ringpu_command_copy_buffer(RinGpuCore* core, RinGpuHandle command_list,
@@ -60,6 +62,52 @@ int ringpu_command_copy_buffer(RinGpuCore* core, RinGpuHandle command_list,
     list->value.command_list.count++;
     destination_slot->value.buffer.reference_count++;
     source_slot->value.buffer.reference_count++;
+    return RIN_GPU_OK;
+}
+
+int ringpu_command_clear_buffer(RinGpuCore* core, RinGpuHandle command_list,
+                                RinGpuHandle destination,
+                                const RinGpuBufferClearV1* clear)
+{
+    RinGpuObjectSlot* list;
+    RinGpuObjectSlot* destination_slot;
+    RinGpuRecordedCommand* command;
+    int result = ringpu_core_ready(core);
+
+    if (result != RIN_GPU_OK) return result;
+    if (!clear || !ringpu_versioned(clear->abi_version, clear->struct_size,
+                                    sizeof(*clear)) || clear->flags != 0u ||
+        clear->reserved != 0u || clear->size_bytes == 0u ||
+        (clear->offset & UINT64_C(3)) != 0u ||
+        (clear->size_bytes & UINT64_C(3)) != 0u) {
+        return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    }
+    result = ringpu_slot(core, command_list, RIN_GPU_OBJECT_COMMAND_LIST, NULL,
+                         &list);
+    if (result != RIN_GPU_OK) return result;
+    if (list->value.command_list.state != RIN_GPU_COMMAND_RECORDING ||
+        list->value.command_list.render_pass_active != 0u ||
+        (list->value.command_list.capabilities & RIN_GPU_QUEUE_COPY) == 0u) {
+        return RIN_GPU_ERROR_STATE;
+    }
+    result = ringpu_slot(core, destination, RIN_GPU_OBJECT_BUFFER, NULL,
+                         &destination_slot);
+    if (result != RIN_GPU_OK) return result;
+    if ((destination_slot->value.buffer.usage &
+         RIN_GPU_BUFFER_COPY_DESTINATION) == 0u ||
+        !ringpu_buffer_upload_ready(destination_slot) ||
+        !ringpu_range(clear->offset, clear->size_bytes,
+                      destination_slot->value.buffer.size_bytes)) {
+        return RIN_GPU_ERROR_STATE;
+    }
+    result = ringpu_record_command(list, &command);
+    if (result != RIN_GPU_OK) return result;
+    command->type = RIN_GPU_BACKEND_COMMAND_CLEAR_BUFFER;
+    command->destination = destination;
+    command->value.buffer_clear = *clear;
+    command->value.buffer_clear.struct_size = sizeof(command->value.buffer_clear);
+    list->value.command_list.count++;
+    destination_slot->value.buffer.reference_count++;
     return RIN_GPU_OK;
 }
 
@@ -140,6 +188,81 @@ int ringpu_command_copy_image(RinGpuCore* core, RinGpuHandle command_list,
     list->value.command_list.count++;
     destination_slot->value.image.reference_count++;
     source_slot->value.image.reference_count++;
+    return RIN_GPU_OK;
+}
+
+int ringpu_command_clear_image(RinGpuCore* core, RinGpuHandle command_list,
+                               RinGpuHandle destination,
+                               const RinGpuImageClearV1* clear)
+{
+    RinGpuObjectSlot* list;
+    RinGpuObjectSlot* destination_slot;
+    const RinGpuImageDescV1* desc;
+    RinGpuRecordedCommand* command;
+    int color;
+    int depth;
+    int stencil;
+    int result = ringpu_core_ready(core);
+
+    if (result != RIN_GPU_OK) return result;
+    if (!clear || !ringpu_versioned(clear->abi_version, clear->struct_size,
+                                    sizeof(*clear)) || clear->flags != 0u ||
+        clear->reserved != 0u || clear->aspects == 0u ||
+        (clear->aspects & ~RIN_GPU_IMAGE_CLEAR_KNOWN_ASPECTS) != 0u) {
+        return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    }
+    color = (clear->aspects & RIN_GPU_IMAGE_CLEAR_COLOR) != 0u;
+    depth = (clear->aspects & RIN_GPU_IMAGE_CLEAR_DEPTH) != 0u;
+    stencil = (clear->aspects & RIN_GPU_IMAGE_CLEAR_STENCIL) != 0u;
+    if (!color && (clear->color_red != 0.0f || clear->color_green != 0.0f ||
+                   clear->color_blue != 0.0f || clear->color_alpha != 0.0f)) {
+        return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    }
+    if (!depth && clear->depth != 0.0f) return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    if (!stencil && clear->stencil != 0u) return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    if ((color && (!ringpu_finite_float(clear->color_red) ||
+                   !ringpu_finite_float(clear->color_green) ||
+                   !ringpu_finite_float(clear->color_blue) ||
+                   !ringpu_finite_float(clear->color_alpha))) ||
+        (depth && (!ringpu_finite_float(clear->depth) ||
+                   clear->depth < 0.0f || clear->depth > 1.0f)) ||
+        (stencil && clear->stencil > UINT32_C(0xff))) {
+        return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    }
+    result = ringpu_slot(core, command_list, RIN_GPU_OBJECT_COMMAND_LIST, NULL,
+                         &list);
+    if (result != RIN_GPU_OK) return result;
+    if (list->value.command_list.state != RIN_GPU_COMMAND_RECORDING ||
+        list->value.command_list.render_pass_active != 0u ||
+        (list->value.command_list.capabilities & RIN_GPU_QUEUE_COPY) == 0u) {
+        return RIN_GPU_ERROR_STATE;
+    }
+    result = ringpu_slot(core, destination, RIN_GPU_OBJECT_IMAGE, NULL,
+                         &destination_slot);
+    if (result != RIN_GPU_OK) return result;
+    desc = &destination_slot->value.image.descriptor;
+    if ((desc->usage & RIN_GPU_IMAGE_COPY_DESTINATION) == 0u ||
+        !ringpu_image_upload_ready(destination_slot) ||
+        clear->mip_level >= desc->mip_levels ||
+        clear->array_layer >= desc->array_layers ||
+        (color && (!ringpu_color_format(desc->format) ||
+                   !ringpu_render_color_clear_valid_for_format(
+                       desc->format, RIN_GPU_RENDER_CLEAR,
+                       clear->color_red, clear->color_green,
+                       clear->color_blue, clear->color_alpha,
+                       RIN_GPU_COLOR_WRITE_ALL))) ||
+        (depth && !ringpu_depth_aspect_format(desc->format)) ||
+        (stencil && !ringpu_stencil_aspect_format(desc->format))) {
+        return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    }
+    result = ringpu_record_command(list, &command);
+    if (result != RIN_GPU_OK) return result;
+    command->type = RIN_GPU_BACKEND_COMMAND_CLEAR_IMAGE;
+    command->destination = destination;
+    command->value.image_clear = *clear;
+    command->value.image_clear.struct_size = sizeof(command->value.image_clear);
+    list->value.command_list.count++;
+    destination_slot->value.image.reference_count++;
     return RIN_GPU_OK;
 }
 

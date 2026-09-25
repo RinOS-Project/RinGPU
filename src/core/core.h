@@ -46,7 +46,9 @@ typedef enum RinGpuBackendCommandTypeV1 {
     RIN_GPU_BACKEND_COMMAND_DRAW_VERTICES_V2 = 16,
     RIN_GPU_BACKEND_COMMAND_DRAW_INDEXED_V2 = 17,
     RIN_GPU_BACKEND_COMMAND_BEGIN_RENDER_PASS_DEPTH_STENCIL = 18,
-    RIN_GPU_BACKEND_COMMAND_BEGIN_RENDER_PASS_MRT = 19
+    RIN_GPU_BACKEND_COMMAND_BEGIN_RENDER_PASS_MRT = 19,
+    RIN_GPU_BACKEND_COMMAND_CLEAR_BUFFER = 20,
+    RIN_GPU_BACKEND_COMMAND_CLEAR_IMAGE = 21
 } RinGpuBackendCommandTypeV1;
 
 typedef struct RinGpuBackendBufferCopyV1 {
@@ -62,6 +64,29 @@ typedef struct RinGpuBackendImageCopyV1 {
     uint64_t source_cookie;
     RinGpuImageCopyRegionV1 region;
 } RinGpuBackendImageCopyV1;
+
+typedef struct RinGpuBackendBufferClearV1 {
+    uint64_t destination_cookie;
+    uint64_t offset;
+    uint64_t size_bytes;
+    uint32_t pattern;
+    uint32_t reserved;
+} RinGpuBackendBufferClearV1;
+
+typedef struct RinGpuBackendImageClearV1 {
+    uint64_t destination_cookie;
+    uint32_t mip_level;
+    uint32_t array_layer;
+    uint32_t aspects;
+    uint32_t flags;
+    float color_red;
+    float color_green;
+    float color_blue;
+    float color_alpha;
+    float depth;
+    uint32_t stencil;
+    uint32_t reserved;
+} RinGpuBackendImageClearV1;
 
 typedef struct RinGpuBackendImageTransitionV1 {
     uint64_t image_cookie;
@@ -436,6 +461,8 @@ typedef struct RinGpuBackendCommandV1 {
     union {
         RinGpuBackendBufferCopyV1 buffer_copy;
         RinGpuBackendImageCopyV1 image_copy;
+        RinGpuBackendBufferClearV1 buffer_clear;
+        RinGpuBackendImageClearV1 image_clear;
         RinGpuBackendImageTransitionV1 image_transition;
         RinGpuBackendDispatchV1 dispatch;
         RinGpuBackendComputeBarrierV1 compute_barrier;
@@ -570,7 +597,9 @@ typedef struct RinGpuRecordedCommand {
             uint64_t source_offset;
             uint64_t size_bytes;
         } buffer_copy;
+        RinGpuBufferClearV1 buffer_clear;
         RinGpuImageCopyRegionV1 image_copy;
+        RinGpuImageClearV1 image_clear;
         RinGpuImageTransitionV1 image_transition;
         RinGpuDispatchV1 dispatch;
         RinGpuComputeBarrierV1 compute_barrier;

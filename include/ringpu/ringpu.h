@@ -416,6 +416,39 @@ typedef struct RinGpuImageCopyRegionV1 {
     uint32_t flags;
 } RinGpuImageCopyRegionV1;
 
+#define RIN_GPU_IMAGE_CLEAR_COLOR UINT32_C(0x00000001)
+#define RIN_GPU_IMAGE_CLEAR_DEPTH UINT32_C(0x00000002)
+#define RIN_GPU_IMAGE_CLEAR_STENCIL UINT32_C(0x00000004)
+#define RIN_GPU_IMAGE_CLEAR_KNOWN_ASPECTS \
+    (RIN_GPU_IMAGE_CLEAR_COLOR | RIN_GPU_IMAGE_CLEAR_DEPTH | \
+     RIN_GPU_IMAGE_CLEAR_STENCIL)
+
+typedef struct RinGpuBufferClearV1 {
+    uint32_t abi_version;
+    uint32_t struct_size;
+    uint64_t offset;
+    uint64_t size_bytes;
+    uint32_t pattern;
+    uint32_t flags;
+    uint32_t reserved;
+} RinGpuBufferClearV1;
+
+typedef struct RinGpuImageClearV1 {
+    uint32_t abi_version;
+    uint32_t struct_size;
+    uint32_t mip_level;
+    uint32_t array_layer;
+    uint32_t aspects;
+    uint32_t flags;
+    float color_red;
+    float color_green;
+    float color_blue;
+    float color_alpha;
+    float depth;
+    uint32_t stencil;
+    uint32_t reserved;
+} RinGpuImageClearV1;
+
 /* Uploads a rectangular image extent from CPU memory. A zero row or slice
  * pitch selects the tightly packed pitch for the specified extent. */
 typedef struct RinGpuImageUploadV1 {
@@ -1263,10 +1296,16 @@ int ringpu_command_copy_buffer(RinGpuCore* core, RinGpuHandle command_list,
                                uint64_t destination_offset,
                                RinGpuHandle source, uint64_t source_offset,
                                uint64_t size_bytes);
+int ringpu_command_clear_buffer(RinGpuCore* core, RinGpuHandle command_list,
+                                RinGpuHandle destination,
+                                const RinGpuBufferClearV1* clear);
 int ringpu_command_copy_image(RinGpuCore* core, RinGpuHandle command_list,
                               RinGpuHandle destination,
                               RinGpuHandle source,
                               const RinGpuImageCopyRegionV1* region);
+int ringpu_command_clear_image(RinGpuCore* core, RinGpuHandle command_list,
+                               RinGpuHandle destination,
+                               const RinGpuImageClearV1* clear);
 int ringpu_command_transition_image(RinGpuCore* core,
                                     RinGpuHandle command_list,
                                     RinGpuHandle image,
@@ -1351,6 +1390,10 @@ _Static_assert(sizeof(RinGpuSamplerDescV1) == 56u,
                "RinGPU sampler ABI drift");
 _Static_assert(sizeof(RinGpuImageCopyRegionV1) == 64u,
                "RinGPU image copy ABI drift");
+_Static_assert(sizeof(RinGpuBufferClearV1) == 40u,
+               "RinGPU buffer clear ABI drift");
+_Static_assert(sizeof(RinGpuImageClearV1) == 52u,
+               "RinGPU image clear ABI drift");
 _Static_assert(sizeof(RinGpuImageUploadV1) == 64u,
                "RinGPU image upload ABI drift");
 _Static_assert(sizeof(RinGpuImageReadbackV1) == 64u,
