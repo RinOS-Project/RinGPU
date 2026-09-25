@@ -73,7 +73,8 @@ static void set_instruction(RinShaderInstructionV1* instruction,
     instruction->immediate = immediate;
 }
 
-static void make_constant_shader(uint8_t* storage, uint32_t stage)
+static void make_constant_shader(uint8_t* storage, uint32_t stage,
+                                 int use_push_constant)
 {
     RinShaderHeaderV1* header = (RinShaderHeaderV1*)storage;
     RinShaderInstructionV1* instructions =
@@ -90,14 +91,21 @@ static void make_constant_shader(uint8_t* storage, uint32_t stage)
     header->total_size = sizeof(RinShaderHeaderV1) +
                          9u * sizeof(RinShaderInstructionV1);
     header->stage = stage;
+    header->flags = use_push_constant ? RIN_SHADER_FLAG_PUSH_CONSTANTS : 0u;
     header->instruction_count = 9u;
     header->register_count = 4u;
     header->input_count = stage == RIN_SHADER_STAGE_VERTEX ? 1u : 0u;
     header->output_count = 4u;
     header->entry_instruction = 0u;
     for (uint16_t component = 0u; component < 4u; ++component) {
-        set_instruction(&instructions[component], RIN_SHADER_OP_CONST_F32,
-                        component, RIN_SHADER_UNUSED, colors[component]);
+        if (use_push_constant && component == 2u) {
+            set_instruction(&instructions[component],
+                            RIN_SHADER_OP_LOAD_PUSH_CONSTANT_F32, component,
+                            RIN_SHADER_UNUSED, 0u);
+        } else {
+            set_instruction(&instructions[component], RIN_SHADER_OP_CONST_F32,
+                            component, RIN_SHADER_UNUSED, colors[component]);
+        }
         set_instruction(&instructions[4u + component],
                         RIN_SHADER_OP_STORE_OUTPUT_F32, RIN_SHADER_UNUSED,
                         component, component);
@@ -129,6 +137,7 @@ int main(void)
     RinGpuQueueDescV1 queue_desc;
     RinGpuCommandListDescV1 command_desc;
     RinGpuSubmitInfoV1 submit;
+    RinGpuPushConstantsV1 push_constants;
     RinGpuHandle vertex_module = 0u;
     RinGpuHandle fragment_module = 0u;
     RinGpuHandle pipeline = 0u;
@@ -139,8 +148,8 @@ int main(void)
     RinGpuHandle fence = 0u;
     int result = 1;
 
-    make_constant_shader(vertex_shader, RIN_SHADER_STAGE_VERTEX);
-    make_constant_shader(fragment_shader, RIN_SHADER_STAGE_FRAGMENT);
+    make_constant_shader(vertex_shader, RIN_SHADER_STAGE_VERTEX, 0);
+    make_constant_shader(fragment_shader, RIN_SHADER_STAGE_FRAGMENT, 1);
     memset(&core, 0, sizeof(core));
     if (!make_core(&core, &backend)) return 1;
 
@@ -241,6 +250,17 @@ int main(void)
     transition.after_state = RIN_GPU_IMAGE_STATE_COLOR_TARGET;
     if (ringpu_command_transition_image(&core, command_list, image,
                                         &transition) != RIN_GPU_OK) {
+        goto done;
+    }
+    memset(&push_constants, 0, sizeof(push_constants));
+    push_constants.abi_version = RIN_GPU_ABI_VERSION;
+    push_constants.struct_size = sizeof(push_constants);
+    {
+        float red = 1.0f;
+        memcpy(push_constants.data, &red, sizeof(red));
+    }
+    if (ringpu_command_set_push_constants(&core, command_list,
+                                          &push_constants) != RIN_GPU_OK) {
         goto done;
     }
     memset(&render_pass, 0, sizeof(render_pass));

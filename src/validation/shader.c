@@ -274,7 +274,8 @@ int ringpu_shader_validate(const void* shader, size_t shader_size,
     memcpy(&header, shader, sizeof(header));
     if (header.magic != RIN_SHADER_MAGIC ||
         header.version != RIN_SHADER_IR_VERSION ||
-        header.header_size != sizeof(header) || header.flags != 0u ||
+        header.header_size != sizeof(header) ||
+        (header.flags & ~RIN_SHADER_KNOWN_FLAGS) != 0u ||
         header.reserved0 != 0u || header.reserved1 != 0u ||
         header.entry_instruction != 0u) {
         return RIN_SHADER_ERROR_BAD_HEADER;
@@ -550,6 +551,24 @@ int ringpu_shader_validate(const void* shader, size_t shader_size,
                                              header.register_count) ||
                     instruction->immediate >= header.input_count) {
                     result = RIN_SHADER_ERROR_BOUNDS;
+                    break;
+                }
+                shader_define(i32_state, f32_state,
+                              instruction->destination, type);
+                break;
+            }
+            case RIN_SHADER_OP_LOAD_PUSH_CONSTANT_I32:
+            case RIN_SHADER_OP_LOAD_PUSH_CONSTANT_F32: {
+                enum ShaderValueType type =
+                    instruction->opcode == RIN_SHADER_OP_LOAD_PUSH_CONSTANT_I32
+                        ? SHADER_VALUE_I32 : SHADER_VALUE_F32;
+                if ((header.flags & RIN_SHADER_FLAG_PUSH_CONSTANTS) == 0u ||
+                    !shader_destination_only(instruction,
+                                             header.register_count) ||
+                    (instruction->immediate & 3u) != 0u ||
+                    instruction->immediate >
+                        RIN_SHADER_PUSH_CONSTANT_BYTES - sizeof(uint32_t)) {
+                    result = RIN_SHADER_ERROR_INVALID_ARGUMENT;
                     break;
                 }
                 shader_define(i32_state, f32_state,

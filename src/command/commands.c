@@ -345,6 +345,39 @@ int ringpu_command_clear_image(RinGpuCore* core, RinGpuHandle command_list,
     return RIN_GPU_OK;
 }
 
+int ringpu_command_set_push_constants(
+    RinGpuCore* core, RinGpuHandle command_list,
+    const RinGpuPushConstantsV1* constants)
+{
+    RinGpuObjectSlot* list;
+    RinGpuRecordedCommand* command;
+    int result = ringpu_core_ready(core);
+
+    if (result != RIN_GPU_OK) return result;
+    if (!constants ||
+        !ringpu_versioned(constants->abi_version, constants->struct_size,
+                          sizeof(*constants)) || constants->flags != 0u ||
+        constants->reserved != 0u) {
+        return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    }
+    result = ringpu_slot(core, command_list, RIN_GPU_OBJECT_COMMAND_LIST, NULL,
+                         &list);
+    if (result != RIN_GPU_OK) return result;
+    if (list->value.command_list.state != RIN_GPU_COMMAND_RECORDING ||
+        (list->value.command_list.capabilities &
+         (RIN_GPU_QUEUE_GRAPHICS | RIN_GPU_QUEUE_COMPUTE)) == 0u) {
+        return RIN_GPU_ERROR_STATE;
+    }
+    result = ringpu_record_command(list, &command);
+    if (result != RIN_GPU_OK) return result;
+    command->type = RIN_GPU_BACKEND_COMMAND_SET_PUSH_CONSTANTS;
+    command->value.push_constants = *constants;
+    command->value.push_constants.struct_size =
+        sizeof(command->value.push_constants);
+    list->value.command_list.count++;
+    return RIN_GPU_OK;
+}
+
 static int ringpu_dispatch_has_hazard(
     RinGpuCore* core, const RinGpuObjectSlot* list,
     const RinGpuObjectSlot* new_bind_group)

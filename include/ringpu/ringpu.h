@@ -907,6 +907,17 @@ typedef struct RinGpuGraphicsBarrierV2 {
     uint32_t reserved;
 } RinGpuGraphicsBarrierV2;
 
+/* One fixed-size, caller-owned constant block is recorded with the command
+ * list. Shaders opt into the block through the RSH1 push-constant flag and
+ * load aligned 32-bit words by byte offset. */
+typedef struct RinGpuPushConstantsV1 {
+    uint32_t abi_version;
+    uint32_t struct_size;
+    uint32_t flags;
+    uint32_t reserved;
+    uint8_t data[RIN_SHADER_PUSH_CONSTANT_BYTES];
+} RinGpuPushConstantsV1;
+
 typedef struct RinGpuDrawV1 {
     uint32_t abi_version;
     uint32_t struct_size;
@@ -1392,6 +1403,9 @@ int ringpu_command_compute_barrier(
 int ringpu_command_compute_barrier_v2(
     RinGpuCore* core, RinGpuHandle command_list,
     const RinGpuComputeBarrierV2* barrier);
+int ringpu_command_set_push_constants(
+    RinGpuCore* core, RinGpuHandle command_list,
+    const RinGpuPushConstantsV1* constants);
 int ringpu_command_begin_render_pass(
     RinGpuCore* core, RinGpuHandle command_list,
     const RinGpuRenderPassDescV1* render_pass);
@@ -1547,6 +1561,9 @@ _Static_assert(sizeof(RinGpuComputeBarrierV2) == 32u,
                "RinGPU compute barrier V2 ABI drift");
 _Static_assert(sizeof(RinGpuGraphicsBarrierV2) == 32u,
                "RinGPU graphics barrier V2 ABI drift");
+_Static_assert(sizeof(RinGpuPushConstantsV1) ==
+                   16u + RIN_SHADER_PUSH_CONSTANT_BYTES,
+               "RinGPU push constants ABI drift");
 _Static_assert(sizeof(RinGpuDrawV1) == 56u,
                "RinGPU draw ABI drift");
 _Static_assert(sizeof(RinGpuDrawVerticesV1) == 72u,

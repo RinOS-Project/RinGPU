@@ -14,6 +14,9 @@
 #define RIN_SHADER_MAX_IO 32u
 #define RIN_SHADER_MAX_RESOURCES 64u
 #define RIN_SHADER_UNUSED UINT16_C(0xffff)
+#define RIN_SHADER_PUSH_CONSTANT_BYTES 128u
+#define RIN_SHADER_FLAG_PUSH_CONSTANTS UINT32_C(0x00000001)
+#define RIN_SHADER_KNOWN_FLAGS RIN_SHADER_FLAG_PUSH_CONSTANTS
 
 /* `SAMPLE_IMAGE_I32`/`SAMPLE_IMAGE_F32` use source0 as one normalized
  * coordinate for a 1D image; source1 is unused. `SAMPLE_COMPARE_*` uses
@@ -201,7 +204,9 @@ typedef enum RinShaderOpcode {
      * held at consecutive registers beginning at immediate. */
     RIN_SHADER_OP_SAMPLE_IMAGE_2D_GRAD_F32 = 72,
     RIN_SHADER_OP_SAMPLE_IMAGE_CUBE_F32 = 73,
-    RIN_SHADER_OP_LAST = RIN_SHADER_OP_SAMPLE_IMAGE_CUBE_F32
+    RIN_SHADER_OP_LOAD_PUSH_CONSTANT_I32 = 74,
+    RIN_SHADER_OP_LOAD_PUSH_CONSTANT_F32 = 75,
+    RIN_SHADER_OP_LAST = RIN_SHADER_OP_LOAD_PUSH_CONSTANT_F32
 } RinShaderOpcode;
 
 typedef enum RinShaderBuiltin {

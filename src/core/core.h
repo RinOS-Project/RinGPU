@@ -51,7 +51,8 @@ typedef enum RinGpuBackendCommandTypeV1 {
     RIN_GPU_BACKEND_COMMAND_CLEAR_IMAGE = 21,
     RIN_GPU_BACKEND_COMMAND_BLIT_IMAGE = 22,
     RIN_GPU_BACKEND_COMMAND_COMPUTE_BARRIER_V2 = 23,
-    RIN_GPU_BACKEND_COMMAND_GRAPHICS_BARRIER_V2 = 24
+    RIN_GPU_BACKEND_COMMAND_GRAPHICS_BARRIER_V2 = 24,
+    RIN_GPU_BACKEND_COMMAND_SET_PUSH_CONSTANTS = 25
 } RinGpuBackendCommandTypeV1;
 
 typedef struct RinGpuBackendBufferCopyV1 {
@@ -162,6 +163,12 @@ typedef struct RinGpuBackendGraphicsBarrierV2 {
     uint32_t flags;
     uint32_t reserved;
 } RinGpuBackendGraphicsBarrierV2;
+
+typedef struct RinGpuBackendPushConstantsV1 {
+    uint32_t flags;
+    uint32_t reserved;
+    uint8_t data[RIN_SHADER_PUSH_CONSTANT_BYTES];
+} RinGpuBackendPushConstantsV1;
 
 typedef struct RinGpuBackendVertexAttributeV1 {
     uint32_t location;
@@ -497,6 +504,7 @@ typedef struct RinGpuBackendCommandV1 {
         RinGpuBackendGraphicsBarrierV1 graphics_barrier;
         RinGpuBackendComputeBarrierV2 compute_barrier_v2;
         RinGpuBackendGraphicsBarrierV2 graphics_barrier_v2;
+        RinGpuBackendPushConstantsV1 push_constants;
         RinGpuBackendDrawV1 draw;
         RinGpuBackendRenderPassBeginV1 render_pass_begin;
         RinGpuBackendRenderPassMrtBeginV1 render_pass_mrt_begin;
@@ -637,6 +645,7 @@ typedef struct RinGpuRecordedCommand {
         RinGpuGraphicsBarrierV1 graphics_barrier;
         RinGpuComputeBarrierV2 compute_barrier_v2;
         RinGpuGraphicsBarrierV2 graphics_barrier_v2;
+        RinGpuPushConstantsV1 push_constants;
         RinGpuDrawV1 draw;
         RinGpuRenderPassDescV1 render_pass;
         RinGpuRenderPassMrtDescV1 render_pass_mrt;
@@ -842,6 +851,9 @@ _Static_assert(sizeof(RinGpuBackendComputeBarrierV2) == 24u,
                "RinGPU backend compute-barrier V2 drift");
 _Static_assert(sizeof(RinGpuBackendGraphicsBarrierV2) == 24u,
                "RinGPU backend graphics-barrier V2 drift");
+_Static_assert(sizeof(RinGpuBackendPushConstantsV1) ==
+                   8u + RIN_SHADER_PUSH_CONSTANT_BYTES,
+               "RinGPU backend push constants drift");
 _Static_assert(sizeof(RinGpuBackendVertexAttributeV1) == 20u,
                "RinGPU backend vertex-attribute drift");
 _Static_assert(sizeof(RinGpuBackendVertexBufferBindingV1) == 24u,

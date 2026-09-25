@@ -498,6 +498,18 @@ static int ringpu_queue_submit_internal(
             commands[index].value.graphics_barrier_v2.reserved =
                 barrier->reserved;
         } else if (command->type ==
+                   RIN_GPU_BACKEND_COMMAND_SET_PUSH_CONSTANTS) {
+            const RinGpuPushConstantsV1* constants =
+                &command->value.push_constants;
+            if (constants->flags != 0u || constants->reserved != 0u) {
+                result = RIN_GPU_ERROR_STATE;
+                break;
+            }
+            commands[index].value.push_constants.flags = constants->flags;
+            commands[index].value.push_constants.reserved = constants->reserved;
+            memcpy(commands[index].value.push_constants.data, constants->data,
+                   sizeof(constants->data));
+        } else if (command->type ==
                    RIN_GPU_BACKEND_COMMAND_BEGIN_RENDER_PASS_MRT) {
             const RinGpuRenderPassMrtDescV1* pass =
                 &command->value.render_pass_mrt;
