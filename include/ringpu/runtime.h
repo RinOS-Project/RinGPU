@@ -122,9 +122,16 @@ int ringpu_runtime_create_graphics_pipeline_native_vertex_bindings_v2(
     const RinGpuVertexBufferLayoutV1* vertex_bindings,
     uint32_t vertex_binding_count, const RinGpuVaryingV1* varyings,
     uint32_t varying_count, RinGpuHandle* pipeline_out);
+int ringpu_runtime_create_compute_pipeline(
+    RinGpuRuntime* runtime, const RinGpuComputePipelineDescV1* desc,
+    RinGpuHandle* pipeline_out);
 int ringpu_runtime_create_graphics_bind_group_typed(
     RinGpuRuntime* runtime, RinGpuHandle pipeline,
     const RinGpuGraphicsBindingV1* bindings, uint32_t binding_count,
+    RinGpuHandle* bind_group_out);
+int ringpu_runtime_create_compute_bind_group(
+    RinGpuRuntime* runtime, RinGpuHandle pipeline,
+    const RinGpuBufferBindingV1* bindings, uint32_t binding_count,
     RinGpuHandle* bind_group_out);
 int ringpu_runtime_command_list_reset(RinGpuRuntime* runtime,
                                       RinGpuHandle command_list);
@@ -173,6 +180,9 @@ int ringpu_runtime_command_draw_indexed(
 int ringpu_runtime_command_draw_indexed_v2(
     RinGpuRuntime* runtime, RinGpuHandle command_list,
     const RinGpuDrawIndexedV2* draw);
+int ringpu_runtime_command_dispatch(RinGpuRuntime* runtime,
+                                    RinGpuHandle command_list,
+                                    const RinGpuDispatchV1* dispatch);
 int ringpu_runtime_command_end_render_pass(RinGpuRuntime* runtime,
                                            RinGpuHandle command_list);
 int ringpu_runtime_command_present(RinGpuRuntime* runtime,

@@ -337,6 +337,15 @@ int ringpu_runtime_create_graphics_pipeline_native_vertex_bindings_v2(
         vertex_binding_count, varyings, varying_count, pipeline_out);
 }
 
+int ringpu_runtime_create_compute_pipeline(
+    RinGpuRuntime* runtime, const RinGpuComputePipelineDescV1* desc,
+    RinGpuHandle* pipeline_out)
+{
+    if (runtime == NULL || runtime->initialized != RIN_GPU_RUNTIME_VERSION)
+        return RIN_GPU_ERROR_STATE;
+    return ringpu_create_compute_pipeline(&runtime->core, desc, pipeline_out);
+}
+
 int ringpu_runtime_create_graphics_bind_group_typed(
     RinGpuRuntime* runtime, RinGpuHandle pipeline,
     const RinGpuGraphicsBindingV1* bindings, uint32_t binding_count,
@@ -346,6 +355,17 @@ int ringpu_runtime_create_graphics_bind_group_typed(
         return RIN_GPU_ERROR_STATE;
     return ringpu_create_graphics_bind_group_typed(
         &runtime->core, pipeline, bindings, binding_count, bind_group_out);
+}
+
+int ringpu_runtime_create_compute_bind_group(
+    RinGpuRuntime* runtime, RinGpuHandle pipeline,
+    const RinGpuBufferBindingV1* bindings, uint32_t binding_count,
+    RinGpuHandle* bind_group_out)
+{
+    if (runtime == NULL || runtime->initialized != RIN_GPU_RUNTIME_VERSION)
+        return RIN_GPU_ERROR_STATE;
+    return ringpu_create_compute_bind_group(&runtime->core, pipeline, bindings,
+                                            binding_count, bind_group_out);
 }
 
 int ringpu_runtime_command_list_reset(RinGpuRuntime* runtime,
@@ -498,6 +518,15 @@ int ringpu_runtime_command_draw_indexed_v2(
     if (runtime == NULL || runtime->initialized != RIN_GPU_RUNTIME_VERSION)
         return RIN_GPU_ERROR_STATE;
     return ringpu_command_draw_indexed_v2(&runtime->core, command_list, draw);
+}
+
+int ringpu_runtime_command_dispatch(RinGpuRuntime* runtime,
+                                    RinGpuHandle command_list,
+                                    const RinGpuDispatchV1* dispatch)
+{
+    if (runtime == NULL || runtime->initialized != RIN_GPU_RUNTIME_VERSION)
+        return RIN_GPU_ERROR_STATE;
+    return ringpu_command_dispatch(&runtime->core, command_list, dispatch);
 }
 
 int ringpu_runtime_command_end_render_pass(RinGpuRuntime* runtime,
