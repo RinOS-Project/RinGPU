@@ -47,6 +47,11 @@ commands. Command-list reference release covers every transfer command, so a
 completed clear or blit cannot leave a resource falsely busy; malformed
 regions, state, format, and aspect combinations still fail closed.
 
+CPU-visible buffers also have an explicit readback owner through
+`ringpu_runtime_readback_buffer`. The software backend copies only validated
+ranges after upload completion; backends without a readback callback return a
+state error instead of fabricating a mapping or success.
+
 ## Public API contract
 
 | Requirement | Contract |
