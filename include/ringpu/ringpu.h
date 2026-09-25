@@ -416,6 +416,31 @@ typedef struct RinGpuImageCopyRegionV1 {
     uint32_t flags;
 } RinGpuImageCopyRegionV1;
 
+#define RIN_GPU_IMAGE_BLIT_NEAREST UINT32_C(0)
+#define RIN_GPU_IMAGE_BLIT_LINEAR UINT32_C(1)
+#define RIN_GPU_IMAGE_BLIT_KNOWN_FILTERS \
+    (RIN_GPU_IMAGE_BLIT_NEAREST | RIN_GPU_IMAGE_BLIT_LINEAR)
+
+typedef struct RinGpuImageBlitV1 {
+    uint32_t abi_version;
+    uint32_t struct_size;
+    uint32_t source_mip_level;
+    uint32_t source_array_layer;
+    uint32_t source_x;
+    uint32_t source_y;
+    uint32_t source_width;
+    uint32_t source_height;
+    uint32_t destination_mip_level;
+    uint32_t destination_array_layer;
+    uint32_t destination_x;
+    uint32_t destination_y;
+    uint32_t destination_width;
+    uint32_t destination_height;
+    uint32_t filter;
+    uint32_t flags;
+    uint32_t reserved;
+} RinGpuImageBlitV1;
+
 #define RIN_GPU_IMAGE_CLEAR_COLOR UINT32_C(0x00000001)
 #define RIN_GPU_IMAGE_CLEAR_DEPTH UINT32_C(0x00000002)
 #define RIN_GPU_IMAGE_CLEAR_STENCIL UINT32_C(0x00000004)
@@ -1303,6 +1328,10 @@ int ringpu_command_copy_image(RinGpuCore* core, RinGpuHandle command_list,
                               RinGpuHandle destination,
                               RinGpuHandle source,
                               const RinGpuImageCopyRegionV1* region);
+int ringpu_command_blit_image(RinGpuCore* core, RinGpuHandle command_list,
+                              RinGpuHandle destination,
+                              RinGpuHandle source,
+                              const RinGpuImageBlitV1* blit);
 int ringpu_command_clear_image(RinGpuCore* core, RinGpuHandle command_list,
                                RinGpuHandle destination,
                                const RinGpuImageClearV1* clear);
@@ -1390,6 +1419,8 @@ _Static_assert(sizeof(RinGpuSamplerDescV1) == 56u,
                "RinGPU sampler ABI drift");
 _Static_assert(sizeof(RinGpuImageCopyRegionV1) == 64u,
                "RinGPU image copy ABI drift");
+_Static_assert(sizeof(RinGpuImageBlitV1) == 68u,
+               "RinGPU image blit ABI drift");
 _Static_assert(sizeof(RinGpuBufferClearV1) == 40u,
                "RinGPU buffer clear ABI drift");
 _Static_assert(sizeof(RinGpuImageClearV1) == 52u,

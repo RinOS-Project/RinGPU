@@ -48,7 +48,8 @@ typedef enum RinGpuBackendCommandTypeV1 {
     RIN_GPU_BACKEND_COMMAND_BEGIN_RENDER_PASS_DEPTH_STENCIL = 18,
     RIN_GPU_BACKEND_COMMAND_BEGIN_RENDER_PASS_MRT = 19,
     RIN_GPU_BACKEND_COMMAND_CLEAR_BUFFER = 20,
-    RIN_GPU_BACKEND_COMMAND_CLEAR_IMAGE = 21
+    RIN_GPU_BACKEND_COMMAND_CLEAR_IMAGE = 21,
+    RIN_GPU_BACKEND_COMMAND_BLIT_IMAGE = 22
 } RinGpuBackendCommandTypeV1;
 
 typedef struct RinGpuBackendBufferCopyV1 {
@@ -64,6 +65,12 @@ typedef struct RinGpuBackendImageCopyV1 {
     uint64_t source_cookie;
     RinGpuImageCopyRegionV1 region;
 } RinGpuBackendImageCopyV1;
+
+typedef struct RinGpuBackendImageBlitV1 {
+    uint64_t destination_cookie;
+    uint64_t source_cookie;
+    RinGpuImageBlitV1 blit;
+} RinGpuBackendImageBlitV1;
 
 typedef struct RinGpuBackendBufferClearV1 {
     uint64_t destination_cookie;
@@ -461,6 +468,7 @@ typedef struct RinGpuBackendCommandV1 {
     union {
         RinGpuBackendBufferCopyV1 buffer_copy;
         RinGpuBackendImageCopyV1 image_copy;
+        RinGpuBackendImageBlitV1 image_blit;
         RinGpuBackendBufferClearV1 buffer_clear;
         RinGpuBackendImageClearV1 image_clear;
         RinGpuBackendImageTransitionV1 image_transition;
@@ -599,6 +607,7 @@ typedef struct RinGpuRecordedCommand {
         } buffer_copy;
         RinGpuBufferClearV1 buffer_clear;
         RinGpuImageCopyRegionV1 image_copy;
+        RinGpuImageBlitV1 image_blit;
         RinGpuImageClearV1 image_clear;
         RinGpuImageTransitionV1 image_transition;
         RinGpuDispatchV1 dispatch;

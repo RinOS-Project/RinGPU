@@ -275,6 +275,46 @@ static int ringpu_queue_submit_internal(
                 source->value.image.backend_cookie;
             commands[index].value.image_copy.region =
                 command->value.image_copy;
+        } else if (command->type == RIN_GPU_BACKEND_COMMAND_BLIT_IMAGE) {
+            const RinGpuImageBlitV1* blit = &command->value.image_blit;
+            RinGpuBackendImageBlitV1* backend_blit =
+                &commands[index].value.image_blit;
+
+            result = ringpu_slot(core, command->destination,
+                                 RIN_GPU_OBJECT_IMAGE, &destination_index,
+                                 &destination);
+            if (result != RIN_GPU_OK) break;
+            result = ringpu_slot(core, command->source,
+                                 RIN_GPU_OBJECT_IMAGE, &source_index, &source);
+            if (result != RIN_GPU_OK) break;
+            result = ringpu_stage_image_states(
+                destination, destination_index, staged_states);
+            if (result != RIN_GPU_OK) break;
+            destination_states = staged_states[destination_index];
+            if (source_index == destination_index) {
+                source_states = destination_states;
+            } else {
+                result = ringpu_stage_image_states(
+                    source, source_index, staged_states);
+                if (result != RIN_GPU_OK) break;
+                source_states = staged_states[source_index];
+            }
+            if (destination_states[
+                    blit->destination_array_layer *
+                        destination->value.image.descriptor.mip_levels +
+                    blit->destination_mip_level] !=
+                    RIN_GPU_IMAGE_STATE_COPY_DESTINATION ||
+                source_states[
+                    blit->source_array_layer *
+                        source->value.image.descriptor.mip_levels +
+                    blit->source_mip_level] != RIN_GPU_IMAGE_STATE_COPY_SOURCE) {
+                result = RIN_GPU_ERROR_STATE;
+                break;
+            }
+            backend_blit->destination_cookie =
+                destination->value.image.backend_cookie;
+            backend_blit->source_cookie = source->value.image.backend_cookie;
+            backend_blit->blit = *blit;
         } else if (command->type == RIN_GPU_BACKEND_COMMAND_CLEAR_IMAGE) {
             const RinGpuImageClearV1* clear = &command->value.image_clear;
             RinGpuBackendImageClearV1* backend_clear =

@@ -76,14 +76,17 @@ int main(void)
     RinGpuSubmitInfoV2 submit_v2;
     RinGpuBufferClearV1 buffer_clear;
     RinGpuImageClearV1 image_clear;
+    RinGpuImageBlitV1 image_blit;
     RinGpuImageUploadV1 upload;
     RinGpuImageReadbackV1 readback;
     RinGpuImageTransitionV1 transition;
     RinGpuHandle queue = 0u;
     RinGpuHandle command_list = 0u;
     RinGpuHandle clear_command_list = 0u;
+    RinGpuHandle blit_command_list = 0u;
     RinGpuHandle buffer = 0u;
     RinGpuHandle image = 0u;
+    RinGpuHandle blit_image = 0u;
     RinGpuHandle fence = 0u;
     uint8_t image_source[64u * 32u * 4u] = {0};
     uint8_t image_readback[64u * 32u * 4u] = {0};
@@ -167,6 +170,8 @@ int main(void)
                             sizeof(image_source)) != RIN_GPU_OK ||
         ringpu_create_command_list(&core, &command_desc,
                                    &clear_command_list) != RIN_GPU_OK ||
+        ringpu_create_command_list(&core, &command_desc,
+                                   &blit_command_list) != RIN_GPU_OK ||
         ringpu_create_command_list(&core, &command_desc, &command_list) !=
             RIN_GPU_OK ||
         ringpu_create_fence(&core, 0u, &fence) != RIN_GPU_OK) {
@@ -225,12 +230,52 @@ int main(void)
                               sizeof(image_readback)) != RIN_GPU_OK ||
         image_readback[0] != 191u || image_readback[1] != 128u ||
         image_readback[2] != 64u || image_readback[3] != 255u ||
-        ringpu_command_list_close(&core, command_list) != RIN_GPU_OK) {
+        ringpu_create_image(&core, &image_desc, &blit_image) != RIN_GPU_OK) {
         goto done;
     }
-    submit.command_list = command_list;
+    memset(&upload, 0, sizeof(upload));
+    upload.abi_version = RIN_GPU_ABI_VERSION;
+    upload.struct_size = sizeof(upload);
+    upload.width = image_desc.width;
+    upload.height = image_desc.height;
+    upload.depth = 1u;
+    if (ringpu_upload_image(&core, blit_image, &upload, image_source,
+                            sizeof(image_source)) != RIN_GPU_OK) {
+        goto done;
+    }
+    memset(&image_blit, 0, sizeof(image_blit));
+    image_blit.abi_version = RIN_GPU_ABI_VERSION;
+    image_blit.struct_size = sizeof(image_blit);
+    image_blit.source_width = image_desc.width;
+    image_blit.source_height = image_desc.height;
+    image_blit.destination_width = image_desc.width;
+    image_blit.destination_height = image_desc.height;
+    image_blit.filter = RIN_GPU_IMAGE_BLIT_LINEAR;
+    if (ringpu_command_blit_image(&core, blit_command_list, blit_image, image,
+                                  &image_blit) != RIN_GPU_OK ||
+        ringpu_command_transition_image(&core, blit_command_list, blit_image,
+                                        &transition) != RIN_GPU_OK ||
+        ringpu_command_list_close(&core, blit_command_list) != RIN_GPU_OK) {
+        goto done;
+    }
+    submit.command_list = blit_command_list;
     submit.signal_value = 2u;
-    if (ringpu_queue_submit(&core, queue, &submit) != RIN_GPU_OK) {
+    {
+        int blit_submit_result = ringpu_queue_submit(&core, queue, &submit);
+        int blit_wait_result = blit_submit_result == RIN_GPU_OK
+            ? ringpu_wait_fence(&core, fence, 2u, 0u)
+            : blit_submit_result;
+
+        if (blit_submit_result != RIN_GPU_OK ||
+            blit_wait_result != RIN_GPU_OK) {
+            goto done;
+        }
+    }
+    if (ringpu_readback_image(&core, blit_image, &readback, image_readback,
+                              sizeof(image_readback)) != RIN_GPU_OK ||
+        image_readback[0] != 191u || image_readback[1] != 128u ||
+        image_readback[2] != 64u || image_readback[3] != 255u ||
+        ringpu_command_list_close(&core, command_list) != RIN_GPU_OK) {
         goto done;
     }
     memset(&submit_v2, 0, sizeof(submit_v2));

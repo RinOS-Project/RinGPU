@@ -612,6 +612,8 @@ static int sw_stencil_target_valid(const SwImage* image);
 static void sw_store_color_components(SwImage* image, uint32_t x,
                                       uint32_t y, const float color[4],
                                       uint32_t write_mask);
+static int sw_load_color_components(const SwImage* image, uint32_t x,
+                                    uint32_t y, float color[4]);
 static int sw_store_depth(SwImage* image, uint32_t x, uint32_t y, float depth);
 static int sw_store_stencil(SwImage* image, uint32_t x, uint32_t y,
                             uint8_t stencil);
@@ -4933,6 +4935,221 @@ static void sw_store_color_components(SwImage* image, uint32_t x, uint32_t y,
     }
 }
 
+static int sw_load_color_components(const SwImage* image, uint32_t x,
+                                    uint32_t y, float color[4])
+{
+    uint32_t bytes_per_pixel;
+    uint64_t offset;
+    const uint8_t* pixel;
+
+    if (!image || !color || x >= image->desc.width || y >= image->desc.height)
+        return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    bytes_per_pixel = sw_image_bytes_per_pixel(image->desc.format);
+    if (bytes_per_pixel == 0u ||
+        !sw_image_pixel_offset(image, x, y, bytes_per_pixel, &offset)) {
+        return RIN_GPU_ERROR_BOUNDS;
+    }
+    pixel = image->bytes + offset;
+    color[0] = 0.0f;
+    color[1] = 0.0f;
+    color[2] = 0.0f;
+    color[3] = 1.0f;
+    if (image->desc.format == RIN_GPU_FORMAT_R8_UNORM) {
+        color[0] = (float)pixel[0] / 255.0f;
+        return RIN_GPU_OK;
+    }
+    if (image->desc.format == RIN_GPU_FORMAT_RGBA32_FLOAT) {
+        memcpy(color, pixel, sizeof(float) * 4u);
+        return sw_f32_finite(color[0]) && sw_f32_finite(color[1]) &&
+                sw_f32_finite(color[2]) && sw_f32_finite(color[3])
+            ? RIN_GPU_OK : RIN_GPU_ERROR_BACKEND;
+    }
+    if (image->desc.format == RIN_GPU_FORMAT_RGBA16_FLOAT) {
+        for (uint32_t component = 0u; component < 4u; ++component) {
+            uint16_t bits;
+
+            memcpy(&bits, pixel + component * sizeof(bits), sizeof(bits));
+            color[component] = sw_f16_to_f32(bits);
+        }
+        return RIN_GPU_OK;
+    }
+    if (sw_packed_color_format(image->desc.format)) {
+        sw_unpack_packed_color(image->desc.format, pixel, color);
+        return RIN_GPU_OK;
+    }
+    if (image->desc.format == RIN_GPU_FORMAT_BGRA8_UNORM) {
+        color[0] = (float)pixel[2] / 255.0f;
+        color[1] = (float)pixel[1] / 255.0f;
+        color[2] = (float)pixel[0] / 255.0f;
+        color[3] = (float)pixel[3] / 255.0f;
+        return RIN_GPU_OK;
+    }
+    if (image->desc.format == RIN_GPU_FORMAT_RGBA8_UNORM) {
+        for (uint32_t component = 0u; component < 4u; ++component)
+            color[component] = (float)pixel[component] / 255.0f;
+        return RIN_GPU_OK;
+    }
+    return RIN_GPU_ERROR_UNSUPPORTED;
+}
+
+static int sw_blit_image(const RinGpuBackendImageBlitV1* blit)
+{
+    SwImage* destination;
+    SwImage* source;
+    SwImage destination_view;
+    SwImage source_view;
+    int result;
+
+    if (!blit || blit->blit.flags != 0u || blit->blit.reserved != 0u ||
+        blit->blit.source_width == 0u || blit->blit.source_height == 0u ||
+        blit->blit.destination_width == 0u ||
+        blit->blit.destination_height == 0u ||
+        blit->blit.filter > RIN_GPU_IMAGE_BLIT_LINEAR) {
+        return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    }
+    destination = (SwImage*)(uintptr_t)blit->destination_cookie;
+    source = (SwImage*)(uintptr_t)blit->source_cookie;
+    if (!destination || !source)
+        return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    destination_view = *destination;
+    source_view = *source;
+    result = sw_image_select_subresource(
+        &destination_view, blit->blit.destination_mip_level,
+        blit->blit.destination_array_layer);
+    if (result != RIN_GPU_OK) return result;
+    result = sw_image_select_subresource(
+        &source_view, blit->blit.source_mip_level,
+        blit->blit.source_array_layer);
+    if (result != RIN_GPU_OK) return result;
+    if (destination_view.desc.dimension != RIN_GPU_IMAGE_DIMENSION_2D ||
+        source_view.desc.dimension != RIN_GPU_IMAGE_DIMENSION_2D ||
+        destination_view.desc.depth != 1u || source_view.desc.depth != 1u ||
+        destination_view.desc.sample_count != 1u ||
+        source_view.desc.sample_count != 1u ||
+        destination_view.desc.format != source_view.desc.format ||
+        !ringpu_color_format(destination_view.desc.format) ||
+        sw_image_bytes_per_pixel(destination_view.desc.format) == 0u ||
+        !destination_view.bytes || !source_view.bytes ||
+        blit->blit.source_x > source_view.desc.width ||
+        blit->blit.source_width >
+            source_view.desc.width - blit->blit.source_x ||
+        blit->blit.source_y > source_view.desc.height ||
+        blit->blit.source_height >
+            source_view.desc.height - blit->blit.source_y ||
+        blit->blit.destination_x > destination_view.desc.width ||
+        blit->blit.destination_width >
+            destination_view.desc.width - blit->blit.destination_x ||
+        blit->blit.destination_y > destination_view.desc.height ||
+        blit->blit.destination_height >
+            destination_view.desc.height - blit->blit.destination_y) {
+        return RIN_GPU_ERROR_UNSUPPORTED;
+    }
+    for (uint32_t y = 0u; y < blit->blit.destination_height; ++y) {
+        for (uint32_t x = 0u; x < blit->blit.destination_width; ++x) {
+            float color[4];
+            uint32_t source_x0;
+            uint32_t source_x1;
+            uint32_t source_y0;
+            uint32_t source_y1;
+            float x_fraction = 0.0f;
+            float y_fraction = 0.0f;
+
+            if (blit->blit.filter == RIN_GPU_IMAGE_BLIT_NEAREST) {
+                source_x0 = blit->blit.source_x +
+                    (uint32_t)(((uint64_t)x * blit->blit.source_width) /
+                               blit->blit.destination_width);
+                source_y0 = blit->blit.source_y +
+                    (uint32_t)(((uint64_t)y * blit->blit.source_height) /
+                               blit->blit.destination_height);
+                source_x1 = source_x0;
+                source_y1 = source_y0;
+            } else {
+                float source_x;
+                float source_y;
+                float source_x_floor;
+                float source_y_floor;
+
+                source_x = ((float)x + 0.5f) *
+                    (float)blit->blit.source_width /
+                    (float)blit->blit.destination_width - 0.5f;
+                source_y = ((float)y + 0.5f) *
+                    (float)blit->blit.source_height /
+                    (float)blit->blit.destination_height - 0.5f;
+                if (!sw_f32_finite(source_x) || !sw_f32_finite(source_y) ||
+                    sw_floorf(source_x, &source_x_floor) == 0 ||
+                    sw_floorf(source_y, &source_y_floor) == 0) {
+                    return RIN_GPU_ERROR_BACKEND;
+                }
+                source_x0 = source_x_floor < 0.0f ? 0u :
+                    source_x_floor >= (float)(blit->blit.source_width - 1u)
+                        ? blit->blit.source_width - 1u
+                        : (uint32_t)source_x_floor;
+                source_y0 = source_y_floor < 0.0f ? 0u :
+                    source_y_floor >= (float)(blit->blit.source_height - 1u)
+                        ? blit->blit.source_height - 1u
+                        : (uint32_t)source_y_floor;
+                source_x1 = source_x0 + 1u < blit->blit.source_width
+                    ? source_x0 + 1u : source_x0;
+                source_y1 = source_y0 + 1u < blit->blit.source_height
+                    ? source_y0 + 1u : source_y0;
+                x_fraction = source_x - source_x_floor;
+                y_fraction = source_y - source_y_floor;
+                if (x_fraction < 0.0f) x_fraction = 0.0f;
+                if (x_fraction > 1.0f) x_fraction = 1.0f;
+                if (y_fraction < 0.0f) y_fraction = 0.0f;
+                if (y_fraction > 1.0f) y_fraction = 1.0f;
+                source_x0 += blit->blit.source_x;
+                source_x1 += blit->blit.source_x;
+                source_y0 += blit->blit.source_y;
+                source_y1 += blit->blit.source_y;
+            }
+            if (blit->blit.filter == RIN_GPU_IMAGE_BLIT_NEAREST) {
+                source_x0 = blit->blit.source_x +
+                    (uint32_t)(((uint64_t)x * blit->blit.source_width) /
+                               blit->blit.destination_width);
+                source_y0 = blit->blit.source_y +
+                    (uint32_t)(((uint64_t)y * blit->blit.source_height) /
+                               blit->blit.destination_height);
+            }
+            if (blit->blit.filter == RIN_GPU_IMAGE_BLIT_NEAREST) {
+                result = sw_load_color_components(&source_view, source_x0,
+                                                  source_y0, color);
+            } else {
+                float top[4];
+                float bottom[4];
+
+                result = sw_load_color_components(&source_view, source_x0,
+                                                  source_y0, top);
+                if (result == RIN_GPU_OK)
+                    result = sw_load_color_components(&source_view, source_x1,
+                                                      source_y0, bottom);
+                if (result != RIN_GPU_OK) return result;
+                for (uint32_t component = 0u; component < 4u; ++component)
+                    color[component] = top[component] +
+                        (bottom[component] - top[component]) * x_fraction;
+                result = sw_load_color_components(&source_view, source_x0,
+                                                  source_y1, top);
+                if (result == RIN_GPU_OK)
+                    result = sw_load_color_components(&source_view, source_x1,
+                                                      source_y1, bottom);
+                if (result != RIN_GPU_OK) return result;
+                for (uint32_t component = 0u; component < 4u; ++component) {
+                    float lower = top[component] +
+                        (bottom[component] - top[component]) * x_fraction;
+                    color[component] += (lower - color[component]) * y_fraction;
+                }
+            }
+            if (result != RIN_GPU_OK) return result;
+            sw_store_color_components(
+                &destination_view,
+                blit->blit.destination_x + x,
+                blit->blit.destination_y + y, color,
+                RIN_GPU_COLOR_WRITE_ALL);
+        }
+    }
+    return RIN_GPU_OK;
+}
+
 /* Ordered 4x4 dither is applied after blending/write-mask resolution, only
  * while quantizing a fragment to a packed normalized color target. Clears do
  * not use this helper: GLES explicitly excludes clear operations from
@@ -8712,6 +8929,14 @@ static int sw_submit(void* opaque, const RinGpuBackendCommandV1* commands,
             if (active_pass.color != NULL)
                 return RIN_GPU_ERROR_STATE;
             result = sw_copy_image(&command->value.image_copy);
+            if (result != RIN_GPU_OK)
+                return result;
+            ++delta.copy_commands;
+            break;
+        case RIN_GPU_BACKEND_COMMAND_BLIT_IMAGE:
+            if (active_pass.color != NULL)
+                return RIN_GPU_ERROR_STATE;
+            result = sw_blit_image(&command->value.image_blit);
             if (result != RIN_GPU_OK)
                 return result;
             ++delta.copy_commands;
