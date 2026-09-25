@@ -426,6 +426,17 @@ int ringpu_runtime_command_copy_image(
                                      source, region);
 }
 
+int ringpu_runtime_command_blit_image(
+    RinGpuRuntime* runtime, RinGpuHandle command_list,
+    RinGpuHandle destination, RinGpuHandle source,
+    const RinGpuImageBlitV1* blit)
+{
+    if (runtime == NULL || runtime->initialized != RIN_GPU_RUNTIME_VERSION)
+        return RIN_GPU_ERROR_STATE;
+    return ringpu_command_blit_image(&runtime->core, command_list, destination,
+                                     source, blit);
+}
+
 int ringpu_runtime_command_clear_image(
     RinGpuRuntime* runtime, RinGpuHandle command_list,
     RinGpuHandle destination, const RinGpuImageClearV1* clear)

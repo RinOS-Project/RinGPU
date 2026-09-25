@@ -151,6 +151,10 @@ int ringpu_runtime_command_copy_image(
     RinGpuRuntime* runtime, RinGpuHandle command_list,
     RinGpuHandle destination, RinGpuHandle source,
     const RinGpuImageCopyRegionV1* region);
+int ringpu_runtime_command_blit_image(
+    RinGpuRuntime* runtime, RinGpuHandle command_list,
+    RinGpuHandle destination, RinGpuHandle source,
+    const RinGpuImageBlitV1* blit);
 int ringpu_runtime_command_clear_image(
     RinGpuRuntime* runtime, RinGpuHandle command_list,
     RinGpuHandle destination, const RinGpuImageClearV1* clear);
