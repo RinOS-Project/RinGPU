@@ -159,6 +159,7 @@ typedef enum RinGpuImageState {
     RIN_GPU_GRAPHICS_PIPELINE_NATIVE_POINT_SIZE_OUTPUT
 #define RIN_GPU_PRIMARY_DISPLAY 0u
 #define RIN_GPU_TIMEOUT_INFINITE UINT64_MAX
+#define RIN_GPU_MAX_SUBMIT_WAITS 8u
 
 #define RIN_GPU_DISPLAY_CONNECTED 0x00000001u
 #define RIN_GPU_DISPLAY_PRIMARY   0x00000002u
@@ -1130,6 +1131,24 @@ typedef struct RinGpuSubmitInfoV1 {
     uint64_t signal_value;
 } RinGpuSubmitInfoV1;
 
+/* A queue dependency is a completed fence value, not a host-side sleep. V2
+ * lets a submission wait on up to eight prior timeline values before it is
+ * admitted to the backend. A value of one is the binary-semaphore
+ * equivalent; larger values preserve monotonic timeline semantics. */
+typedef struct RinGpuSubmitWaitV1 {
+    uint32_t abi_version;
+    uint32_t struct_size;
+    RinGpuHandle fence;
+    uint64_t value;
+} RinGpuSubmitWaitV1;
+
+typedef struct RinGpuSubmitInfoV2 {
+    RinGpuSubmitInfoV1 base;
+    uint32_t wait_count;
+    uint32_t flags;
+    RinGpuSubmitWaitV1 waits[RIN_GPU_MAX_SUBMIT_WAITS];
+} RinGpuSubmitInfoV2;
+
 typedef struct RinGpuCore RinGpuCore;
 
 int ringpu_get_adapter_info(const RinGpuCore* core, RinGpuAdapterInfoV1* info);
@@ -1302,6 +1321,8 @@ int ringpu_command_present(RinGpuCore* core, RinGpuHandle command_list,
 int ringpu_command_list_close(RinGpuCore* core, RinGpuHandle command_list);
 int ringpu_queue_submit(RinGpuCore* core, RinGpuHandle queue,
                         const RinGpuSubmitInfoV1* submit);
+int ringpu_queue_submit_v2(RinGpuCore* core, RinGpuHandle queue,
+                           const RinGpuSubmitInfoV2* submit);
 int ringpu_fence_value(const RinGpuCore* core, RinGpuHandle fence,
                        uint64_t* value);
 /* Waits until all work submitted before the requested fence value has
@@ -1440,6 +1461,10 @@ _Static_assert(sizeof(RinGpuPresentV1) == 32u,
                "RinGPU present ABI drift");
 _Static_assert(sizeof(RinGpuSubmitInfoV1) == 32u,
                "RinGPU submit ABI drift");
+_Static_assert(sizeof(RinGpuSubmitWaitV1) == 24u,
+               "RinGPU submit wait ABI drift");
+_Static_assert(sizeof(RinGpuSubmitInfoV2) == 232u,
+               "RinGPU submit V2 ABI drift");
 #endif
 
 #endif /* RIN_API_RIN_GPU_H */

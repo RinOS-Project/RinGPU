@@ -104,8 +104,9 @@ static int ringpu_validate_graphics_sampled_submit(
     return RIN_GPU_OK;
 }
 
-int ringpu_queue_submit(RinGpuCore* core, RinGpuHandle queue,
-                        const RinGpuSubmitInfoV1* submit) {
+static int ringpu_queue_submit_internal(
+    RinGpuCore* core, RinGpuHandle queue, const RinGpuSubmitInfoV1* submit,
+    uint32_t wait_count, const RinGpuSubmitWaitV1* waits) {
     RinGpuObjectSlot* queue_slot;
     RinGpuObjectSlot* list;
     RinGpuObjectSlot* fence = NULL;
@@ -148,6 +149,29 @@ int ringpu_queue_submit(RinGpuCore* core, RinGpuHandle queue,
         }
     } else if (submit->signal_value != 0u) {
         return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    }
+    if (wait_count > RIN_GPU_MAX_SUBMIT_WAITS ||
+        (wait_count != 0u && !waits)) {
+        return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    }
+    for (uint32_t wait_index = 0u; wait_index < wait_count; ++wait_index) {
+        RinGpuObjectSlot* wait_fence;
+
+        if (!ringpu_versioned(waits[wait_index].abi_version,
+                              waits[wait_index].struct_size,
+                              sizeof(waits[wait_index])) ||
+            waits[wait_index].value == 0u) {
+            return RIN_GPU_ERROR_INVALID_ARGUMENT;
+        }
+        result = ringpu_slot(core, waits[wait_index].fence,
+                             RIN_GPU_OBJECT_FENCE, NULL, &wait_fence);
+        if (result != RIN_GPU_OK) return result;
+        /* The core and the portable software backend submit synchronously.
+         * A value that is not complete cannot be silently ignored or turned
+         * into a fake wait; physical asynchronous owners may block at their
+         * own queue boundary before calling this admission path. */
+        if (waits[wait_index].value > wait_fence->value.fence.value)
+            return RIN_GPU_ERROR_BUSY;
     }
     if (list->value.command_list.count != 0u) {
         commands = (RinGpuBackendCommandV1*)calloc(
@@ -1692,4 +1716,33 @@ int ringpu_queue_submit(RinGpuCore* core, RinGpuHandle queue,
     if (result != RIN_GPU_OK) return result;
     if (fence) fence->value.fence.value = submit->signal_value;
     return RIN_GPU_OK;
+}
+
+int ringpu_queue_submit(RinGpuCore* core, RinGpuHandle queue,
+                        const RinGpuSubmitInfoV1* submit)
+{
+    int result = ringpu_core_ready(core);
+
+    if (result != RIN_GPU_OK) return result;
+    if (!submit || !ringpu_versioned(submit->abi_version,
+                                     submit->struct_size,
+                                     sizeof(*submit))) {
+        return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    }
+    return ringpu_queue_submit_internal(core, queue, submit, 0u, NULL);
+}
+
+int ringpu_queue_submit_v2(RinGpuCore* core, RinGpuHandle queue,
+                           const RinGpuSubmitInfoV2* submit)
+{
+    int result = ringpu_core_ready(core);
+
+    if (result != RIN_GPU_OK) return result;
+    if (!submit || submit->base.abi_version != RIN_GPU_ABI_VERSION ||
+        submit->base.struct_size != sizeof(submit->base) ||
+        submit->wait_count > RIN_GPU_MAX_SUBMIT_WAITS || submit->flags != 0u) {
+        return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    }
+    return ringpu_queue_submit_internal(core, queue, &submit->base,
+                                        submit->wait_count, submit->waits);
 }
