@@ -1089,7 +1089,6 @@ static int sw_image_select_subresource(SwImage* image, uint32_t mip_level,
          image->allocation_desc.dimension != RIN_GPU_IMAGE_DIMENSION_2D) ||
         image->allocation_desc.width == 0u || image->allocation_desc.height == 0u ||
         image->allocation_desc.depth != 1u ||
-        image->allocation_desc.sample_count != 1u ||
         image->allocation_desc.mip_levels == 0u ||
         mip_level >= image->allocation_desc.mip_levels ||
         array_layer >= image->allocation_desc.array_layers) {
@@ -1141,6 +1140,9 @@ static int sw_image_select_subresource(SwImage* image, uint32_t mip_level,
         if (!sw_multiply_u64(width, bytes_per_pixel, &prior_row_pitch) ||
             !sw_multiply_u64(prior_row_pitch, height, &prior_layer_size) ||
             !sw_multiply_u64(prior_layer_size,
+                             image->allocation_desc.sample_count,
+                             &prior_layer_size) ||
+            !sw_multiply_u64(prior_layer_size,
                              image->allocation_desc.array_layers,
                              &prior_level_size) ||
             !sw_add_u64(offset, prior_level_size, &offset)) {
@@ -1153,6 +1155,8 @@ static int sw_image_select_subresource(SwImage* image, uint32_t mip_level,
     }
     if (!sw_multiply_u64(width, bytes_per_pixel, &row_pitch) ||
         !sw_multiply_u64(row_pitch, height, &layer_size) ||
+        !sw_multiply_u64(layer_size, image->allocation_desc.sample_count,
+                         &layer_size) ||
         !sw_multiply_u64(array_layer, layer_size, &layer_offset) ||
         !sw_add_u64(offset, layer_offset, &offset) ||
         offset > image->allocation_size_bytes ||
@@ -1233,6 +1237,7 @@ static int sw_external_image_configure(
 {
     uint32_t bytes_per_pixel;
     uint64_t color_row_bytes;
+    uint64_t color_size_bytes;
     uint64_t depth_row_bytes;
     int any_storage;
     int planar_depth_stencil;
@@ -1267,13 +1272,17 @@ static int sw_external_image_configure(
     if (image->desc.dimension != RIN_GPU_IMAGE_DIMENSION_2D ||
         image->desc.width == 0u || image->desc.height == 0u ||
         image->desc.depth != 1u || image->desc.array_layers != 1u ||
-        image->desc.mip_levels != 1u || image->desc.sample_count != 1u) {
+        image->desc.mip_levels != 1u) {
         return RIN_GPU_ERROR_UNSUPPORTED;
     }
     bytes_per_pixel = sw_image_bytes_per_pixel(image->desc.format);
     if (bytes_per_pixel == 0u ||
         !sw_multiply_u64(image->desc.width, bytes_per_pixel,
                          &color_row_bytes) ||
+        !sw_multiply_u64(color_row_bytes, image->desc.height,
+                         &color_size_bytes) ||
+        !sw_multiply_u64(color_size_bytes, image->desc.sample_count,
+                         &color_size_bytes) ||
         !sw_multiply_u64(image->desc.width, sizeof(float),
                          &depth_row_bytes)) {
         return RIN_GPU_ERROR_INVALID_ARGUMENT;
@@ -1314,6 +1323,8 @@ static int sw_external_image_configure(
         storage->depth_row_pitch_bytes != 0u || storage->stencil_pixels != NULL ||
         storage->stencil_size_bytes != 0u ||
         storage->stencil_row_pitch_bytes != 0u ||
+        storage->row_pitch_bytes < color_row_bytes ||
+        storage->size_bytes < color_size_bytes ||
         !sw_external_plane_valid(storage->pixels, storage->size_bytes,
                                  storage->row_pitch_bytes, color_row_bytes,
                                  image->desc.height)) {
@@ -1368,6 +1379,33 @@ static int sw_image_pixel_offset(const SwImage* image, uint32_t x, uint32_t y,
     }
     *offset_out = offset;
     return 1;
+}
+
+static int sw_image_sample_view(const SwImage* image, uint32_t sample,
+                                SwImage* view)
+{
+    uint32_t bytes_per_pixel;
+    uint64_t offset;
+
+    if (!image || !view || image->desc.sample_count <= 1u ||
+        sample >= image->desc.sample_count) {
+        return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    }
+    bytes_per_pixel = sw_image_bytes_per_pixel(image->desc.format);
+    if (bytes_per_pixel == 0u ||
+        !sw_multiply_u64(image->desc.width, bytes_per_pixel, &offset) ||
+        !sw_multiply_u64(offset, image->desc.height, &offset) ||
+        !sw_multiply_u64(sample, offset, &offset) ||
+        offset > image->size_bytes) {
+        return RIN_GPU_ERROR_BOUNDS;
+    }
+    *view = *image;
+    view->desc.sample_count = 1u;
+    view->bytes = image->bytes + offset;
+    view->size_bytes = image->size_bytes - offset;
+    /* Keep the multisample row stride while the view exposes one sample. */
+    view->row_pitch_bytes = image->row_pitch_bytes;
+    return RIN_GPU_OK;
 }
 
 static int sw_depth_pixel_address(const SwImage* image, uint32_t x, uint32_t y,
@@ -5502,6 +5540,88 @@ static int sw_blit_image(const RinGpuBackendImageBlitV1* blit)
     return RIN_GPU_OK;
 }
 
+static int sw_resolve_image(const RinGpuBackendImageResolveV1* resolve)
+{
+    SwImage* destination;
+    SwImage* source;
+    SwImage destination_view;
+    SwImage source_view;
+    uint32_t sample_count;
+    int result;
+
+    if (!resolve || resolve->resolve.flags != 0u ||
+        resolve->resolve.reserved != 0u || resolve->resolve.width == 0u ||
+        resolve->resolve.height == 0u) {
+        return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    }
+    destination = (SwImage*)(uintptr_t)resolve->destination_cookie;
+    source = (SwImage*)(uintptr_t)resolve->source_cookie;
+    if (!destination || !source) return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    destination_view = *destination;
+    source_view = *source;
+    result = sw_image_select_subresource(
+        &destination_view, resolve->resolve.destination_mip_level,
+        resolve->resolve.destination_array_layer);
+    if (result != RIN_GPU_OK) return result;
+    result = sw_image_select_subresource(
+        &source_view, resolve->resolve.source_mip_level,
+        resolve->resolve.source_array_layer);
+    if (result != RIN_GPU_OK) return result;
+    sample_count = source_view.desc.sample_count;
+    if (destination_view.desc.dimension != RIN_GPU_IMAGE_DIMENSION_2D ||
+        source_view.desc.dimension != RIN_GPU_IMAGE_DIMENSION_2D ||
+        destination_view.desc.depth != 1u || source_view.desc.depth != 1u ||
+        destination_view.desc.sample_count != 1u || sample_count <= 1u ||
+        destination_view.desc.format != source_view.desc.format ||
+        !ringpu_color_format(destination_view.desc.format) ||
+        sw_image_bytes_per_pixel(destination_view.desc.format) == 0u ||
+        !destination_view.bytes || !source_view.bytes ||
+        resolve->resolve.source_x > source_view.desc.width ||
+        resolve->resolve.width >
+            source_view.desc.width - resolve->resolve.source_x ||
+        resolve->resolve.source_y > source_view.desc.height ||
+        resolve->resolve.height >
+            source_view.desc.height - resolve->resolve.source_y ||
+        resolve->resolve.destination_x > destination_view.desc.width ||
+        resolve->resolve.width >
+            destination_view.desc.width - resolve->resolve.destination_x ||
+        resolve->resolve.destination_y > destination_view.desc.height ||
+        resolve->resolve.height >
+            destination_view.desc.height - resolve->resolve.destination_y) {
+        return RIN_GPU_ERROR_UNSUPPORTED;
+    }
+    for (uint32_t y = 0u; y < resolve->resolve.height; ++y) {
+        for (uint32_t x = 0u; x < resolve->resolve.width; ++x) {
+            float color[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+
+            for (uint32_t sample = 0u; sample < sample_count; ++sample) {
+                SwImage sample_view;
+                float sample_color[4];
+
+                result = sw_image_sample_view(&source_view, sample,
+                                              &sample_view);
+                if (result != RIN_GPU_OK) return result;
+                result = sw_load_color_components(
+                    &sample_view, resolve->resolve.source_x + x,
+                    resolve->resolve.source_y + y, sample_color);
+                if (result != RIN_GPU_OK) return result;
+                for (uint32_t component = 0u; component < 4u; ++component)
+                    color[component] += sample_color[component];
+            }
+            for (uint32_t component = 0u; component < 4u; ++component) {
+                color[component] /= (float)sample_count;
+                if (!sw_f32_finite(color[component]))
+                    return RIN_GPU_ERROR_BACKEND;
+            }
+            sw_store_color_components(
+                &destination_view, resolve->resolve.destination_x + x,
+                resolve->resolve.destination_y + y, color,
+                RIN_GPU_COLOR_WRITE_ALL);
+        }
+    }
+    return RIN_GPU_OK;
+}
+
 /* Ordered 4x4 dither is applied after blending/write-mask resolution, only
  * while quantizing a fragment to a packed normalized color target. Clears do
  * not use this helper: GLES explicitly excludes clear operations from
@@ -9510,6 +9630,14 @@ static int sw_submit(void* opaque, const RinGpuBackendCommandV1* commands,
             if (active_pass.color != NULL)
                 return RIN_GPU_ERROR_STATE;
             result = sw_blit_image(&command->value.image_blit);
+            if (result != RIN_GPU_OK)
+                return result;
+            ++delta.copy_commands;
+            break;
+        case RIN_GPU_BACKEND_COMMAND_RESOLVE_IMAGE:
+            if (active_pass.color != NULL)
+                return RIN_GPU_ERROR_STATE;
+            result = sw_resolve_image(&command->value.image_resolve);
             if (result != RIN_GPU_OK)
                 return result;
             ++delta.copy_commands;

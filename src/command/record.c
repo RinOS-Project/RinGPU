@@ -182,6 +182,10 @@ void ringpu_release_command_references(RinGpuCore* core,
             release_reference(core, command->destination, RIN_GPU_OBJECT_IMAGE);
             release_reference(core, command->source, RIN_GPU_OBJECT_IMAGE);
             break;
+        case RIN_GPU_BACKEND_COMMAND_RESOLVE_IMAGE:
+            release_reference(core, command->destination, RIN_GPU_OBJECT_IMAGE);
+            release_reference(core, command->source, RIN_GPU_OBJECT_IMAGE);
+            break;
         case RIN_GPU_BACKEND_COMMAND_TRANSITION_IMAGE:
             release_reference(core, command->destination, RIN_GPU_OBJECT_IMAGE);
             break;

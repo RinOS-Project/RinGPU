@@ -347,6 +347,17 @@ int ringpu_runtime_command_transition_image(
                                            transition);
 }
 
+int ringpu_runtime_command_resolve_image(
+    RinGpuRuntime* runtime, RinGpuHandle command_list,
+    RinGpuHandle destination, RinGpuHandle source,
+    const RinGpuImageResolveV1* resolve)
+{
+    if (runtime == NULL || runtime->initialized != RIN_GPU_RUNTIME_VERSION)
+        return RIN_GPU_ERROR_STATE;
+    return ringpu_command_resolve_image(&runtime->core, command_list,
+                                        destination, source, resolve);
+}
+
 int ringpu_runtime_command_transfer_image_ownership(
     RinGpuRuntime* runtime, RinGpuHandle command_list, RinGpuHandle image,
     const RinGpuImageOwnershipTransferV1* transfer)

@@ -18,6 +18,9 @@ int ringpu_command_copy_image(RinGpuCore* core, RinGpuHandle command_list,
 int ringpu_command_blit_image(RinGpuCore* core, RinGpuHandle command_list,
                               RinGpuHandle destination, RinGpuHandle source,
                               const RinGpuImageBlitV1* blit);
+int ringpu_command_resolve_image(RinGpuCore* core, RinGpuHandle command_list,
+                                 RinGpuHandle destination, RinGpuHandle source,
+                                 const RinGpuImageResolveV1* resolve);
 int ringpu_command_clear_image(RinGpuCore* core, RinGpuHandle command_list,
                                RinGpuHandle destination,
                                const RinGpuImageClearV1* clear);

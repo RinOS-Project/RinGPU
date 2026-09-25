@@ -270,6 +270,76 @@ int ringpu_command_blit_image(RinGpuCore* core, RinGpuHandle command_list,
     return RIN_GPU_OK;
 }
 
+int ringpu_command_resolve_image(RinGpuCore* core, RinGpuHandle command_list,
+                                 RinGpuHandle destination,
+                                 RinGpuHandle source,
+                                 const RinGpuImageResolveV1* resolve)
+{
+    RinGpuObjectSlot* list;
+    RinGpuObjectSlot* destination_slot;
+    RinGpuObjectSlot* source_slot;
+    RinGpuRecordedCommand* command;
+    const RinGpuImageDescV1* destination_desc;
+    const RinGpuImageDescV1* source_desc;
+    int result = ringpu_core_ready(core);
+
+    if (result != RIN_GPU_OK) return result;
+    if (!resolve || !ringpu_versioned(resolve->abi_version,
+                                      resolve->struct_size, sizeof(*resolve)) ||
+        resolve->flags != 0u || resolve->reserved != 0u ||
+        resolve->width == 0u || resolve->height == 0u) {
+        return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    }
+    result = ringpu_slot(core, command_list, RIN_GPU_OBJECT_COMMAND_LIST, NULL,
+                         &list);
+    if (result != RIN_GPU_OK) return result;
+    if (list->value.command_list.state != RIN_GPU_COMMAND_RECORDING ||
+        list->value.command_list.render_pass_active != 0u ||
+        (list->value.command_list.capabilities & RIN_GPU_QUEUE_COPY) == 0u) {
+        return RIN_GPU_ERROR_STATE;
+    }
+    result = ringpu_slot(core, destination, RIN_GPU_OBJECT_IMAGE, NULL,
+                         &destination_slot);
+    if (result != RIN_GPU_OK) return result;
+    result = ringpu_slot(core, source, RIN_GPU_OBJECT_IMAGE, NULL, &source_slot);
+    if (result != RIN_GPU_OK) return result;
+    destination_desc = &destination_slot->value.image.descriptor;
+    source_desc = &source_slot->value.image.descriptor;
+    if ((destination_desc->usage & RIN_GPU_IMAGE_COPY_DESTINATION) == 0u ||
+        (source_desc->usage & RIN_GPU_IMAGE_COPY_SOURCE) == 0u ||
+        !ringpu_image_upload_ready(destination_slot) ||
+        !ringpu_image_upload_ready(source_slot) ||
+        destination_desc->format != source_desc->format ||
+        !ringpu_color_format(destination_desc->format) ||
+        destination_desc->dimension != RIN_GPU_IMAGE_DIMENSION_2D ||
+        source_desc->dimension != RIN_GPU_IMAGE_DIMENSION_2D ||
+        destination_desc->sample_count != 1u ||
+        source_desc->sample_count <= 1u ||
+        !ringpu_image_copy_side_valid(
+            source_desc, resolve->source_mip_level,
+            resolve->source_array_layer, resolve->source_x, resolve->source_y,
+            0u, resolve->width, resolve->height, 1u) ||
+        !ringpu_image_copy_side_valid(
+            destination_desc, resolve->destination_mip_level,
+            resolve->destination_array_layer, resolve->destination_x,
+            resolve->destination_y, 0u, resolve->width, resolve->height,
+            1u)) {
+        return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    }
+    result = ringpu_record_command(list, &command);
+    if (result != RIN_GPU_OK) return result;
+    command->type = RIN_GPU_BACKEND_COMMAND_RESOLVE_IMAGE;
+    command->destination = destination;
+    command->source = source;
+    command->value.image_resolve = *resolve;
+    command->value.image_resolve.struct_size =
+        sizeof(command->value.image_resolve);
+    list->value.command_list.count++;
+    destination_slot->value.image.reference_count++;
+    source_slot->value.image.reference_count++;
+    return RIN_GPU_OK;
+}
+
 int ringpu_command_clear_image(RinGpuCore* core, RinGpuHandle command_list,
                                RinGpuHandle destination,
                                const RinGpuImageClearV1* clear)

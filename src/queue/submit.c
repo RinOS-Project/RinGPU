@@ -146,6 +146,7 @@ static int ringpu_validate_command_image_owners(
     switch (command->type) {
     case RIN_GPU_BACKEND_COMMAND_COPY_IMAGE:
     case RIN_GPU_BACKEND_COMMAND_BLIT_IMAGE:
+    case RIN_GPU_BACKEND_COMMAND_RESOLVE_IMAGE:
         CHECK_IMAGE_OWNER(command->destination);
         CHECK_IMAGE_OWNER(command->source);
         break;
@@ -421,6 +422,66 @@ static int ringpu_queue_submit_internal(
                 destination->value.image.backend_cookie;
             backend_blit->source_cookie = source->value.image.backend_cookie;
             backend_blit->blit = *blit;
+        } else if (command->type == RIN_GPU_BACKEND_COMMAND_RESOLVE_IMAGE) {
+            const RinGpuImageResolveV1* resolve =
+                &command->value.image_resolve;
+            RinGpuBackendImageResolveV1* backend_resolve =
+                &commands[index].value.image_resolve;
+            result = ringpu_slot(core, command->destination,
+                                 RIN_GPU_OBJECT_IMAGE, &destination_index,
+                                 &destination);
+            if (result != RIN_GPU_OK) break;
+            result = ringpu_slot(core, command->source,
+                                 RIN_GPU_OBJECT_IMAGE, &source_index, &source);
+            if (result != RIN_GPU_OK) break;
+            if (destination->value.image.descriptor.sample_count != 1u ||
+                source->value.image.descriptor.sample_count <= 1u ||
+                destination->value.image.descriptor.format !=
+                    source->value.image.descriptor.format ||
+                !ringpu_color_format(
+                    destination->value.image.descriptor.format) ||
+                !ringpu_image_copy_side_valid(
+                    &source->value.image.descriptor, resolve->source_mip_level,
+                    resolve->source_array_layer, resolve->source_x,
+                    resolve->source_y, 0u, resolve->width, resolve->height,
+                    1u) ||
+                !ringpu_image_copy_side_valid(
+                    &destination->value.image.descriptor,
+                    resolve->destination_mip_level,
+                    resolve->destination_array_layer, resolve->destination_x,
+                    resolve->destination_y, 0u, resolve->width,
+                    resolve->height, 1u)) {
+                result = RIN_GPU_ERROR_INVALID_ARGUMENT;
+                break;
+            }
+            result = ringpu_stage_image_states(
+                destination, destination_index, staged_states);
+            if (result != RIN_GPU_OK) break;
+            destination_states = staged_states[destination_index];
+            if (source_index == destination_index) {
+                source_states = destination_states;
+            } else {
+                result = ringpu_stage_image_states(
+                    source, source_index, staged_states);
+                if (result != RIN_GPU_OK) break;
+                source_states = staged_states[source_index];
+            }
+            if (destination_states[
+                    resolve->destination_array_layer *
+                        destination->value.image.descriptor.mip_levels +
+                    resolve->destination_mip_level] !=
+                    RIN_GPU_IMAGE_STATE_COPY_DESTINATION ||
+                source_states[resolve->source_array_layer *
+                                  source->value.image.descriptor.mip_levels +
+                              resolve->source_mip_level] !=
+                    RIN_GPU_IMAGE_STATE_COPY_SOURCE) {
+                result = RIN_GPU_ERROR_STATE;
+                break;
+            }
+            backend_resolve->destination_cookie =
+                destination->value.image.backend_cookie;
+            backend_resolve->source_cookie = source->value.image.backend_cookie;
+            backend_resolve->resolve = *resolve;
         } else if (command->type == RIN_GPU_BACKEND_COMMAND_CLEAR_IMAGE) {
             const RinGpuImageClearV1* clear = &command->value.image_clear;
             RinGpuBackendImageClearV1* backend_clear =

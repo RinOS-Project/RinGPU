@@ -124,6 +124,10 @@ int ringpu_runtime_command_list_close(RinGpuRuntime* runtime,
 int ringpu_runtime_command_transition_image(
     RinGpuRuntime* runtime, RinGpuHandle command_list, RinGpuHandle image,
     const RinGpuImageTransitionV1* transition);
+int ringpu_runtime_command_resolve_image(
+    RinGpuRuntime* runtime, RinGpuHandle command_list,
+    RinGpuHandle destination, RinGpuHandle source,
+    const RinGpuImageResolveV1* resolve);
 int ringpu_runtime_command_transfer_image_ownership(
     RinGpuRuntime* runtime, RinGpuHandle command_list, RinGpuHandle image,
     const RinGpuImageOwnershipTransferV1* transfer);

@@ -69,7 +69,9 @@ typedef struct RinGpuSoftwareBackendDescV2 {
 /* V3 lets an embedding bind caller-owned storage to selected 2D, single-mip,
  * single-layer images. A successful acquire callback may leave this record
  * fully zeroed to request the ordinary private allocation instead. Otherwise
- * `pixels` describes a complete interleaved image. D32S8 may instead provide
+ * `pixels` describes complete tightly packed sample planes; for multisample
+ * images the planes are laid out one after another, each with the supplied
+ * row pitch. D32S8 may instead provide
  * both `depth_pixels` and `stencil_pixels` as separate planes; mixed planar
  * and interleaved D32S8 storage is rejected. All external storage remains
  * owned by the callback's caller and must remain live until destroy_image(). */
