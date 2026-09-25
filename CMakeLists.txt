@@ -106,6 +106,9 @@ if(RINGPU_BUILD_TESTS)
     target_link_libraries(ringpu-primitive-restart-test PRIVATE RinGPU::RinGPU)
     add_test(NAME ringpu-primitive-restart
              COMMAND ringpu-primitive-restart-test)
+    add_executable(ringpu-srgb-test tests/ringpu_srgb_test.c)
+    target_link_libraries(ringpu-srgb-test PRIVATE RinGPU::RinGPU)
+    add_test(NAME ringpu-srgb COMMAND ringpu-srgb-test)
 endif()
 
 if(RINGPU_BUILD_DIFFERENTIAL_TESTS)

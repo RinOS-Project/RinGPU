@@ -130,7 +130,13 @@ typedef enum RinGpuImageFormat {
      * components in RGBA order. Like RGBA32_FLOAT, half-float images are
      * sampled/offscreen color targets only in the portable profile; they are
      * neither presentable nor storage images. */
-    RIN_GPU_FORMAT_RGBA16_FLOAT = 11
+    RIN_GPU_FORMAT_RGBA16_FLOAT = 11,
+    /* CPU upload/readback is four bytes in RGBA/BGRA order. RGB bytes use
+     * the IEC 61966-2-1 sRGB transfer function; alpha remains linear. These
+     * formats are color targets and sampled images but are not presentable in
+     * the bounded portable profile. */
+    RIN_GPU_FORMAT_RGBA8_SRGB = 12,
+    RIN_GPU_FORMAT_BGRA8_SRGB = 13
 } RinGpuImageFormat;
 
 typedef enum RinGpuImageState {

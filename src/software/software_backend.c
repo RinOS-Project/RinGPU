@@ -1012,6 +1012,8 @@ static int sw_image_select_mip(SwImage* image, uint32_t mip_level)
 static int sw_f32_finite(float value);
 static float sw_f16_to_f32(uint16_t half);
 static uint16_t sw_f32_to_f16(float value);
+static int sw_srgb_decode(float encoded, float* linear_out);
+static int sw_srgb_encode(float linear, float* encoded_out);
 
 static uint32_t sw_image_bytes_per_pixel(uint32_t format)
 {
@@ -1030,6 +1032,8 @@ static uint32_t sw_image_bytes_per_pixel(uint32_t format)
         return 16u;
     if (format == RIN_GPU_FORMAT_RGBA8_UNORM ||
         format == RIN_GPU_FORMAT_BGRA8_UNORM ||
+        format == RIN_GPU_FORMAT_RGBA8_SRGB ||
+        format == RIN_GPU_FORMAT_BGRA8_SRGB ||
         format == RIN_GPU_FORMAT_D32_FLOAT) {
         return 4u;
     }
@@ -1298,6 +1302,8 @@ static int sw_validate_sampled_image_2d(const SwImage* image)
          image->desc.format != RIN_GPU_FORMAT_RGB5_A1_UNORM &&
          image->desc.format != RIN_GPU_FORMAT_RGBA8_UNORM &&
          image->desc.format != RIN_GPU_FORMAT_BGRA8_UNORM &&
+         image->desc.format != RIN_GPU_FORMAT_RGBA8_SRGB &&
+         image->desc.format != RIN_GPU_FORMAT_BGRA8_SRGB &&
          image->desc.format != RIN_GPU_FORMAT_RGBA16_FLOAT &&
          image->desc.format != RIN_GPU_FORMAT_RGBA32_FLOAT &&
          image->desc.format != RIN_GPU_FORMAT_D32_FLOAT &&
@@ -2579,12 +2585,24 @@ static int sw_sample_image_texel_component(const SwImage* image,
         *value_out = sw_f16_to_f32(component_bits);
         return sw_f32_finite(*value_out) ? RIN_GPU_OK : RIN_GPU_ERROR_BACKEND;
     }
-    if (image->desc.format == RIN_GPU_FORMAT_RGBA8_UNORM) {
-        *value_out = (float)image->bytes[byte_offset + component] / 255.0f;
-    } else if (image->desc.format == RIN_GPU_FORMAT_BGRA8_UNORM) {
+    if (image->desc.format == RIN_GPU_FORMAT_RGBA8_UNORM ||
+        image->desc.format == RIN_GPU_FORMAT_RGBA8_SRGB) {
+        uint8_t encoded = image->bytes[byte_offset + component];
+
+        *value_out = (float)encoded / 255.0f;
+        if (image->desc.format == RIN_GPU_FORMAT_RGBA8_SRGB &&
+            component != RIN_SHADER_SAMPLE_COMPONENT_ALPHA &&
+            !sw_srgb_decode(*value_out, value_out))
+            return RIN_GPU_ERROR_BACKEND;
+    } else if (image->desc.format == RIN_GPU_FORMAT_BGRA8_UNORM ||
+               image->desc.format == RIN_GPU_FORMAT_BGRA8_SRGB) {
         static const uint8_t component_offsets[4] = {2u, 1u, 0u, 3u};
         *value_out = (float)image->bytes[
             byte_offset + component_offsets[component]] / 255.0f;
+        if (image->desc.format == RIN_GPU_FORMAT_BGRA8_SRGB &&
+            component != RIN_SHADER_SAMPLE_COMPONENT_ALPHA &&
+            !sw_srgb_decode(*value_out, value_out))
+            return RIN_GPU_ERROR_BACKEND;
     } else {
         return RIN_GPU_ERROR_UNSUPPORTED;
     }
@@ -4621,6 +4639,51 @@ static uint8_t sw_color_byte(float value)
     return (uint8_t)(value * 255.0f + 0.5f);
 }
 
+/* sRGB conversion is kept in the freestanding software profile.  The
+ * bounded shader power helper is deterministic and already rejects non-finite
+ * inputs; valid normalized color values never take its unsupported branch. */
+static int sw_srgb_decode(float encoded, float* linear_out)
+{
+    float power_input;
+
+    if (!linear_out || !sw_f32_finite(encoded) || encoded < 0.0f ||
+        encoded > 1.0f)
+        return 0;
+    if (encoded <= 0.04045f) {
+        *linear_out = encoded / 12.92f;
+        return sw_f32_finite(*linear_out);
+    }
+    power_input = (encoded + 0.055f) / 1.055f;
+    if (!sw_powf(power_input, 2.4f, linear_out))
+        return 0;
+    return *linear_out >= 0.0f && *linear_out <= 1.0f;
+}
+
+static int sw_srgb_encode(float linear, float* encoded_out)
+{
+    float power;
+
+    if (!encoded_out || !sw_f32_finite(linear))
+        return 0;
+    if (linear <= 0.0f) {
+        *encoded_out = 0.0f;
+        return 1;
+    }
+    if (linear >= 1.0f) {
+        *encoded_out = 1.0f;
+        return 1;
+    }
+    if (linear <= 0.0031308f) {
+        *encoded_out = linear * 12.92f;
+        return sw_f32_finite(*encoded_out);
+    }
+    if (!sw_powf(linear, 1.0f / 2.4f, &power))
+        return 0;
+    *encoded_out = 1.055f * power - 0.055f;
+    return sw_f32_finite(*encoded_out) && *encoded_out >= 0.0f &&
+           *encoded_out <= 1.0f;
+}
+
 static int sw_packed_color_format(uint32_t format)
 {
     return format == RIN_GPU_FORMAT_RGB565_UNORM ||
@@ -4695,6 +4758,8 @@ static int sw_color_target_valid(const SwImage* image)
          image->desc.format != RIN_GPU_FORMAT_RGB5_A1_UNORM &&
          image->desc.format != RIN_GPU_FORMAT_RGBA8_UNORM &&
          image->desc.format != RIN_GPU_FORMAT_BGRA8_UNORM &&
+         image->desc.format != RIN_GPU_FORMAT_RGBA8_SRGB &&
+         image->desc.format != RIN_GPU_FORMAT_BGRA8_SRGB &&
         image->desc.format != RIN_GPU_FORMAT_RGBA16_FLOAT &&
         image->desc.format != RIN_GPU_FORMAT_RGBA32_FLOAT) ||
         (bytes_per_pixel = sw_image_bytes_per_pixel(image->desc.format)) == 0u ||
@@ -4740,6 +4805,8 @@ static int sw_make_implicit_render_pass(SwImage* color, SwRenderPass* pass)
          color->desc.format != RIN_GPU_FORMAT_RGB5_A1_UNORM &&
          color->desc.format != RIN_GPU_FORMAT_RGBA8_UNORM &&
          color->desc.format != RIN_GPU_FORMAT_BGRA8_UNORM &&
+         color->desc.format != RIN_GPU_FORMAT_RGBA8_SRGB &&
+         color->desc.format != RIN_GPU_FORMAT_BGRA8_SRGB &&
          color->desc.format != RIN_GPU_FORMAT_RGBA16_FLOAT &&
          color->desc.format != RIN_GPU_FORMAT_RGBA32_FLOAT) ||
         !sw_multiply_u64(color->desc.width,
@@ -4942,6 +5009,33 @@ static void sw_store_color_components(SwImage* image, uint32_t x, uint32_t y,
         memcpy(pixel, &packed, sizeof(packed));
         return;
     }
+    if (image->desc.format == RIN_GPU_FORMAT_RGBA8_SRGB ||
+        image->desc.format == RIN_GPU_FORMAT_BGRA8_SRGB) {
+        float encoded[3];
+
+        if (!sw_srgb_encode(color[0], &encoded[0]) ||
+            !sw_srgb_encode(color[1], &encoded[1]) ||
+            !sw_srgb_encode(color[2], &encoded[2]))
+            return;
+        if (image->desc.format == RIN_GPU_FORMAT_BGRA8_SRGB) {
+            if ((write_mask & RIN_GPU_COLOR_WRITE_BLUE) != 0u)
+                pixel[0] = sw_color_byte(encoded[2]);
+            if ((write_mask & RIN_GPU_COLOR_WRITE_GREEN) != 0u)
+                pixel[1] = sw_color_byte(encoded[1]);
+            if ((write_mask & RIN_GPU_COLOR_WRITE_RED) != 0u)
+                pixel[2] = sw_color_byte(encoded[0]);
+        } else {
+            if ((write_mask & RIN_GPU_COLOR_WRITE_RED) != 0u)
+                pixel[0] = sw_color_byte(encoded[0]);
+            if ((write_mask & RIN_GPU_COLOR_WRITE_GREEN) != 0u)
+                pixel[1] = sw_color_byte(encoded[1]);
+            if ((write_mask & RIN_GPU_COLOR_WRITE_BLUE) != 0u)
+                pixel[2] = sw_color_byte(encoded[2]);
+        }
+        if ((write_mask & RIN_GPU_COLOR_WRITE_ALPHA) != 0u)
+            pixel[3] = sw_color_byte(color[3]);
+        return;
+    }
     if (image->desc.format == RIN_GPU_FORMAT_BGRA8_UNORM) {
         if ((write_mask & RIN_GPU_COLOR_WRITE_BLUE) != 0u)
             pixel[0] = sw_color_byte(color[2]);
@@ -5005,16 +5099,28 @@ static int sw_load_color_components(const SwImage* image, uint32_t x,
         sw_unpack_packed_color(image->desc.format, pixel, color);
         return RIN_GPU_OK;
     }
-    if (image->desc.format == RIN_GPU_FORMAT_BGRA8_UNORM) {
+    if (image->desc.format == RIN_GPU_FORMAT_BGRA8_UNORM ||
+        image->desc.format == RIN_GPU_FORMAT_BGRA8_SRGB) {
         color[0] = (float)pixel[2] / 255.0f;
         color[1] = (float)pixel[1] / 255.0f;
         color[2] = (float)pixel[0] / 255.0f;
         color[3] = (float)pixel[3] / 255.0f;
+        if (image->desc.format == RIN_GPU_FORMAT_BGRA8_SRGB &&
+            (!sw_srgb_decode(color[0], &color[0]) ||
+             !sw_srgb_decode(color[1], &color[1]) ||
+             !sw_srgb_decode(color[2], &color[2])))
+            return RIN_GPU_ERROR_BACKEND;
         return RIN_GPU_OK;
     }
-    if (image->desc.format == RIN_GPU_FORMAT_RGBA8_UNORM) {
+    if (image->desc.format == RIN_GPU_FORMAT_RGBA8_UNORM ||
+        image->desc.format == RIN_GPU_FORMAT_RGBA8_SRGB) {
         for (uint32_t component = 0u; component < 4u; ++component)
             color[component] = (float)pixel[component] / 255.0f;
+        if (image->desc.format == RIN_GPU_FORMAT_RGBA8_SRGB &&
+            (!sw_srgb_decode(color[0], &color[0]) ||
+             !sw_srgb_decode(color[1], &color[1]) ||
+             !sw_srgb_decode(color[2], &color[2])))
+            return RIN_GPU_ERROR_BACKEND;
         return RIN_GPU_OK;
     }
     return RIN_GPU_ERROR_UNSUPPORTED;
@@ -6335,11 +6441,26 @@ static void sw_put_pixel_with_raster(const SwPipeline* pipeline, SwImage* image,
         }
     } else if (sw_packed_color_format(image->desc.format)) {
         sw_unpack_packed_color(image->desc.format, pixel, destination);
-    } else if (image->desc.format == RIN_GPU_FORMAT_BGRA8_UNORM) {
+    } else if (image->desc.format == RIN_GPU_FORMAT_BGRA8_UNORM ||
+               image->desc.format == RIN_GPU_FORMAT_BGRA8_SRGB) {
         destination[0] = (float)pixel[2] / 255.0f;
         destination[1] = (float)pixel[1] / 255.0f;
         destination[2] = (float)pixel[0] / 255.0f;
         destination[3] = (float)pixel[3] / 255.0f;
+        if (image->desc.format == RIN_GPU_FORMAT_BGRA8_SRGB &&
+            (!sw_srgb_decode(destination[0], &destination[0]) ||
+             !sw_srgb_decode(destination[1], &destination[1]) ||
+             !sw_srgb_decode(destination[2], &destination[2])))
+            return;
+    } else if (image->desc.format == RIN_GPU_FORMAT_RGBA8_SRGB) {
+        destination[0] = (float)pixel[0] / 255.0f;
+        destination[1] = (float)pixel[1] / 255.0f;
+        destination[2] = (float)pixel[2] / 255.0f;
+        destination[3] = (float)pixel[3] / 255.0f;
+        if (!sw_srgb_decode(destination[0], &destination[0]) ||
+            !sw_srgb_decode(destination[1], &destination[1]) ||
+            !sw_srgb_decode(destination[2], &destination[2]))
+            return;
     } else {
         destination[0] = (float)pixel[0] / 255.0f;
         destination[1] = (float)pixel[1] / 255.0f;
