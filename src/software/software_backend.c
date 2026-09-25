@@ -1157,6 +1157,7 @@ static int sw_image_select_subresource(SwImage* image, uint32_t mip_level,
     uint32_t bytes_per_pixel;
     uint32_t width;
     uint32_t height;
+    uint32_t depth;
     uint32_t level;
     uint64_t offset = 0u;
     uint64_t row_pitch;
@@ -1176,10 +1177,10 @@ static int sw_image_select_subresource(SwImage* image, uint32_t mip_level,
         image->active_array_layer = 0u;
         return RIN_GPU_OK;
     }
-    if ((image->allocation_desc.dimension != RIN_GPU_IMAGE_DIMENSION_1D &&
-         image->allocation_desc.dimension != RIN_GPU_IMAGE_DIMENSION_2D) ||
+    if ((image->allocation_desc.dimension < RIN_GPU_IMAGE_DIMENSION_1D ||
+         image->allocation_desc.dimension > RIN_GPU_IMAGE_DIMENSION_3D) ||
         image->allocation_desc.width == 0u || image->allocation_desc.height == 0u ||
-        image->allocation_desc.depth != 1u ||
+        image->allocation_desc.depth == 0u ||
         image->allocation_desc.mip_levels == 0u ||
         mip_level >= image->allocation_desc.mip_levels ||
         array_layer >= image->allocation_desc.array_layers) {
@@ -1223,17 +1224,20 @@ static int sw_image_select_subresource(SwImage* image, uint32_t mip_level,
     }
     width = image->allocation_desc.width;
     height = image->allocation_desc.height;
+    depth = image->allocation_desc.depth;
     for (level = 0u; level < mip_level; ++level) {
         uint64_t prior_row_pitch;
-        uint64_t prior_layer_size;
+        uint64_t prior_height_size;
+        uint64_t prior_depth_size;
         uint64_t prior_level_size;
 
         if (!sw_multiply_u64(width, bytes_per_pixel, &prior_row_pitch) ||
-            !sw_multiply_u64(prior_row_pitch, height, &prior_layer_size) ||
-            !sw_multiply_u64(prior_layer_size,
+            !sw_multiply_u64(prior_row_pitch, height, &prior_height_size) ||
+            !sw_multiply_u64(prior_height_size, depth, &prior_depth_size) ||
+            !sw_multiply_u64(prior_depth_size,
                              image->allocation_desc.sample_count,
-                             &prior_layer_size) ||
-            !sw_multiply_u64(prior_layer_size,
+                             &prior_depth_size) ||
+            !sw_multiply_u64(prior_depth_size,
                              image->allocation_desc.array_layers,
                              &prior_level_size) ||
             !sw_add_u64(offset, prior_level_size, &offset)) {
@@ -1243,9 +1247,12 @@ static int sw_image_select_subresource(SwImage* image, uint32_t mip_level,
             width >>= 1u;
         if (height > 1u)
             height >>= 1u;
+        if (depth > 1u)
+            depth >>= 1u;
     }
     if (!sw_multiply_u64(width, bytes_per_pixel, &row_pitch) ||
         !sw_multiply_u64(row_pitch, height, &layer_size) ||
+        !sw_multiply_u64(layer_size, depth, &layer_size) ||
         !sw_multiply_u64(layer_size, image->allocation_desc.sample_count,
                          &layer_size) ||
         !sw_multiply_u64(array_layer, layer_size, &layer_offset) ||
@@ -1258,6 +1265,7 @@ static int sw_image_select_subresource(SwImage* image, uint32_t mip_level,
     view = image->allocation_desc;
     view.width = width;
     view.height = height;
+    view.depth = depth;
     view.array_layers = 1u;
     view.mip_levels = 1u;
     image->desc = view;
