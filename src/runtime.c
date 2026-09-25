@@ -147,6 +147,24 @@ int ringpu_runtime_create_buffer(RinGpuRuntime* runtime,
     return ringpu_create_buffer(&runtime->core, desc, buffer_out);
 }
 
+int ringpu_runtime_create_memory(RinGpuRuntime* runtime,
+                                 const RinGpuMemoryDescV1* desc,
+                                 RinGpuHandle* memory_out)
+{
+    if (runtime == NULL || runtime->initialized != RIN_GPU_RUNTIME_VERSION)
+        return RIN_GPU_ERROR_STATE;
+    return ringpu_create_memory(&runtime->core, desc, memory_out);
+}
+
+int ringpu_runtime_bind_buffer_memory(
+    RinGpuRuntime* runtime, RinGpuHandle buffer,
+    const RinGpuResourceMemoryBindingV1* binding)
+{
+    if (runtime == NULL || runtime->initialized != RIN_GPU_RUNTIME_VERSION)
+        return RIN_GPU_ERROR_STATE;
+    return ringpu_bind_buffer_memory(&runtime->core, buffer, binding);
+}
+
 int ringpu_runtime_upload_buffer(RinGpuRuntime* runtime,
                                  RinGpuHandle buffer, uint64_t destination_offset,
                                  const void* source, uint64_t size_bytes)
@@ -200,6 +218,15 @@ int ringpu_runtime_create_image(RinGpuRuntime* runtime,
     if (runtime == NULL || runtime->initialized != RIN_GPU_RUNTIME_VERSION)
         return RIN_GPU_ERROR_STATE;
     return ringpu_create_image(&runtime->core, desc, image_out);
+}
+
+int ringpu_runtime_bind_image_memory(
+    RinGpuRuntime* runtime, RinGpuHandle image,
+    const RinGpuResourceMemoryBindingV1* binding)
+{
+    if (runtime == NULL || runtime->initialized != RIN_GPU_RUNTIME_VERSION)
+        return RIN_GPU_ERROR_STATE;
+    return ringpu_bind_image_memory(&runtime->core, image, binding);
 }
 
 int ringpu_runtime_upload_image(RinGpuRuntime* runtime, RinGpuHandle image,

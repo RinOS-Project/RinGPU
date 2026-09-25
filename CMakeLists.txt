@@ -125,6 +125,10 @@ if(RINGPU_BUILD_TESTS)
     add_executable(ringpu-compressed-test tests/ringpu_compressed_test.c)
     target_link_libraries(ringpu-compressed-test PRIVATE RinGPU::RinGPU)
     add_test(NAME ringpu-compressed COMMAND ringpu-compressed-test)
+    add_executable(ringpu-memory-binding-test
+                   tests/ringpu_memory_binding_test.c)
+    target_link_libraries(ringpu-memory-binding-test PRIVATE RinGPU::RinGPU)
+    add_test(NAME ringpu-memory-binding COMMAND ringpu-memory-binding-test)
 endif()
 
 if(RINGPU_BUILD_DIFFERENTIAL_TESTS)

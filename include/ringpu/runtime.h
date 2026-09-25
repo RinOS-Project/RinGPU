@@ -53,6 +53,12 @@ int ringpu_runtime_get_device_generation(const RinGpuRuntime* runtime,
 int ringpu_runtime_create_buffer(RinGpuRuntime* runtime,
                                  const RinGpuBufferDescV1* desc,
                                  RinGpuHandle* buffer_out);
+int ringpu_runtime_create_memory(RinGpuRuntime* runtime,
+                                 const RinGpuMemoryDescV1* desc,
+                                 RinGpuHandle* memory_out);
+int ringpu_runtime_bind_buffer_memory(
+    RinGpuRuntime* runtime, RinGpuHandle buffer,
+    const RinGpuResourceMemoryBindingV1* binding);
 int ringpu_runtime_upload_buffer(RinGpuRuntime* runtime,
                                  RinGpuHandle buffer, uint64_t destination_offset,
                                  const void* source, uint64_t size_bytes);
@@ -72,6 +78,9 @@ int ringpu_runtime_create_command_list(
 int ringpu_runtime_create_image(RinGpuRuntime* runtime,
                                 const RinGpuImageDescV1* desc,
                                 RinGpuHandle* image_out);
+int ringpu_runtime_bind_image_memory(
+    RinGpuRuntime* runtime, RinGpuHandle image,
+    const RinGpuResourceMemoryBindingV1* binding);
 int ringpu_runtime_upload_image(RinGpuRuntime* runtime, RinGpuHandle image,
                                 const RinGpuImageUploadV1* upload,
                                 const void* source, uint64_t source_size);

@@ -716,6 +716,9 @@ typedef struct RinGpuObjectSlot {
             uint32_t flags;
             uint32_t reference_count;
             uint32_t cpu_upload_pending;
+            RinGpuHandle memory_handle;
+            uint64_t memory_offset;
+            uint64_t memory_size;
         } buffer;
         struct {
             RinGpuImageDescV1 descriptor;
@@ -730,7 +733,17 @@ typedef struct RinGpuObjectSlot {
             uint32_t cpu_upload_pending;
             uint32_t owner_family_index;
             uint32_t owner_engine_index;
+            RinGpuHandle memory_handle;
+            uint64_t memory_offset;
+            uint64_t memory_size;
         } image;
+        struct {
+            uint8_t* bytes;
+            uint64_t size_bytes;
+            uint64_t alignment;
+            uint32_t flags;
+            uint32_t reference_count;
+        } memory;
         struct {
             RinGpuSamplerDescV1 descriptor;
             uint64_t backend_cookie;

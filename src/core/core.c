@@ -11,6 +11,7 @@
 #include "../presentation/present.h"
 #include "../presentation/render_pass.h"
 #include "../resource/resources.h"
+#include "../software/software_backend.h"
 #include "../shader/modules.h"
 #include "../pipeline/pipelines.h"
 #include "../command/commands.h"
@@ -368,6 +369,18 @@ void ringpu_core_shutdown(RinGpuCore* core) {
             core->backend.destroy_query(
                 core->backend_context, raw ^ core->handle_secret);
         }
+    }
+    /* Resource cookies are released before memory objects so a bound
+     * resource can still refer to its backing while its software wrapper is
+     * being destroyed. Core shutdown is unconditional, so reference counts
+     * do not need to be decremented in this final pass. */
+    for (uint32_t index = 0; index < RIN_GPU_CORE_MAX_OBJECTS; index++) {
+        RinGpuObjectSlot* slot = &core->objects[index];
+        if (!slot->occupied || slot->type != RIN_GPU_OBJECT_MEMORY)
+            continue;
+        ringpu_software_backend_destroy_memory(
+            core->backend_context, slot->value.memory.bytes,
+            slot->value.memory.size_bytes);
     }
     memset(core, 0, sizeof(*core));
 }

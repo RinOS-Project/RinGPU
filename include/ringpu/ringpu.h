@@ -48,7 +48,8 @@ typedef enum RinGpuObjectType {
     RIN_GPU_OBJECT_GRAPHICS_PIPELINE = 9,
     RIN_GPU_OBJECT_GRAPHICS_BIND_GROUP = 10,
     RIN_GPU_OBJECT_SAMPLER = 11,
-    RIN_GPU_OBJECT_QUERY = 12
+    RIN_GPU_OBJECT_QUERY = 12,
+    RIN_GPU_OBJECT_MEMORY = 13
 } RinGpuObjectType;
 
 #define RIN_GPU_BUFFER_COPY_SOURCE      0x00000001u
@@ -410,6 +411,32 @@ typedef struct RinGpuResourceMemoryRequirementsV1 {
     uint32_t reserved0;
     uint64_t reserved[2];
 } RinGpuResourceMemoryRequirementsV1;
+
+/* Bounded software resource-memory profile.  A memory object owns one real
+ * byte allocation in the software backend; binding replaces a resource's
+ * private backing with the selected range.  Physical heaps, native device
+ * memory, and external backend binding remain backend-owned extensions. */
+#define RIN_GPU_MEMORY_BINDING_DEDICATED UINT32_C(0x00000001)
+#define RIN_GPU_MEMORY_BINDING_KNOWN_FLAGS RIN_GPU_MEMORY_BINDING_DEDICATED
+
+typedef struct RinGpuMemoryDescV1 {
+    uint32_t abi_version;
+    uint32_t struct_size;
+    uint64_t size_bytes;
+    uint64_t alignment;
+    uint32_t flags;
+    uint32_t reserved0;
+    uint64_t reserved[2];
+} RinGpuMemoryDescV1;
+
+typedef struct RinGpuResourceMemoryBindingV1 {
+    uint32_t abi_version;
+    uint32_t struct_size;
+    RinGpuHandle memory;
+    uint64_t offset_bytes;
+    uint64_t size_bytes;
+    uint64_t reserved[2];
+} RinGpuResourceMemoryBindingV1;
 
 typedef struct RinGpuImageDescV1 {
     uint32_t abi_version;
@@ -1397,6 +1424,11 @@ int ringpu_create_buffer(RinGpuCore* core, const RinGpuBufferDescV1* desc,
 int ringpu_get_buffer_memory_requirements(
     const RinGpuCore* core, const RinGpuBufferDescV1* desc,
     RinGpuResourceMemoryRequirementsV1* requirements);
+int ringpu_create_memory(RinGpuCore* core, const RinGpuMemoryDescV1* desc,
+                         RinGpuHandle* memory);
+int ringpu_bind_buffer_memory(
+    RinGpuCore* core, RinGpuHandle buffer,
+    const RinGpuResourceMemoryBindingV1* binding);
 /* Copies a non-empty CPU range into a CPU-visible buffer.  A successful call
  * has completed the backend's required CPU-to-device cache synchronization. */
 int ringpu_upload_buffer(RinGpuCore* core, RinGpuHandle buffer,
@@ -1407,6 +1439,9 @@ int ringpu_create_image(RinGpuCore* core, const RinGpuImageDescV1* desc,
 int ringpu_get_image_memory_requirements(
     const RinGpuCore* core, const RinGpuImageDescV1* desc,
     RinGpuResourceMemoryRequirementsV1* requirements);
+int ringpu_bind_image_memory(
+    RinGpuCore* core, RinGpuHandle image,
+    const RinGpuResourceMemoryBindingV1* binding);
 /* Copies a non-empty CPU region into a CPU-visible image. `source_size` must
  * cover every source row and slice selected by `upload`; success includes the
  * backend's required CPU-to-device cache synchronization. A complete mip/layer
@@ -1625,6 +1660,10 @@ _Static_assert(sizeof(RinGpuBufferDescV1) == 24u,
                "RinGPU buffer ABI drift");
 _Static_assert(sizeof(RinGpuResourceMemoryRequirementsV1) == 56u,
                "RinGPU resource memory requirements ABI drift");
+_Static_assert(sizeof(RinGpuMemoryDescV1) == 48u,
+               "RinGPU memory descriptor ABI drift");
+_Static_assert(sizeof(RinGpuResourceMemoryBindingV1) == 48u,
+               "RinGPU resource memory binding ABI drift");
 _Static_assert(sizeof(RinGpuImageDescV1) == 48u,
                "RinGPU image ABI drift");
 _Static_assert(sizeof(RinGpuImageInfoV1) == 64u,

@@ -3,10 +3,26 @@
 
 #include "../command/record.h"
 #include "../pipeline/pipelines.h"
+#include "../software/software_backend.h"
 #include "../shader/modules.h"
 #include "object_table.h"
 
 #include <stdlib.h>
+
+static int ringpu_release_bound_memory(RinGpuCore* core,
+                                       RinGpuHandle memory)
+{
+    RinGpuObjectSlot* memory_slot;
+    int result;
+
+    if (memory == 0u) return RIN_GPU_OK;
+    result = ringpu_slot(core, memory, RIN_GPU_OBJECT_MEMORY, NULL,
+                         &memory_slot);
+    if (result != RIN_GPU_OK || memory_slot->value.memory.reference_count == 0u)
+        return RIN_GPU_ERROR_STATE;
+    memory_slot->value.memory.reference_count--;
+    return RIN_GPU_OK;
+}
 
 int ringpu_destroy(RinGpuCore* core, RinGpuHandle object) {
     RinGpuObjectSlot* slot;
@@ -16,16 +32,35 @@ int ringpu_destroy(RinGpuCore* core, RinGpuHandle object) {
     if (result != RIN_GPU_OK) return result;
     if (slot->type == RIN_GPU_OBJECT_BUFFER) {
         if (slot->value.buffer.reference_count != 0u) return RIN_GPU_ERROR_BUSY;
+        if (slot->value.buffer.memory_handle != 0u) {
+            result = ringpu_release_bound_memory(
+                core, slot->value.buffer.memory_handle);
+            if (result != RIN_GPU_OK) return result;
+        }
         core->backend.destroy_buffer(core->backend_context,
                                      slot->value.buffer.backend_cookie);
-        core->allocated_bytes -= slot->value.buffer.size_bytes;
+        if (slot->value.buffer.memory_handle == 0u)
+            core->allocated_bytes -= slot->value.buffer.size_bytes;
     } else if (slot->type == RIN_GPU_OBJECT_IMAGE) {
         if (slot->value.image.reference_count != 0u) return RIN_GPU_ERROR_BUSY;
+        if (slot->value.image.memory_handle != 0u) {
+            result = ringpu_release_bound_memory(
+                core, slot->value.image.memory_handle);
+            if (result != RIN_GPU_OK) return result;
+        }
         core->backend.destroy_image(core->backend_context,
                                     slot->value.image.backend_cookie);
         free(slot->value.image.subresource_states);
         free(slot->value.image.cpu_upload_complete);
-        core->allocated_bytes -= slot->value.image.allocation_bytes;
+        if (slot->value.image.memory_handle == 0u)
+            core->allocated_bytes -= slot->value.image.allocation_bytes;
+    } else if (slot->type == RIN_GPU_OBJECT_MEMORY) {
+        if (slot->value.memory.reference_count != 0u)
+            return RIN_GPU_ERROR_BUSY;
+        ringpu_software_backend_destroy_memory(
+            core->backend_context, slot->value.memory.bytes,
+            slot->value.memory.size_bytes);
+        core->allocated_bytes -= slot->value.memory.size_bytes;
     } else if (slot->type == RIN_GPU_OBJECT_SAMPLER) {
         if (slot->value.sampler.reference_count != 0u) {
             return RIN_GPU_ERROR_BUSY;

@@ -40,6 +40,7 @@
 typedef struct SwBuffer {
     uint8_t* bytes;
     uint64_t size_bytes;
+    uint32_t owns_bytes;
 } SwBuffer;
 
 typedef struct SwImage {
@@ -62,6 +63,7 @@ typedef struct SwImage {
     uint32_t active_mip_level;
     uint32_t active_array_layer;
     uint32_t external_storage;
+    uint32_t owns_allocation;
 } SwImage;
 
 typedef struct SwShader {
@@ -918,6 +920,7 @@ static int sw_create_buffer(void* opaque, const RinGpuBufferDescV1* desc,
         return RIN_GPU_ERROR_NO_MEMORY;
     }
     buffer->size_bytes = desc->size_bytes;
+    buffer->owns_bytes = 1u;
     *cookie = (uint64_t)(uintptr_t)buffer;
     return RIN_GPU_OK;
 }
@@ -928,8 +931,48 @@ static void sw_destroy_buffer(void* opaque, uint64_t cookie)
     SwBuffer* buffer = (SwBuffer*)(uintptr_t)cookie;
     if (!buffer)
         return;
-    sw_free(backend, buffer->bytes, buffer->size_bytes);
+    if (buffer->owns_bytes != 0u)
+        sw_free(backend, buffer->bytes, buffer->size_bytes);
     sw_free(backend, buffer, sizeof(*buffer));
+}
+
+int ringpu_software_backend_create_memory(void* opaque, uint64_t size_bytes,
+                                          uint8_t** bytes_out)
+{
+    RinGpuSoftwareBackend* backend = opaque;
+
+    if (!backend || !bytes_out || size_bytes == 0u || size_bytes > SIZE_MAX)
+        return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    *bytes_out = sw_alloc(backend, size_bytes, 1);
+    return *bytes_out != NULL ? RIN_GPU_OK : RIN_GPU_ERROR_NO_MEMORY;
+}
+
+void ringpu_software_backend_destroy_memory(void* opaque, uint8_t* bytes,
+                                            uint64_t size_bytes)
+{
+    sw_free((RinGpuSoftwareBackend*)opaque, bytes, size_bytes);
+}
+
+int ringpu_software_backend_bind_buffer(
+    void* opaque, const RinGpuBufferDescV1* desc, uint8_t* memory,
+    uint64_t memory_size, uint64_t offset_bytes, uint64_t* cookie_out)
+{
+    RinGpuSoftwareBackend* backend = opaque;
+    SwBuffer* buffer;
+
+    if (!backend || !desc || !memory || !cookie_out ||
+        desc->size_bytes == 0u || offset_bytes > memory_size ||
+        desc->size_bytes > memory_size - offset_bytes ||
+        offset_bytes > SIZE_MAX) {
+        return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    }
+    buffer = sw_alloc(backend, sizeof(*buffer), 1);
+    if (!buffer) return RIN_GPU_ERROR_NO_MEMORY;
+    buffer->bytes = memory + (size_t)offset_bytes;
+    buffer->size_bytes = desc->size_bytes;
+    buffer->owns_bytes = 0u;
+    *cookie_out = (uint64_t)(uintptr_t)buffer;
+    return RIN_GPU_OK;
 }
 
 static int sw_upload_buffer(void* opaque, uint64_t cookie,
@@ -1002,6 +1045,7 @@ static int sw_create_image(void* opaque, const RinGpuImageDescV1* desc,
         return RIN_GPU_ERROR_NO_MEMORY;
     }
     image->allocation_size_bytes = allocation_bytes;
+    image->owns_allocation = 1u;
     image->bytes = image->allocation_bytes;
     image->size_bytes = allocation_bytes;
     image->row_pitch_bytes = row_pitch_bytes;
@@ -1021,11 +1065,41 @@ static void sw_destroy_image(void* opaque, uint64_t cookie)
     SwImage* image = (SwImage*)(uintptr_t)cookie;
     if (!image)
         return;
-    if (image->external_storage == 0u) {
+    if (image->external_storage == 0u && image->owns_allocation != 0u) {
         sw_free(backend, image->allocation_bytes,
                 image->allocation_size_bytes);
     }
     sw_free(backend, image, sizeof(*image));
+}
+
+int ringpu_software_backend_bind_image(
+    void* opaque, const RinGpuImageDescV1* desc, uint64_t allocation_bytes,
+    uint8_t* memory, uint64_t memory_size, uint64_t offset_bytes,
+    uint64_t* cookie_out)
+{
+    RinGpuSoftwareBackend* backend = opaque;
+    SwImage* image;
+    int result;
+
+    if (!backend || !desc || !memory || !cookie_out || allocation_bytes == 0u ||
+        offset_bytes > memory_size || allocation_bytes > memory_size - offset_bytes ||
+        offset_bytes > SIZE_MAX) {
+        return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    }
+    image = sw_alloc(backend, sizeof(*image), 1);
+    if (!image) return RIN_GPU_ERROR_NO_MEMORY;
+    image->desc = *desc;
+    image->allocation_desc = *desc;
+    image->allocation_bytes = memory + (size_t)offset_bytes;
+    image->allocation_size_bytes = allocation_bytes;
+    image->owns_allocation = 0u;
+    result = sw_image_select_mip(image, 0u);
+    if (result != RIN_GPU_OK) {
+        sw_free(backend, image, sizeof(*image));
+        return result;
+    }
+    *cookie_out = (uint64_t)(uintptr_t)image;
+    return RIN_GPU_OK;
 }
 
 static int sw_multiply_u64(uint64_t left, uint64_t right, uint64_t* value)
