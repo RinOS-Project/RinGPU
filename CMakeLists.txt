@@ -4,6 +4,8 @@ project(RinGPU VERSION 1.0.0 LANGUAGES C)
 option(RINGPU_BUILD_SHARED "Build RinGPU as a shared library" OFF)
 option(RINGPU_BUILD_TESTS "Build RinGPU host tests" ON)
 option(RINGPU_BUILD_DIFFERENTIAL_TESTS "Build RinGPU differential support tests" OFF)
+option(RINGPU_BUILD_SOFTWARE_BACKEND
+       "Build the generic CPU software backend in the RinGPU archive" ON)
 
 set(RINGPU_SOURCES
     src/command/commands.c
@@ -18,7 +20,6 @@ set(RINGPU_SOURCES
     src/validation/pipeline.c
     src/validation/resource.c
     src/validation/shader.c
-    src/software/software_backend.c
     src/sync/barriers.c
     src/sync/fences.c
     src/device/device_runtime.c
@@ -36,6 +37,10 @@ set(RINGPU_SOURCES
     src/shader/spirv_frontend.c
     src/capability/cross_process_capability.c
     src/capability/cross_process_capability_ipc.c)
+
+if(RINGPU_BUILD_SOFTWARE_BACKEND)
+    list(APPEND RINGPU_SOURCES src/software/software_backend.c)
+endif()
 
 if(RINGPU_BUILD_SHARED)
     add_library(RinGPU SHARED ${RINGPU_SOURCES})
