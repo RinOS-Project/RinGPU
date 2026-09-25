@@ -403,9 +403,12 @@ int ringpu_image_state_allowed(const RinGpuImageDescV1* desc, uint32_t state)
         return (desc->usage & RIN_GPU_IMAGE_DEPTH_STENCIL) != 0u &&
                ringpu_depth_stencil_format(desc->format);
     if (state == RIN_GPU_IMAGE_STATE_SHADER_READ)
-        return (desc->usage & RIN_GPU_IMAGE_SAMPLED) != 0u &&
-               desc->sample_count == 1u &&
-               (ringpu_sampled_image_format(desc->format) ||
-                ringpu_depth_stencil_format(desc->format));
+        return desc->sample_count == 1u &&
+               (((desc->usage & RIN_GPU_IMAGE_SAMPLED) != 0u &&
+                 (ringpu_sampled_image_format(desc->format) ||
+                  ringpu_depth_stencil_format(desc->format))) ||
+                ((desc->usage & RIN_GPU_IMAGE_STORAGE) != 0u &&
+                 desc->dimension == RIN_GPU_IMAGE_DIMENSION_2D &&
+                 desc->format == RIN_GPU_FORMAT_R8_UNORM));
     return 0;
 }

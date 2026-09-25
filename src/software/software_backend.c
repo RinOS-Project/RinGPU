@@ -2600,7 +2600,35 @@ static int sw_create_graphics_bind_group(
             sw_free(backend, group, sizeof(*group));
             return RIN_GPU_ERROR_INVALID_ARGUMENT;
         }
-        if (binding->kind == RIN_SHADER_RESOURCE_SAMPLED_IMAGE ||
+        if (binding->kind == RIN_SHADER_RESOURCE_STORAGE_IMAGE) {
+            const SwImage* image =
+                (const SwImage*)(uintptr_t)binding->resource_cookie;
+            SwImage image_view;
+            int result;
+            if (!image || binding->access == 0u ||
+                (binding->access & ~RIN_GPU_RESOURCE_KNOWN_ACCESS) != 0u ||
+                binding->offset != 0u || binding->size_bytes != 0u ||
+                binding->flags != 0u) {
+                sw_free(backend, group, sizeof(*group));
+                return RIN_GPU_ERROR_INVALID_ARGUMENT;
+            }
+            image_view = *image;
+            result = sw_image_select_subresource(&image_view,
+                                                 binding->mip_level,
+                                                 binding->array_layer);
+            if (result != RIN_GPU_OK ||
+                image_view.desc.dimension != RIN_GPU_IMAGE_DIMENSION_2D ||
+                image_view.desc.format != RIN_GPU_FORMAT_R8_UNORM ||
+                image_view.desc.sample_count != 1u ||
+                (image_view.desc.usage & RIN_GPU_IMAGE_STORAGE) == 0u) {
+                sw_free(backend, group, sizeof(*group));
+                return result != RIN_GPU_OK ? result : RIN_GPU_ERROR_UNSUPPORTED;
+            }
+            group->images[binding->binding] = image;
+            group->image_base_mip_levels[binding->binding] = binding->mip_level;
+            group->image_mip_counts[binding->binding] = 1u;
+            group->image_array_layers[binding->binding] = binding->array_layer;
+        } else if (binding->kind == RIN_SHADER_RESOURCE_SAMPLED_IMAGE ||
             binding->kind == RIN_SHADER_RESOURCE_SAMPLED_DEPTH_IMAGE) {
             const SwImage* image =
                 (const SwImage*)(uintptr_t)binding->resource_cookie;
@@ -3705,6 +3733,43 @@ static int sw_compute_shared_address(const SwShaderIo* io, int32_t byte_offset,
     return RIN_GPU_OK;
 }
 
+static int sw_storage_image_address(const SwShaderIo* io, uint16_t resource,
+                                    int32_t x, int32_t y, uint32_t access,
+                                    uint8_t** address_out)
+{
+    const SwGraphicsBindGroup* group;
+    const SwImage* image;
+    SwImage view;
+    uint64_t offset;
+    int result;
+
+    if (!io || !address_out || x < 0 || y < 0 || !io->graphics_bind_group)
+        return RIN_GPU_ERROR_BOUNDS;
+    group = io->graphics_bind_group;
+    if (resource >= group->binding_count ||
+        group->kinds[resource] != RIN_SHADER_RESOURCE_STORAGE_IMAGE ||
+        (group->kinds[resource] == RIN_SHADER_RESOURCE_STORAGE_IMAGE &&
+         (group->images[resource] == NULL ||
+          (group->pipeline == NULL))) ||
+        (group->pipeline != NULL && access == 0u))
+        return RIN_GPU_ERROR_UNSUPPORTED;
+    image = group->images[resource];
+    view = *image;
+    result = sw_image_select_subresource(
+        &view, group->image_base_mip_levels[resource],
+        group->image_array_layers[resource]);
+    if (result != RIN_GPU_OK || view.desc.dimension != RIN_GPU_IMAGE_DIMENSION_2D ||
+        view.desc.format != RIN_GPU_FORMAT_R8_UNORM ||
+        view.desc.sample_count != 1u ||
+        (view.desc.usage & RIN_GPU_IMAGE_STORAGE) == 0u ||
+        (uint32_t)x >= view.desc.width || (uint32_t)y >= view.desc.height ||
+        !sw_image_pixel_offset(&view, (uint32_t)x, (uint32_t)y, 1u, &offset) ||
+        offset >= view.size_bytes)
+        return result != RIN_GPU_OK ? result : RIN_GPU_ERROR_BOUNDS;
+    *address_out = view.bytes + offset;
+    return RIN_GPU_OK;
+}
+
 static int sw_run_shader_typed(const SwShader* shader, const SwShaderIo* io)
 {
     const RinShaderHeaderV1* header;
@@ -3974,6 +4039,67 @@ static int sw_run_shader_typed(const SwShader* shader, const SwShaderIo* io)
                     return RIN_GPU_ERROR_BACKEND;
                 memcpy(address, &f32_registers[in->source1],
                        sizeof(f32_registers[in->source1]));
+            }
+            break;
+        }
+        case RIN_SHADER_OP_LOAD_IMAGE_2D_I32:
+        case RIN_SHADER_OP_LOAD_IMAGE_2D_F32: {
+            uint8_t* address;
+            if (in->destination == RIN_SHADER_UNUSED ||
+                in->source0 == RIN_SHADER_UNUSED ||
+                in->source1 == RIN_SHADER_UNUSED ||
+                in->resource >= header->resource_count || in->immediate != 0u ||
+                in->flags != 0u || header->stage != RIN_SHADER_STAGE_FRAGMENT ||
+                register_types[in->source0] != SW_SHADER_VALUE_I32 ||
+                register_types[in->source1] != SW_SHADER_VALUE_I32)
+                return RIN_GPU_ERROR_UNSUPPORTED;
+            result = sw_storage_image_address(
+                io, in->resource, i32_registers[in->source0],
+                i32_registers[in->source1], RIN_GPU_RESOURCE_READ, &address);
+            if (result != RIN_GPU_OK) return result;
+            if (in->opcode == RIN_SHADER_OP_LOAD_IMAGE_2D_I32) {
+                i32_registers[in->destination] = (int32_t)*address;
+                register_types[in->destination] = SW_SHADER_VALUE_I32;
+            } else {
+                f32_registers[in->destination] = (float)*address / 255.0f;
+                f32_register_dx[in->destination] = 0.0f;
+                f32_register_dy[in->destination] = 0.0f;
+                register_types[in->destination] = SW_SHADER_VALUE_F32;
+            }
+            break;
+        }
+        case RIN_SHADER_OP_STORE_IMAGE_2D_I32:
+        case RIN_SHADER_OP_STORE_IMAGE_2D_F32: {
+            uint8_t* address;
+            if (in->destination == RIN_SHADER_UNUSED ||
+                in->source0 == RIN_SHADER_UNUSED ||
+                in->source1 == RIN_SHADER_UNUSED ||
+                in->resource >= header->resource_count || in->immediate != 0u ||
+                in->flags != 0u || header->stage != RIN_SHADER_STAGE_FRAGMENT ||
+                register_types[in->source0] != SW_SHADER_VALUE_I32 ||
+                register_types[in->source1] != SW_SHADER_VALUE_I32)
+                return RIN_GPU_ERROR_UNSUPPORTED;
+            result = sw_storage_image_address(
+                io, in->resource, i32_registers[in->source0],
+                i32_registers[in->source1], RIN_GPU_RESOURCE_WRITE, &address);
+            if (result != RIN_GPU_OK) return result;
+            if (in->opcode == RIN_SHADER_OP_STORE_IMAGE_2D_I32) {
+                if (register_types[in->destination] != SW_SHADER_VALUE_I32 ||
+                    i32_registers[in->destination] < 0 ||
+                    i32_registers[in->destination] > 255)
+                    return RIN_GPU_ERROR_BOUNDS;
+                *address = (uint8_t)i32_registers[in->destination];
+            } else {
+                float value;
+                if (register_types[in->destination] != SW_SHADER_VALUE_F32 ||
+                    !sw_f32_finite(f32_registers[in->destination]) ||
+                    f32_registers[in->destination] < 0.0f ||
+                    f32_registers[in->destination] > 1.0f)
+                    return RIN_GPU_ERROR_BOUNDS;
+                value = f32_registers[in->destination] * 255.0f + 0.5f;
+                if (value < 0.0f || value > 255.0f)
+                    return RIN_GPU_ERROR_BOUNDS;
+                *address = (uint8_t)value;
             }
             break;
         }

@@ -115,6 +115,24 @@ int ringpu_shader_resource_layout(const RinGpuObjectSlot* shader,
             kinds[instruction->resource] = RIN_SHADER_RESOURCE_STORAGE_BUFFER;
             access[instruction->resource] |= RIN_GPU_RESOURCE_READ |
                                              RIN_GPU_RESOURCE_WRITE;
+        } else if (instruction->opcode == RIN_SHADER_OP_LOAD_IMAGE_2D_I32 ||
+                   instruction->opcode == RIN_SHADER_OP_LOAD_IMAGE_2D_F32) {
+            if (kinds[instruction->resource] != RIN_SHADER_RESOURCE_NONE &&
+                kinds[instruction->resource] !=
+                    RIN_SHADER_RESOURCE_STORAGE_IMAGE) {
+                return RIN_GPU_ERROR_SHADER_INVALID;
+            }
+            kinds[instruction->resource] = RIN_SHADER_RESOURCE_STORAGE_IMAGE;
+            access[instruction->resource] |= RIN_GPU_RESOURCE_READ;
+        } else if (instruction->opcode == RIN_SHADER_OP_STORE_IMAGE_2D_I32 ||
+                   instruction->opcode == RIN_SHADER_OP_STORE_IMAGE_2D_F32) {
+            if (kinds[instruction->resource] != RIN_SHADER_RESOURCE_NONE &&
+                kinds[instruction->resource] !=
+                    RIN_SHADER_RESOURCE_STORAGE_IMAGE) {
+                return RIN_GPU_ERROR_SHADER_INVALID;
+            }
+            kinds[instruction->resource] = RIN_SHADER_RESOURCE_STORAGE_IMAGE;
+            access[instruction->resource] |= RIN_GPU_RESOURCE_WRITE;
         } else if (instruction->opcode == RIN_SHADER_OP_SAMPLE_IMAGE_I32 ||
                    instruction->opcode == RIN_SHADER_OP_SAMPLE_IMAGE_F32 ||
                    instruction->opcode == RIN_SHADER_OP_SAMPLE_IMAGE_2D_I32 ||
@@ -690,6 +708,61 @@ int ringpu_shader_validate(const void* shader, size_t shader_size,
                     result = RIN_SHADER_ERROR_INVALID_RESOURCE;
                 }
                 break;
+            case RIN_SHADER_OP_LOAD_IMAGE_2D_I32:
+            case RIN_SHADER_OP_LOAD_IMAGE_2D_F32: {
+                enum ShaderValueType type = instruction->opcode ==
+                        RIN_SHADER_OP_LOAD_IMAGE_2D_I32
+                    ? SHADER_VALUE_I32 : SHADER_VALUE_F32;
+                if (header.stage != RIN_SHADER_STAGE_FRAGMENT ||
+                    !shader_register(instruction->destination,
+                                     header.register_count) ||
+                    !shader_register(instruction->source0,
+                                     header.register_count) ||
+                    !shader_register(instruction->source1,
+                                     header.register_count) ||
+                    instruction->resource >= header.resource_count ||
+                    instruction->immediate != 0u || instruction->flags != 0u ||
+                    !shader_has_type(i32_state, f32_state,
+                                     instruction->source0, SHADER_VALUE_I32) ||
+                    !shader_has_type(i32_state, f32_state,
+                                     instruction->source1, SHADER_VALUE_I32) ||
+                    !shader_resource_set_kind(
+                        resource_kinds, instruction->resource,
+                        RIN_SHADER_RESOURCE_STORAGE_IMAGE)) {
+                    result = RIN_SHADER_ERROR_INVALID_RESOURCE;
+                    break;
+                }
+                shader_define(i32_state, f32_state,
+                              instruction->destination, type);
+                break;
+            }
+            case RIN_SHADER_OP_STORE_IMAGE_2D_I32:
+            case RIN_SHADER_OP_STORE_IMAGE_2D_F32: {
+                enum ShaderValueType type = instruction->opcode ==
+                        RIN_SHADER_OP_STORE_IMAGE_2D_I32
+                    ? SHADER_VALUE_I32 : SHADER_VALUE_F32;
+                if (header.stage != RIN_SHADER_STAGE_FRAGMENT ||
+                    !shader_register(instruction->destination,
+                                     header.register_count) ||
+                    !shader_register(instruction->source0,
+                                     header.register_count) ||
+                    !shader_register(instruction->source1,
+                                     header.register_count) ||
+                    instruction->resource >= header.resource_count ||
+                    instruction->immediate != 0u || instruction->flags != 0u ||
+                    !shader_has_type(i32_state, f32_state,
+                                     instruction->destination, type) ||
+                    !shader_has_type(i32_state, f32_state,
+                                     instruction->source0, SHADER_VALUE_I32) ||
+                    !shader_has_type(i32_state, f32_state,
+                                     instruction->source1, SHADER_VALUE_I32) ||
+                    !shader_resource_set_kind(
+                        resource_kinds, instruction->resource,
+                        RIN_SHADER_RESOURCE_STORAGE_IMAGE)) {
+                    result = RIN_SHADER_ERROR_INVALID_RESOURCE;
+                }
+                break;
+            }
             }
             case RIN_SHADER_OP_ATOMIC_ADD_I32:
             case RIN_SHADER_OP_ATOMIC_EXCHANGE_I32:

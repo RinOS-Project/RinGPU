@@ -106,7 +106,10 @@ typedef enum RinShaderResourceKind {
     RIN_SHADER_RESOURCE_SAMPLED_IMAGE = 2,
     RIN_SHADER_RESOURCE_SAMPLER = 3,
     RIN_SHADER_RESOURCE_SAMPLED_DEPTH_IMAGE = 4,
-    RIN_SHADER_RESOURCE_COMPARISON_SAMPLER = 5
+    RIN_SHADER_RESOURCE_COMPARISON_SAMPLER = 5,
+    /* Bounded fragment storage-image profile.  The software backend accepts
+     * only a 2D single-sample R8_UNORM view; other formats stay fail-closed. */
+    RIN_SHADER_RESOURCE_STORAGE_IMAGE = 6
 } RinShaderResourceKind;
 
 typedef enum RinShaderOpcode {
@@ -223,7 +226,14 @@ typedef enum RinShaderOpcode {
     RIN_SHADER_OP_LOAD_SHARED_I32 = 80,
     RIN_SHADER_OP_STORE_SHARED_I32 = 81,
     RIN_SHADER_OP_WORKGROUP_BARRIER = 82,
-    RIN_SHADER_OP_LAST = RIN_SHADER_OP_WORKGROUP_BARRIER
+    /* Storage-image coordinates are I32 x/y registers.  LOAD writes the
+     * destination register; STORE uses destination as the value register.
+     * `resource` names the image and immediate/flags must be zero. */
+    RIN_SHADER_OP_LOAD_IMAGE_2D_I32 = 83,
+    RIN_SHADER_OP_STORE_IMAGE_2D_I32 = 84,
+    RIN_SHADER_OP_LOAD_IMAGE_2D_F32 = 85,
+    RIN_SHADER_OP_STORE_IMAGE_2D_F32 = 86,
+    RIN_SHADER_OP_LAST = RIN_SHADER_OP_STORE_IMAGE_2D_F32
 } RinShaderOpcode;
 
 typedef enum RinShaderBuiltin {

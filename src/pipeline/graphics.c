@@ -875,7 +875,8 @@ int ringpu_create_graphics_pipeline_native_vertex_bindings_v2(
 
 int ringpu_graphics_image_kind(uint32_t kind) {
     return kind == RIN_SHADER_RESOURCE_SAMPLED_IMAGE ||
-           kind == RIN_SHADER_RESOURCE_SAMPLED_DEPTH_IMAGE;
+           kind == RIN_SHADER_RESOURCE_SAMPLED_DEPTH_IMAGE ||
+           kind == RIN_SHADER_RESOURCE_STORAGE_IMAGE;
 }
 
 int ringpu_graphics_sampler_kind(uint32_t kind) {
@@ -1041,6 +1042,24 @@ int ringpu_create_graphics_bind_group_typed(
             backend_bindings[binding->binding].offset = binding->offset;
             backend_bindings[binding->binding].size_bytes =
                 binding->size_bytes;
+        } else if (binding->kind == RIN_SHADER_RESOURCE_STORAGE_IMAGE) {
+            const RinGpuImageDescV1* desc = &resource->value.image.descriptor;
+            if (binding->access == 0u ||
+                (binding->access & ~RIN_GPU_RESOURCE_KNOWN_ACCESS) != 0u ||
+                binding->offset != 0u || binding->size_bytes != 0u ||
+                binding->flags != 0u || binding->mip_level >= desc->mip_levels ||
+                binding->array_layer >= desc->array_layers ||
+                desc->dimension != RIN_GPU_IMAGE_DIMENSION_2D ||
+                desc->format != RIN_GPU_FORMAT_R8_UNORM ||
+                desc->sample_count != 1u ||
+                (desc->usage & RIN_GPU_IMAGE_STORAGE) == 0u) {
+                result = RIN_GPU_ERROR_STATE;
+                goto fail;
+            }
+            backend_bindings[binding->binding].mip_level =
+                binding->mip_level;
+            backend_bindings[binding->binding].array_layer =
+                binding->array_layer;
         } else if (ringpu_graphics_image_kind(binding->kind)) {
             const RinGpuImageDescV1* desc = &resource->value.image.descriptor;
             if (binding->access != RIN_GPU_RESOURCE_READ ||
@@ -1219,6 +1238,20 @@ int ringpu_validate_graphics_bind_group(
                 !ringpu_buffer_upload_ready(resource) ||
                 !ringpu_range(binding->offset, binding->size_bytes,
                               resource->value.buffer.size_bytes)) {
+                return RIN_GPU_ERROR_STATE;
+            }
+        } else if (binding->kind == RIN_SHADER_RESOURCE_STORAGE_IMAGE) {
+            const RinGpuImageDescV1* desc = &resource->value.image.descriptor;
+            if (binding->access == 0u ||
+                (binding->access & ~RIN_GPU_RESOURCE_KNOWN_ACCESS) != 0u ||
+                binding->offset != 0u || binding->size_bytes != 0u ||
+                binding->flags != 0u ||
+                desc->dimension != RIN_GPU_IMAGE_DIMENSION_2D ||
+                desc->format != RIN_GPU_FORMAT_R8_UNORM ||
+                desc->sample_count != 1u ||
+                (desc->usage & RIN_GPU_IMAGE_STORAGE) == 0u ||
+                binding->mip_level >= desc->mip_levels ||
+                binding->array_layer >= desc->array_layers) {
                 return RIN_GPU_ERROR_STATE;
             }
         } else if (ringpu_graphics_image_kind(binding->kind)) {
