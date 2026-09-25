@@ -81,6 +81,9 @@ int ringpu_runtime_create_fence(RinGpuRuntime* runtime,
 int ringpu_runtime_create_command_list(
     RinGpuRuntime* runtime, const RinGpuCommandListDescV1* desc,
     RinGpuHandle* command_list_out);
+int ringpu_runtime_create_query(RinGpuRuntime* runtime,
+                                const RinGpuQueryDescV1* desc,
+                                RinGpuHandle* query_out);
 int ringpu_runtime_get_image_info(const RinGpuRuntime* runtime,
                                   RinGpuHandle image,
                                   RinGpuImageInfoV1* info);
@@ -146,6 +149,15 @@ int ringpu_runtime_command_list_reset(RinGpuRuntime* runtime,
                                       RinGpuHandle command_list);
 int ringpu_runtime_command_list_close(RinGpuRuntime* runtime,
                                       RinGpuHandle command_list);
+int ringpu_runtime_command_begin_query(RinGpuRuntime* runtime,
+                                       RinGpuHandle command_list,
+                                       RinGpuHandle query);
+int ringpu_runtime_command_end_query(RinGpuRuntime* runtime,
+                                     RinGpuHandle command_list,
+                                     RinGpuHandle query);
+int ringpu_runtime_command_reset_query(RinGpuRuntime* runtime,
+                                       RinGpuHandle command_list,
+                                       RinGpuHandle query);
 int ringpu_runtime_command_copy_buffer(
     RinGpuRuntime* runtime, RinGpuHandle command_list,
     RinGpuHandle destination, uint64_t destination_offset,
@@ -226,6 +238,9 @@ int ringpu_runtime_command_present(RinGpuRuntime* runtime,
                                    const RinGpuPresentV1* present);
 int ringpu_runtime_wait_fence(RinGpuRuntime* runtime, RinGpuHandle fence,
                               uint64_t value, uint64_t timeout_ns);
+int ringpu_runtime_get_query_result(RinGpuRuntime* runtime,
+                                    RinGpuHandle query, uint32_t flags,
+                                    RinGpuQueryResultV1* result);
 int ringpu_runtime_readback_image(
     RinGpuRuntime* runtime, RinGpuHandle image,
     const RinGpuImageReadbackV1* readback, void* destination,

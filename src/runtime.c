@@ -230,6 +230,15 @@ int ringpu_runtime_create_command_list(
     return ringpu_create_command_list(&runtime->core, desc, command_list_out);
 }
 
+int ringpu_runtime_create_query(RinGpuRuntime* runtime,
+                                const RinGpuQueryDescV1* desc,
+                                RinGpuHandle* query_out)
+{
+    if (runtime == NULL || runtime->initialized != RIN_GPU_RUNTIME_VERSION)
+        return RIN_GPU_ERROR_STATE;
+    return ringpu_create_query(&runtime->core, desc, query_out);
+}
+
 int ringpu_runtime_get_image_info(const RinGpuRuntime* runtime,
                                   RinGpuHandle image,
                                   RinGpuImageInfoV1* info)
@@ -410,6 +419,33 @@ int ringpu_runtime_command_list_close(RinGpuRuntime* runtime,
     if (runtime == NULL || runtime->initialized != RIN_GPU_RUNTIME_VERSION)
         return RIN_GPU_ERROR_STATE;
     return ringpu_command_list_close(&runtime->core, command_list);
+}
+
+int ringpu_runtime_command_begin_query(RinGpuRuntime* runtime,
+                                       RinGpuHandle command_list,
+                                       RinGpuHandle query)
+{
+    if (runtime == NULL || runtime->initialized != RIN_GPU_RUNTIME_VERSION)
+        return RIN_GPU_ERROR_STATE;
+    return ringpu_command_begin_query(&runtime->core, command_list, query);
+}
+
+int ringpu_runtime_command_end_query(RinGpuRuntime* runtime,
+                                     RinGpuHandle command_list,
+                                     RinGpuHandle query)
+{
+    if (runtime == NULL || runtime->initialized != RIN_GPU_RUNTIME_VERSION)
+        return RIN_GPU_ERROR_STATE;
+    return ringpu_command_end_query(&runtime->core, command_list, query);
+}
+
+int ringpu_runtime_command_reset_query(RinGpuRuntime* runtime,
+                                       RinGpuHandle command_list,
+                                       RinGpuHandle query)
+{
+    if (runtime == NULL || runtime->initialized != RIN_GPU_RUNTIME_VERSION)
+        return RIN_GPU_ERROR_STATE;
+    return ringpu_command_reset_query(&runtime->core, command_list, query);
 }
 
 int ringpu_runtime_command_copy_buffer(
@@ -663,6 +699,15 @@ int ringpu_runtime_wait_fence(RinGpuRuntime* runtime, RinGpuHandle fence,
     if (runtime == NULL || runtime->initialized != RIN_GPU_RUNTIME_VERSION)
         return RIN_GPU_ERROR_STATE;
     return ringpu_wait_fence(&runtime->core, fence, value, timeout_ns);
+}
+
+int ringpu_runtime_get_query_result(RinGpuRuntime* runtime,
+                                    RinGpuHandle query, uint32_t flags,
+                                    RinGpuQueryResultV1* result)
+{
+    if (runtime == NULL || runtime->initialized != RIN_GPU_RUNTIME_VERSION)
+        return RIN_GPU_ERROR_STATE;
+    return ringpu_get_query_result(&runtime->core, query, flags, result);
 }
 
 int ringpu_runtime_readback_image(
