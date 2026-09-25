@@ -297,7 +297,14 @@ int ringpu_shader_validate(const void* shader, size_t shader_size,
         header.version != RIN_SHADER_IR_VERSION ||
         header.header_size != sizeof(header) ||
         (header.flags & ~RIN_SHADER_KNOWN_FLAGS) != 0u ||
-        header.reserved0 != 0u || header.reserved1 != 0u ||
+        header.reserved1 != 0u ||
+        ((header.flags & RIN_SHADER_FLAG_WORKGROUP_SHARED) == 0u &&
+         header.reserved0 != 0u) ||
+        ((header.flags & RIN_SHADER_FLAG_WORKGROUP_SHARED) != 0u &&
+         (header.stage != RIN_SHADER_STAGE_COMPUTE ||
+          header.reserved0 == 0u ||
+          header.reserved0 > RIN_SHADER_MAX_WORKGROUP_SHARED_BYTES ||
+          (header.reserved0 & 3u) != 0u)) ||
         header.entry_instruction != 0u) {
         return RIN_SHADER_ERROR_BAD_HEADER;
     }
@@ -328,6 +335,13 @@ int ringpu_shader_validate(const void* shader, size_t shader_size,
         workgroup_size = (uint64_t)header.workgroup_x * header.workgroup_y *
                          header.workgroup_z;
         if (workgroup_size > 1024u) return RIN_SHADER_ERROR_BAD_HEADER;
+        /* The bounded executor has no resumable per-invocation continuation
+         * yet. Reject multi-invocation rendezvous instead of turning a
+         * barrier into an order-dependent success. */
+        if ((header.flags & RIN_SHADER_FLAG_WORKGROUP_SHARED) != 0u &&
+            workgroup_size != 1u) {
+            return RIN_SHADER_ERROR_UNSUPPORTED;
+        }
     } else if (header.workgroup_x != 0u || header.workgroup_y != 0u ||
                header.workgroup_z != 0u) {
         return RIN_SHADER_ERROR_BAD_HEADER;
@@ -699,6 +713,51 @@ int ringpu_shader_validate(const void* shader, size_t shader_size,
                 }
                 shader_define(i32_state, f32_state,
                               instruction->destination, SHADER_VALUE_I32);
+                break;
+            case RIN_SHADER_OP_LOAD_SHARED_I32:
+                if (header.stage != RIN_SHADER_STAGE_COMPUTE ||
+                    (header.flags & RIN_SHADER_FLAG_WORKGROUP_SHARED) == 0u ||
+                    !shader_register(instruction->destination,
+                                     header.register_count) ||
+                    !shader_register(instruction->source0,
+                                     header.register_count) ||
+                    !shader_unused(instruction->source1) ||
+                    !shader_unused(instruction->resource) ||
+                    instruction->immediate != 0u ||
+                    !shader_has_type(i32_state, f32_state,
+                                     instruction->source0,
+                                     SHADER_VALUE_I32)) {
+                    result = RIN_SHADER_ERROR_INVALID_RESOURCE;
+                    break;
+                }
+                shader_define(i32_state, f32_state,
+                              instruction->destination, SHADER_VALUE_I32);
+                break;
+            case RIN_SHADER_OP_STORE_SHARED_I32:
+                if (header.stage != RIN_SHADER_STAGE_COMPUTE ||
+                    (header.flags & RIN_SHADER_FLAG_WORKGROUP_SHARED) == 0u ||
+                    !shader_unused(instruction->destination) ||
+                    !shader_register(instruction->source0,
+                                     header.register_count) ||
+                    !shader_register(instruction->source1,
+                                     header.register_count) ||
+                    !shader_unused(instruction->resource) ||
+                    instruction->immediate != 0u ||
+                    !shader_has_type(i32_state, f32_state,
+                                     instruction->source0,
+                                     SHADER_VALUE_I32) ||
+                    !shader_has_type(i32_state, f32_state,
+                                     instruction->source1,
+                                     SHADER_VALUE_I32)) {
+                    result = RIN_SHADER_ERROR_INVALID_RESOURCE;
+                }
+                break;
+            case RIN_SHADER_OP_WORKGROUP_BARRIER:
+                if (header.stage != RIN_SHADER_STAGE_COMPUTE ||
+                    (header.flags & RIN_SHADER_FLAG_WORKGROUP_SHARED) == 0u ||
+                    !shader_plain_operands(instruction)) {
+                    result = RIN_SHADER_ERROR_INVALID_INSTRUCTION;
+                }
                 break;
             case RIN_SHADER_OP_SAMPLE_IMAGE_I32:
             case RIN_SHADER_OP_SAMPLE_IMAGE_F32: {

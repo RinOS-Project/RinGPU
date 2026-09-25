@@ -15,8 +15,11 @@
 #define RIN_SHADER_MAX_RESOURCES 64u
 #define RIN_SHADER_UNUSED UINT16_C(0xffff)
 #define RIN_SHADER_PUSH_CONSTANT_BYTES 128u
+#define RIN_SHADER_MAX_WORKGROUP_SHARED_BYTES (64u * 1024u)
 #define RIN_SHADER_FLAG_PUSH_CONSTANTS UINT32_C(0x00000001)
-#define RIN_SHADER_KNOWN_FLAGS RIN_SHADER_FLAG_PUSH_CONSTANTS
+#define RIN_SHADER_FLAG_WORKGROUP_SHARED UINT32_C(0x00000002)
+#define RIN_SHADER_KNOWN_FLAGS \
+    (RIN_SHADER_FLAG_PUSH_CONSTANTS | RIN_SHADER_FLAG_WORKGROUP_SHARED)
 
 /* `SAMPLE_IMAGE_I32`/`SAMPLE_IMAGE_F32` use source0 as one normalized
  * coordinate for a 1D image; source1 is unused. `SAMPLE_COMPARE_*` uses
@@ -215,7 +218,12 @@ typedef enum RinShaderOpcode {
     RIN_SHADER_OP_ATOMIC_EXCHANGE_I32 = 77,
     RIN_SHADER_OP_ATOMIC_MIN_I32 = 78,
     RIN_SHADER_OP_ATOMIC_MAX_I32 = 79,
-    RIN_SHADER_OP_LAST = RIN_SHADER_OP_ATOMIC_MAX_I32
+    /* Shared memory uses source0 as an aligned byte offset. LOAD writes an
+     * I32 destination; STORE uses source1 as the I32 value. */
+    RIN_SHADER_OP_LOAD_SHARED_I32 = 80,
+    RIN_SHADER_OP_STORE_SHARED_I32 = 81,
+    RIN_SHADER_OP_WORKGROUP_BARRIER = 82,
+    RIN_SHADER_OP_LAST = RIN_SHADER_OP_WORKGROUP_BARRIER
 } RinShaderOpcode;
 
 typedef enum RinShaderBuiltin {
@@ -268,6 +276,8 @@ typedef struct RIN_SHADER_PACKED RinShaderHeaderV1 {
     uint32_t workgroup_y;
     uint32_t workgroup_z;
     uint32_t entry_instruction;
+    /* When WORKGROUP_SHARED is set, reserved0 is the shared byte count.
+     * Otherwise it must remain zero. */
     uint32_t reserved0;
     uint32_t reserved1;
 } RinShaderHeaderV1;
