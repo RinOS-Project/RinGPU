@@ -42,6 +42,11 @@ operations needed by a compatibility layer such as RinGL.  Consumers should
 link the exported `RinGPU::RinGPU` target (or the installed `ringpu` package)
 and must not include `src/` headers.
 
+The same runtime seam exposes validated buffer/image copy, resolve, and clear
+commands. Command-list reference release covers every transfer command, so a
+completed clear or blit cannot leave a resource falsely busy; malformed
+regions, state, format, and aspect combinations still fail closed.
+
 ## Public API contract
 
 | Requirement | Contract |
