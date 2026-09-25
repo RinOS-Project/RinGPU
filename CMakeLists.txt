@@ -147,4 +147,11 @@ if(RINGPU_BUILD_DIFFERENTIAL_TESTS)
                                PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests/differential)
     target_link_libraries(ringpu-differential-test PRIVATE RinGPU::RinGPU)
     add_test(NAME ringpu-differential COMMAND ringpu-differential-test)
+    add_executable(ringpu-determinism-test
+                   tests/differential/determinism_test.c
+                   tests/differential/differential.c)
+    target_include_directories(ringpu-determinism-test
+                               PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests/differential)
+    target_link_libraries(ringpu-determinism-test PRIVATE RinGPU::RinGPU)
+    add_test(NAME ringpu-determinism COMMAND ringpu-determinism-test)
 endif()
