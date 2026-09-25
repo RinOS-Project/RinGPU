@@ -44,6 +44,7 @@ uint32_t ringpu_image_format_bytes(uint32_t format)
     case RIN_GPU_FORMAT_RGBA8_SRGB:
     case RIN_GPU_FORMAT_BGRA8_SRGB:
     case RIN_GPU_FORMAT_D32_FLOAT:
+    case RIN_GPU_FORMAT_BC1_RGBA_UNORM:
         return 4u;
     case RIN_GPU_FORMAT_D32_FLOAT_S8_UINT:
     case RIN_GPU_FORMAT_RGBA16_FLOAT:
@@ -65,6 +66,7 @@ int ringpu_color_format(uint32_t format)
            format == RIN_GPU_FORMAT_BGRA8_UNORM ||
            format == RIN_GPU_FORMAT_RGBA8_SRGB ||
            format == RIN_GPU_FORMAT_BGRA8_SRGB ||
+           format == RIN_GPU_FORMAT_BC1_RGBA_UNORM ||
            format == RIN_GPU_FORMAT_RGBA16_FLOAT ||
            format == RIN_GPU_FORMAT_RGBA32_FLOAT;
 }
@@ -190,6 +192,16 @@ int ringpu_image_allocation_size(const RinGpuCore* core,
             RIN_GPU_IMAGE_COPY_SOURCE) & RIN_GPU_IMAGE_KNOWN_USAGE;
         if ((desc->usage & forbidden_usage) != 0u)
             return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    } else if (desc->format == RIN_GPU_FORMAT_BC1_RGBA_UNORM) {
+        forbidden_usage = ~(RIN_GPU_IMAGE_COPY_DESTINATION |
+            RIN_GPU_IMAGE_SAMPLED | RIN_GPU_IMAGE_COPY_SOURCE) &
+            RIN_GPU_IMAGE_KNOWN_USAGE;
+        if ((desc->usage & forbidden_usage) != 0u ||
+            desc->sample_count != 1u ||
+            desc->dimension != RIN_GPU_IMAGE_DIMENSION_2D ||
+            desc->depth != 1u) {
+            return RIN_GPU_ERROR_INVALID_ARGUMENT;
+        }
     } else if ((desc->usage & RIN_GPU_IMAGE_DEPTH_STENCIL) != 0u) {
         return RIN_GPU_ERROR_INVALID_ARGUMENT;
     }
@@ -327,6 +339,21 @@ int ringpu_image_upload_source_valid(
     format_bytes = ringpu_image_format_bytes(desc->format);
     if (format_bytes == 0u)
         return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    if (desc->format == RIN_GPU_FORMAT_BC1_RGBA_UNORM) {
+        uint64_t block_width = ((uint64_t)upload->width + 3u) / 4u;
+        uint64_t block_height = ((uint64_t)upload->height + 3u) / 4u;
+
+        if ((upload->x & 3u) != 0u || (upload->y & 3u) != 0u ||
+            block_width == 0u || block_height == 0u ||
+            !ringpu_multiply_u64(block_width, 8u, &block_width) ||
+            block_width > UINT32_MAX || block_height > UINT32_MAX) {
+            return RIN_GPU_ERROR_INVALID_ARGUMENT;
+        }
+        return image_transfer_size_valid(
+            (uint32_t)block_width, (uint32_t)block_height, upload->depth,
+            1u, &upload->source_row_pitch_bytes,
+            &upload->source_slice_pitch_bytes, source_size);
+    }
     return image_transfer_size_valid(
             upload->width, upload->height, upload->depth, format_bytes,
             &upload->source_row_pitch_bytes,

@@ -1211,6 +1211,7 @@ static uint32_t sw_image_bytes_per_pixel(uint32_t format)
         format == RIN_GPU_FORMAT_BGRA8_UNORM ||
         format == RIN_GPU_FORMAT_RGBA8_SRGB ||
         format == RIN_GPU_FORMAT_BGRA8_SRGB ||
+        format == RIN_GPU_FORMAT_BC1_RGBA_UNORM ||
         format == RIN_GPU_FORMAT_D32_FLOAT) {
         return 4u;
     }
@@ -1515,6 +1516,7 @@ static int sw_validate_sampled_image_2d(const SwImage* image)
          image->desc.format != RIN_GPU_FORMAT_BGRA8_UNORM &&
          image->desc.format != RIN_GPU_FORMAT_RGBA8_SRGB &&
          image->desc.format != RIN_GPU_FORMAT_BGRA8_SRGB &&
+         image->desc.format != RIN_GPU_FORMAT_BC1_RGBA_UNORM &&
          image->desc.format != RIN_GPU_FORMAT_RGBA16_FLOAT &&
          image->desc.format != RIN_GPU_FORMAT_RGBA32_FLOAT &&
          image->desc.format != RIN_GPU_FORMAT_D32_FLOAT &&
@@ -1531,6 +1533,111 @@ static int sw_validate_sampled_image_2d(const SwImage* image)
         !sw_add_u64(trailing_rows, row_bytes, &required_bytes) ||
         required_bytes > image->size_bytes) {
         return RIN_GPU_ERROR_BOUNDS;
+    }
+    return RIN_GPU_OK;
+}
+
+static void sw_bc1_decode_color(uint16_t packed, uint8_t color[4])
+{
+    color[0] = (uint8_t)((((packed >> 11u) & 0x1fu) * 255u + 15u) / 31u);
+    color[1] = (uint8_t)((((packed >> 5u) & 0x3fu) * 255u + 31u) / 63u);
+    color[2] = (uint8_t)(((packed & 0x1fu) * 255u + 15u) / 31u);
+    color[3] = 255u;
+}
+
+/* BC1 upload is an explicit software profile: the input is block-compressed
+ * DXT1 data, while the image backing is canonical RGBA8 so existing sample,
+ * copy, blit, and readback code never guesses at block addressing. */
+static int sw_upload_bc1_image(SwImage* image,
+                               const RinGpuImageUploadV1* upload,
+                               const void* source, uint64_t source_size)
+{
+    uint64_t block_width;
+    uint64_t block_height;
+    uint64_t row_bytes;
+    uint64_t minimum_slice_pitch;
+    uint64_t source_row_pitch;
+    uint64_t source_slice_pitch;
+    uint64_t required_size;
+
+    if (!image || !upload || !source || source_size == 0u ||
+        image->desc.format != RIN_GPU_FORMAT_BC1_RGBA_UNORM ||
+        image->desc.dimension != RIN_GPU_IMAGE_DIMENSION_2D ||
+        image->desc.depth != 1u || upload->depth != 1u ||
+        (upload->x & 3u) != 0u || (upload->y & 3u) != 0u) {
+        return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    }
+    block_width = ((uint64_t)upload->width + 3u) / 4u;
+    block_height = ((uint64_t)upload->height + 3u) / 4u;
+    if (block_width == 0u || block_height == 0u ||
+        !sw_multiply_u64(block_width, 8u, &row_bytes)) {
+        return RIN_GPU_ERROR_BOUNDS;
+    }
+    source_row_pitch = upload->source_row_pitch_bytes != 0u
+        ? upload->source_row_pitch_bytes : row_bytes;
+    if (!sw_multiply_u64(row_bytes, block_height, &minimum_slice_pitch))
+        return RIN_GPU_ERROR_BOUNDS;
+    source_slice_pitch = upload->source_slice_pitch_bytes != 0u
+        ? upload->source_slice_pitch_bytes
+        : minimum_slice_pitch;
+    if (source_row_pitch < row_bytes ||
+        source_slice_pitch < minimum_slice_pitch ||
+        !sw_multiply_u64(block_height - 1u, source_row_pitch,
+                         &required_size) ||
+        !sw_add_u64(required_size, row_bytes, &required_size) ||
+        source_size < required_size) {
+        return RIN_GPU_ERROR_BOUNDS;
+    }
+    for (uint64_t block_y = 0u; block_y < block_height; ++block_y) {
+        for (uint64_t block_x = 0u; block_x < block_width; ++block_x) {
+            const uint8_t* block = (const uint8_t*)source +
+                block_y * source_row_pitch + block_x * 8u;
+            uint16_t color0 = (uint16_t)block[0] |
+                              ((uint16_t)block[1] << 8u);
+            uint16_t color1 = (uint16_t)block[2] |
+                              ((uint16_t)block[3] << 8u);
+            uint32_t indices = (uint32_t)block[4] |
+                               ((uint32_t)block[5] << 8u) |
+                               ((uint32_t)block[6] << 16u) |
+                               ((uint32_t)block[7] << 24u);
+            uint8_t colors[4][4];
+
+            sw_bc1_decode_color(color0, colors[0]);
+            sw_bc1_decode_color(color1, colors[1]);
+            if (color0 > color1) {
+                for (uint32_t component = 0u; component < 4u; ++component) {
+                    colors[2][component] = (uint8_t)(
+                        (2u * colors[0][component] +
+                         colors[1][component]) / 3u);
+                    colors[3][component] = (uint8_t)(
+                        (colors[0][component] +
+                         2u * colors[1][component]) / 3u);
+                }
+            } else {
+                for (uint32_t component = 0u; component < 4u; ++component)
+                    colors[2][component] = (uint8_t)(
+                        (colors[0][component] + colors[1][component]) / 2u);
+                memset(colors[3], 0, sizeof(colors[3]));
+            }
+            for (uint32_t pixel_y = 0u; pixel_y < 4u; ++pixel_y) {
+                for (uint32_t pixel_x = 0u; pixel_x < 4u; ++pixel_x) {
+                    uint64_t x = upload->x + block_x * 4u + pixel_x;
+                    uint64_t y = upload->y + block_y * 4u + pixel_y;
+                    uint64_t offset;
+                    uint32_t index;
+
+                    if (x >= upload->x + upload->width ||
+                        y >= upload->y + upload->height)
+                        continue;
+                    index = (indices >> (2u * (pixel_y * 4u + pixel_x))) &
+                        3u;
+                    if (!sw_image_pixel_offset(image, (uint32_t)x,
+                                                (uint32_t)y, 4u, &offset))
+                        return RIN_GPU_ERROR_BOUNDS;
+                    memcpy(image->bytes + offset, colors[index], 4u);
+                }
+            }
+        }
     }
     return RIN_GPU_OK;
 }
@@ -1592,6 +1699,8 @@ static int sw_upload_image(void* opaque, uint64_t cookie,
         image->desc.dimension > RIN_GPU_IMAGE_DIMENSION_3D) {
         return RIN_GPU_ERROR_INVALID_ARGUMENT;
     }
+    if (image->desc.format == RIN_GPU_FORMAT_BC1_RGBA_UNORM)
+        return sw_upload_bc1_image(image, upload, source, source_size);
     bytes_per_pixel = sw_image_bytes_per_pixel(image->desc.format);
     if (bytes_per_pixel == 0u ||
         !sw_multiply_u64(upload->width, bytes_per_pixel, &row_bytes) ||
@@ -2802,7 +2911,8 @@ static int sw_sample_image_texel_component(const SwImage* image,
         return sw_f32_finite(*value_out) ? RIN_GPU_OK : RIN_GPU_ERROR_BACKEND;
     }
     if (image->desc.format == RIN_GPU_FORMAT_RGBA8_UNORM ||
-        image->desc.format == RIN_GPU_FORMAT_RGBA8_SRGB) {
+        image->desc.format == RIN_GPU_FORMAT_RGBA8_SRGB ||
+        image->desc.format == RIN_GPU_FORMAT_BC1_RGBA_UNORM) {
         uint8_t encoded = image->bytes[byte_offset + component];
 
         *value_out = (float)encoded / 255.0f;
@@ -5457,7 +5567,8 @@ static int sw_load_color_components(const SwImage* image, uint32_t x,
         return RIN_GPU_OK;
     }
     if (image->desc.format == RIN_GPU_FORMAT_RGBA8_UNORM ||
-        image->desc.format == RIN_GPU_FORMAT_RGBA8_SRGB) {
+        image->desc.format == RIN_GPU_FORMAT_RGBA8_SRGB ||
+        image->desc.format == RIN_GPU_FORMAT_BC1_RGBA_UNORM) {
         for (uint32_t component = 0u; component < 4u; ++component)
             color[component] = (float)pixel[component] / 255.0f;
         if (image->desc.format == RIN_GPU_FORMAT_RGBA8_SRGB &&

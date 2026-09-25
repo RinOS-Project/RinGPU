@@ -137,7 +137,11 @@ typedef enum RinGpuImageFormat {
      * formats are color targets and sampled images but are not presentable in
      * the bounded portable profile. */
     RIN_GPU_FORMAT_RGBA8_SRGB = 12,
-    RIN_GPU_FORMAT_BGRA8_SRGB = 13
+    RIN_GPU_FORMAT_BGRA8_SRGB = 13,
+    /* BC1/DXT1 block input is decoded into a bounded RGBA8 software image.
+     * CPU upload accepts 8-byte 4x4 blocks; readback exposes canonical RGBA8
+     * texels. The portable profile does not claim physical block storage. */
+    RIN_GPU_FORMAT_BC1_RGBA_UNORM = 14
 } RinGpuImageFormat;
 
 typedef enum RinGpuImageState {
