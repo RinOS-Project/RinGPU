@@ -15,5 +15,11 @@ int ringpu_vertex_bindings_for_draw(
     uint32_t first_vertex, uint32_t vertex_count, uint32_t first_instance,
     uint32_t instance_count,
     RinGpuObjectSlot* resolved[RIN_GPU_MAX_VERTEX_BUFFER_BINDINGS]);
+int ringpu_command_draw_indirect(
+    RinGpuCore* core, RinGpuHandle command_list,
+    const RinGpuDrawIndirectV1* draw);
+int ringpu_command_draw_indexed_indirect(
+    RinGpuCore* core, RinGpuHandle command_list,
+    const RinGpuDrawIndexedIndirectV1* draw);
 
 #endif /* RIN_GPU_COMMAND_DRAW_H */

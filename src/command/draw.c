@@ -973,6 +973,215 @@ int ringpu_command_draw_indexed_base_vertex(
         RIN_GPU_BACKEND_COMMAND_DRAW_INDEXED_BASE_VERTEX);
 }
 
+static int ringpu_indirect_range_valid(const RinGpuObjectSlot* buffer,
+                                       uint64_t offset, uint32_t draw_count,
+                                       uint32_t stride, uint32_t packet_size)
+{
+    uint64_t span;
+    if (!buffer || draw_count == 0u || draw_count > RIN_GPU_MAX_INDIRECT_COMMANDS ||
+        stride < packet_size || (stride & UINT32_C(3)) != 0u ||
+        (offset & UINT64_C(3)) != 0u ||
+        !ringpu_multiply_u64((uint64_t)(draw_count - 1u), stride, &span) ||
+        span > UINT64_MAX - packet_size ||
+        offset > buffer->value.buffer.size_bytes ||
+        span + packet_size > buffer->value.buffer.size_bytes - offset) {
+        return 0;
+    }
+    return 1;
+}
+
+static int ringpu_indirect_graphics_target(
+    RinGpuCore* core, RinGpuHandle command_list, RinGpuHandle pipeline_handle,
+    RinGpuHandle color_target_handle, uint32_t mip_level,
+    uint32_t array_layer, RinGpuObjectSlot** list_out,
+    RinGpuObjectSlot** pipeline_out, RinGpuObjectSlot** color_target_out)
+{
+    RinGpuObjectSlot* list;
+    RinGpuObjectSlot* pipeline;
+    RinGpuObjectSlot* color_target;
+    const RinGpuImageDescV1* target_desc;
+    int result = ringpu_slot(core, command_list, RIN_GPU_OBJECT_COMMAND_LIST,
+                             NULL, &list);
+    if (result != RIN_GPU_OK) return result;
+    if (list->value.command_list.state != RIN_GPU_COMMAND_RECORDING ||
+        list->value.command_list.render_pass_active == 0u ||
+        (list->value.command_list.capabilities & RIN_GPU_QUEUE_GRAPHICS) == 0u ||
+        list->value.command_list.render_target != color_target_handle ||
+        list->value.command_list.render_mip_level != mip_level ||
+        list->value.command_list.render_array_layer != array_layer) {
+        return RIN_GPU_ERROR_STATE;
+    }
+    result = ringpu_slot(core, pipeline_handle,
+                         RIN_GPU_OBJECT_GRAPHICS_PIPELINE, NULL, &pipeline);
+    if (result != RIN_GPU_OK) return result;
+    if (pipeline->value.graphics_pipeline.depth_format != 0u &&
+        list->value.command_list.render_depth_target == 0u) {
+        return RIN_GPU_ERROR_STATE;
+    }
+    result = ringpu_slot(core, color_target_handle, RIN_GPU_OBJECT_IMAGE,
+                         NULL, &color_target);
+    if (result != RIN_GPU_OK) return result;
+    target_desc = &color_target->value.image.descriptor;
+    if (mip_level >= target_desc->mip_levels ||
+        array_layer >= target_desc->array_layers ||
+        (target_desc->usage & RIN_GPU_IMAGE_COLOR_TARGET) == 0u ||
+        target_desc->dimension != RIN_GPU_IMAGE_DIMENSION_2D ||
+        target_desc->sample_count != 1u ||
+        target_desc->format != pipeline->value.graphics_pipeline.color_format) {
+        return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    }
+    *list_out = list;
+    *pipeline_out = pipeline;
+    *color_target_out = color_target;
+    return RIN_GPU_OK;
+}
+
+int ringpu_command_draw_indirect(
+    RinGpuCore* core, RinGpuHandle command_list,
+    const RinGpuDrawIndirectV1* draw)
+{
+    RinGpuObjectSlot* list;
+    RinGpuObjectSlot* pipeline;
+    RinGpuObjectSlot* color_target;
+    RinGpuObjectSlot* indirect_buffer;
+    RinGpuObjectSlot* vertex_buffers[RIN_GPU_MAX_VERTEX_BUFFER_BINDINGS] = {0};
+    RinGpuObjectSlot* bind_group;
+    RinGpuRecordedCommand* command;
+    RinGpuHandle bind_group_handle;
+    int result = ringpu_core_ready(core);
+    if (result != RIN_GPU_OK) return result;
+    if (!draw || !ringpu_versioned(draw->abi_version, draw->struct_size,
+                                   sizeof(*draw)) || draw->flags != 0u ||
+        draw->reserved0 != 0u || draw->reserved1 != 0u ||
+        draw->binding_count > RIN_GPU_MAX_VERTEX_BUFFER_BINDINGS) {
+        return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    }
+    result = ringpu_indirect_graphics_target(
+        core, command_list, draw->pipeline, draw->color_target,
+        draw->mip_level, draw->array_layer, &list, &pipeline, &color_target);
+    if (result != RIN_GPU_OK) return result;
+    result = ringpu_slot(core, draw->indirect_buffer, RIN_GPU_OBJECT_BUFFER,
+                         NULL, &indirect_buffer);
+    if (result != RIN_GPU_OK) return result;
+    if ((indirect_buffer->value.buffer.usage & RIN_GPU_BUFFER_INDIRECT) == 0u ||
+        !ringpu_buffer_upload_ready(indirect_buffer) ||
+        !ringpu_indirect_range_valid(indirect_buffer, draw->indirect_offset,
+                                     draw->draw_count, draw->stride, 16u)) {
+        return RIN_GPU_ERROR_BOUNDS;
+    }
+    result = ringpu_vertex_bindings_for_draw(
+        core, pipeline, draw->vertex_buffers, draw->binding_count,
+        0u, 1u, 0u, 1u, vertex_buffers);
+    if (result != RIN_GPU_OK) return result;
+    result = ringpu_graphics_resources_for_draw(
+        core, list, draw->pipeline, pipeline, &bind_group_handle, &bind_group);
+    if (result != RIN_GPU_OK) return result;
+    if (ringpu_graphics_draw_has_hazard(
+            core, list, bind_group_handle, list->value.command_list.count)) {
+        return RIN_GPU_ERROR_STATE;
+    }
+    result = ringpu_record_command(list, &command);
+    if (result != RIN_GPU_OK) return result;
+    command->type = RIN_GPU_BACKEND_COMMAND_DRAW_INDIRECT;
+    command->destination = draw->pipeline;
+    command->source = draw->color_target;
+    command->auxiliary = draw->indirect_buffer;
+    command->resources = bind_group_handle;
+    command->value.draw_indirect = *draw;
+    command->value.draw_indirect.struct_size = sizeof(command->value.draw_indirect);
+    list->value.command_list.count++;
+    pipeline->value.graphics_pipeline.reference_count++;
+    color_target->value.image.reference_count++;
+    indirect_buffer->value.buffer.reference_count++;
+    for (uint32_t binding = 0u; binding < draw->binding_count; ++binding)
+        vertex_buffers[binding]->value.buffer.reference_count++;
+    if (bind_group) bind_group->value.graphics_bind_group.reference_count++;
+    return RIN_GPU_OK;
+}
+
+int ringpu_command_draw_indexed_indirect(
+    RinGpuCore* core, RinGpuHandle command_list,
+    const RinGpuDrawIndexedIndirectV1* draw)
+{
+    RinGpuObjectSlot* list;
+    RinGpuObjectSlot* pipeline;
+    RinGpuObjectSlot* color_target;
+    RinGpuObjectSlot* index_buffer;
+    RinGpuObjectSlot* indirect_buffer;
+    RinGpuObjectSlot* vertex_buffers[RIN_GPU_MAX_VERTEX_BUFFER_BINDINGS] = {0};
+    RinGpuObjectSlot* bind_group;
+    RinGpuRecordedCommand* command;
+    RinGpuHandle bind_group_handle;
+    uint32_t index_stride;
+    int result = ringpu_core_ready(core);
+    if (result != RIN_GPU_OK) return result;
+    if (!draw || !ringpu_versioned(draw->abi_version, draw->struct_size,
+                                   sizeof(*draw)) || draw->flags != 0u ||
+        draw->reserved0 != 0u || draw->reserved1 != 0u ||
+        draw->binding_count > RIN_GPU_MAX_VERTEX_BUFFER_BINDINGS ||
+        draw->vertex_count == 0u || draw->vertex_count > RIN_GPU_MAX_DRAW_VERTICES) {
+        return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    }
+    index_stride = ringpu_index_format_bytes(draw->index_format);
+    if (index_stride == 0u ||
+        (draw->index_offset & (uint64_t)(index_stride - 1u)) != 0u) {
+        return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    }
+    result = ringpu_indirect_graphics_target(
+        core, command_list, draw->pipeline, draw->color_target,
+        draw->mip_level, draw->array_layer, &list, &pipeline, &color_target);
+    if (result != RIN_GPU_OK) return result;
+    if (pipeline->value.graphics_pipeline.vertex_input_count == 0u)
+        return RIN_GPU_ERROR_UNSUPPORTED;
+    result = ringpu_slot(core, draw->index_buffer, RIN_GPU_OBJECT_BUFFER,
+                         NULL, &index_buffer);
+    if (result != RIN_GPU_OK) return result;
+    if ((index_buffer->value.buffer.usage & RIN_GPU_BUFFER_INDEX) == 0u ||
+        !ringpu_buffer_upload_ready(index_buffer) ||
+        draw->index_offset > index_buffer->value.buffer.size_bytes) {
+        return RIN_GPU_ERROR_BOUNDS;
+    }
+    result = ringpu_slot(core, draw->indirect_buffer, RIN_GPU_OBJECT_BUFFER,
+                         NULL, &indirect_buffer);
+    if (result != RIN_GPU_OK) return result;
+    if ((indirect_buffer->value.buffer.usage & RIN_GPU_BUFFER_INDIRECT) == 0u ||
+        !ringpu_buffer_upload_ready(indirect_buffer) ||
+        !ringpu_indirect_range_valid(indirect_buffer, draw->indirect_offset,
+                                     draw->draw_count, draw->stride, 20u)) {
+        return RIN_GPU_ERROR_BOUNDS;
+    }
+    result = ringpu_vertex_bindings_for_draw(
+        core, pipeline, draw->vertex_buffers, draw->binding_count,
+        0u, 1u, 0u, 1u, vertex_buffers);
+    if (result != RIN_GPU_OK) return result;
+    result = ringpu_graphics_resources_for_draw(
+        core, list, draw->pipeline, pipeline, &bind_group_handle, &bind_group);
+    if (result != RIN_GPU_OK) return result;
+    if (ringpu_graphics_draw_has_hazard(
+            core, list, bind_group_handle, list->value.command_list.count)) {
+        return RIN_GPU_ERROR_STATE;
+    }
+    result = ringpu_record_command(list, &command);
+    if (result != RIN_GPU_OK) return result;
+    command->type = RIN_GPU_BACKEND_COMMAND_DRAW_INDEXED_INDIRECT;
+    command->destination = draw->pipeline;
+    command->source = draw->color_target;
+    command->auxiliary = draw->indirect_buffer;
+    command->resources = bind_group_handle;
+    command->value.draw_indexed_indirect = *draw;
+    command->value.draw_indexed_indirect.struct_size =
+        sizeof(command->value.draw_indexed_indirect);
+    list->value.command_list.count++;
+    pipeline->value.graphics_pipeline.reference_count++;
+    color_target->value.image.reference_count++;
+    index_buffer->value.buffer.reference_count++;
+    indirect_buffer->value.buffer.reference_count++;
+    for (uint32_t binding = 0u; binding < draw->binding_count; ++binding)
+        vertex_buffers[binding]->value.buffer.reference_count++;
+    if (bind_group) bind_group->value.graphics_bind_group.reference_count++;
+    return RIN_GPU_OK;
+}
+
 int ringpu_command_end_render_pass(RinGpuCore* core,
                                    RinGpuHandle command_list) {
     RinGpuObjectSlot* list;

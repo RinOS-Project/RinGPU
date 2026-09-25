@@ -9609,6 +9609,7 @@ static int sw_draw_indexed_base_vertex_in_pass(
 }
 
 static int sw_draw_indexed_v2_in_pass(const RinGpuBackendDrawIndexedV2* draw,
+                                      int32_t base_vertex,
                                       const SwRenderPass* active_pass)
 {
     SwPipeline* pipeline;
@@ -9690,8 +9691,9 @@ static int sw_draw_indexed_v2_in_pass(const RinGpuBackendDrawIndexedV2* draw,
                                    draw->index_offset, draw->first_index, index,
                                    &vertex_index);
             if (result != RIN_GPU_OK) return result;
-            if (vertex_index >= draw->vertex_count)
-                return RIN_GPU_ERROR_BOUNDS;
+            result = sw_rebase_vertex_index(vertex_index, base_vertex,
+                                             draw->vertex_count, &vertex_index);
+            if (result != RIN_GPU_OK) return result;
             result = sw_load_vertex_inputs(pipeline, &vertex_bindings,
                                            vertex_index, instance,
                                            draw->first_instance, inputs);
@@ -9707,7 +9709,7 @@ static int sw_draw_indexed_v2_in_pass(const RinGpuBackendDrawIndexedV2* draw,
                 result = sw_draw_indexed_primitive(
                     pipeline, render_pass, &vertex_bindings, index_buffer,
                     draw->index_format, draw->index_offset, draw->first_index,
-                    draw->index_count, 0, draw->vertex_count, index, instance,
+                    draw->index_count, base_vertex, draw->vertex_count, index, instance,
                     draw->first_instance, bind_group, vertex_outputs,
                     fragment_inputs,
                     fragment_outputs, pass != 0u, &fragment_invocations);
@@ -9775,7 +9777,7 @@ sw_draw_indexed(const RinGpuBackendDrawIndexedV1* draw)
 static int __attribute__((unused))
 sw_draw_indexed_v2(const RinGpuBackendDrawIndexedV2* draw)
 {
-    return sw_draw_indexed_v2_in_pass(draw, NULL);
+    return sw_draw_indexed_v2_in_pass(draw, 0, NULL);
 }
 
 typedef struct SwComputeShadow {
@@ -9980,6 +9982,262 @@ done:
     return result;
 }
 
+static int sw_indirect_packet_offset(const SwBuffer* buffer,
+                                     uint64_t base, uint32_t index,
+                                     uint32_t stride, uint32_t packet_size,
+                                     uint64_t* offset_out)
+{
+    uint64_t delta;
+    uint64_t offset;
+    if (!buffer || !offset_out || stride < packet_size ||
+        !sw_multiply_u64(index, stride, &delta) ||
+        !sw_add_u64(base, delta, &offset) ||
+        offset > buffer->size_bytes ||
+        packet_size > buffer->size_bytes - offset) {
+        return RIN_GPU_ERROR_BOUNDS;
+    }
+    *offset_out = offset;
+    return RIN_GPU_OK;
+}
+
+static int sw_indirect_read_u32(const SwBuffer* buffer, uint64_t offset,
+                                uint32_t* value_out)
+{
+    if (!buffer || !value_out || offset > buffer->size_bytes ||
+        sizeof(uint32_t) > buffer->size_bytes - offset)
+        return RIN_GPU_ERROR_BOUNDS;
+    memcpy(value_out, buffer->bytes + offset, sizeof(*value_out));
+    return RIN_GPU_OK;
+}
+
+static int sw_draw_indirect(RinGpuSoftwareBackend* backend,
+                            const RinGpuBackendDrawIndirectV1* indirect,
+                            const SwRenderPass* active_pass,
+                            uint32_t* executed_out)
+{
+    SwBuffer* buffer;
+    uint32_t executed = 0u;
+    int result;
+    if (!backend || !indirect || !executed_out ||
+        indirect->draw_count == 0u ||
+        indirect->draw_count > RIN_GPU_MAX_INDIRECT_COMMANDS) {
+        return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    }
+    buffer = (SwBuffer*)(uintptr_t)indirect->indirect_buffer_cookie;
+    if (!buffer || !buffer->bytes || indirect->vertex_binding_count >
+        RIN_GPU_MAX_VERTEX_BUFFER_BINDINGS) {
+        return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    }
+    /* Preflight the complete argument stream before publishing any draw. */
+    for (uint32_t index = 0u; index < indirect->draw_count; ++index) {
+        uint64_t offset;
+        uint32_t vertex_count;
+        uint32_t instance_count;
+        uint32_t first_vertex;
+        uint32_t first_instance;
+        result = sw_indirect_packet_offset(buffer, indirect->indirect_offset,
+                                           index, indirect->stride, 16u,
+                                           &offset);
+        if (result != RIN_GPU_OK) return result;
+        result = sw_indirect_read_u32(buffer, offset, &vertex_count);
+        if (result != RIN_GPU_OK) return result;
+        result = sw_indirect_read_u32(buffer, offset + 4u, &instance_count);
+        if (result != RIN_GPU_OK) return result;
+        result = sw_indirect_read_u32(buffer, offset + 8u, &first_vertex);
+        if (result != RIN_GPU_OK) return result;
+        result = sw_indirect_read_u32(buffer, offset + 12u, &first_instance);
+        if (result != RIN_GPU_OK) return result;
+        if ((vertex_count != 0u && instance_count != 0u) &&
+            (vertex_count > RIN_GPU_MAX_DRAW_VERTICES ||
+             instance_count > RIN_GPU_MAX_DRAW_INSTANCES ||
+             first_vertex > UINT32_MAX - vertex_count ||
+             first_instance > UINT32_MAX - instance_count)) {
+            return RIN_GPU_ERROR_BOUNDS;
+        }
+    }
+    for (uint32_t index = 0u; index < indirect->draw_count; ++index) {
+        RinGpuBackendDrawVerticesV2 draw;
+        uint64_t offset;
+        result = sw_indirect_packet_offset(buffer, indirect->indirect_offset,
+                                           index, indirect->stride, 16u,
+                                           &offset);
+        if (result != RIN_GPU_OK) return result;
+        memset(&draw, 0, sizeof(draw));
+        draw.pipeline_cookie = indirect->pipeline_cookie;
+        draw.color_target_cookie = indirect->color_target_cookie;
+        draw.bind_group_cookie = indirect->bind_group_cookie;
+        draw.mip_level = indirect->mip_level;
+        draw.array_layer = indirect->array_layer;
+        result = sw_indirect_read_u32(buffer, offset, &draw.vertex_count);
+        if (result != RIN_GPU_OK) return result;
+        result = sw_indirect_read_u32(buffer, offset + 4u,
+                                      &draw.instance_count);
+        if (result != RIN_GPU_OK) return result;
+        result = sw_indirect_read_u32(buffer, offset + 8u, &draw.first_vertex);
+        if (result != RIN_GPU_OK) return result;
+        result = sw_indirect_read_u32(buffer, offset + 12u,
+                                      &draw.first_instance);
+        if (result != RIN_GPU_OK) return result;
+        draw.vertex_binding_count = indirect->vertex_binding_count;
+        memcpy(draw.vertex_buffers, indirect->vertex_buffers,
+               sizeof(draw.vertex_buffers));
+        if (draw.vertex_count == 0u || draw.instance_count == 0u)
+            continue;
+        result = sw_draw_vertices_v2_in_pass(
+            &draw, active_pass != NULL ? active_pass : NULL);
+        if (result != RIN_GPU_OK) return result;
+        result = sw_query_record_draw(backend, draw.vertex_count,
+                                      draw.instance_count);
+        if (result != RIN_GPU_OK) return result;
+        ++executed;
+    }
+    *executed_out = executed;
+    return RIN_GPU_OK;
+}
+
+static int sw_draw_indexed_indirect(
+    RinGpuSoftwareBackend* backend,
+    const RinGpuBackendDrawIndexedIndirectV1* indirect,
+    const SwRenderPass* active_pass, uint32_t* executed_out)
+{
+    SwBuffer* buffer;
+    uint32_t executed = 0u;
+    int result;
+    if (!backend || !indirect || !executed_out || indirect->draw_count == 0u ||
+        indirect->draw_count > RIN_GPU_MAX_INDIRECT_COMMANDS ||
+        indirect->vertex_count == 0u ||
+        indirect->vertex_count > RIN_GPU_MAX_DRAW_VERTICES) {
+        return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    }
+    buffer = (SwBuffer*)(uintptr_t)indirect->indirect_buffer_cookie;
+    if (!buffer || !buffer->bytes || indirect->vertex_binding_count >
+        RIN_GPU_MAX_VERTEX_BUFFER_BINDINGS)
+        return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    for (uint32_t index = 0u; index < indirect->draw_count; ++index) {
+        uint64_t offset;
+        uint32_t index_count;
+        uint32_t instance_count;
+        uint32_t first_index;
+        uint32_t first_instance;
+        int32_t base_vertex;
+        result = sw_indirect_packet_offset(buffer, indirect->indirect_offset,
+                                           index, indirect->stride, 20u,
+                                           &offset);
+        if (result != RIN_GPU_OK) return result;
+        result = sw_indirect_read_u32(buffer, offset, &index_count);
+        if (result != RIN_GPU_OK) return result;
+        result = sw_indirect_read_u32(buffer, offset + 4u, &instance_count);
+        if (result != RIN_GPU_OK) return result;
+        result = sw_indirect_read_u32(buffer, offset + 8u, &first_index);
+        if (result != RIN_GPU_OK) return result;
+        result = sw_indirect_read_u32(buffer, offset + 12u,
+                                      (uint32_t*)&base_vertex);
+        if (result != RIN_GPU_OK) return result;
+        result = sw_indirect_read_u32(buffer, offset + 16u, &first_instance);
+        if (result != RIN_GPU_OK) return result;
+        if ((index_count != 0u && instance_count != 0u) &&
+            (index_count > SW_MAX_DRAW_INDICES ||
+             instance_count > RIN_GPU_MAX_DRAW_INSTANCES ||
+             first_index > UINT32_MAX - index_count ||
+             first_instance > UINT32_MAX - instance_count)) {
+            return RIN_GPU_ERROR_BOUNDS;
+        }
+        if (index_count != 0u && instance_count != 0u) {
+            uint32_t raw_index;
+            result = sw_read_index(
+                (const SwBuffer*)(uintptr_t)indirect->index_buffer_cookie,
+                indirect->index_format, indirect->index_offset, first_index,
+                0u, &raw_index);
+            if (result != RIN_GPU_OK && result != RIN_GPU_ERROR_BOUNDS)
+                return result;
+            (void)raw_index;
+        }
+    }
+    for (uint32_t index = 0u; index < indirect->draw_count; ++index) {
+        RinGpuBackendDrawIndexedV2 draw;
+        uint64_t offset;
+        result = sw_indirect_packet_offset(buffer, indirect->indirect_offset,
+                                           index, indirect->stride, 20u,
+                                           &offset);
+        if (result != RIN_GPU_OK) return result;
+        memset(&draw, 0, sizeof(draw));
+        draw.pipeline_cookie = indirect->pipeline_cookie;
+        draw.color_target_cookie = indirect->color_target_cookie;
+        draw.bind_group_cookie = indirect->bind_group_cookie;
+        draw.index_buffer_cookie = indirect->index_buffer_cookie;
+        draw.index_offset = indirect->index_offset;
+        draw.index_format = indirect->index_format;
+        draw.mip_level = indirect->mip_level;
+        draw.array_layer = indirect->array_layer;
+        result = sw_indirect_read_u32(buffer, offset, &draw.index_count);
+        if (result != RIN_GPU_OK) return result;
+        result = sw_indirect_read_u32(buffer, offset + 4u,
+                                      &draw.instance_count);
+        if (result != RIN_GPU_OK) return result;
+        result = sw_indirect_read_u32(buffer, offset + 8u, &draw.first_index);
+        if (result != RIN_GPU_OK) return result;
+        result = sw_indirect_read_u32(buffer, offset + 16u,
+                                      &draw.first_instance);
+        if (result != RIN_GPU_OK) return result;
+        draw.vertex_count = indirect->vertex_count;
+        draw.vertex_binding_count = indirect->vertex_binding_count;
+        memcpy(draw.vertex_buffers, indirect->vertex_buffers,
+               sizeof(draw.vertex_buffers));
+        if (draw.index_count == 0u || draw.instance_count == 0u)
+            continue;
+        {
+            uint32_t base_vertex_bits;
+            int32_t base_vertex;
+            result = sw_indirect_read_u32(buffer, offset + 12u,
+                                          &base_vertex_bits);
+            if (result != RIN_GPU_OK) return result;
+            memcpy(&base_vertex, &base_vertex_bits, sizeof(base_vertex));
+            result = sw_draw_indexed_v2_in_pass(&draw, base_vertex,
+                                            active_pass != NULL ? active_pass : NULL);
+        }
+        if (result != RIN_GPU_OK) return result;
+        result = sw_query_record_draw(backend, draw.vertex_count,
+                                      draw.instance_count);
+        if (result != RIN_GPU_OK) return result;
+        ++executed;
+    }
+    *executed_out = executed;
+    return RIN_GPU_OK;
+}
+
+static int sw_dispatch_indirect(RinGpuSoftwareBackend* backend,
+                                const RinGpuBackendDispatchIndirectV1* indirect,
+                                const uint8_t* push_constants,
+                                uint32_t push_constant_size,
+                                uint64_t* invocations_out)
+{
+    SwBuffer* buffer;
+    uint32_t groups[3];
+    RinGpuBackendDispatchV1 dispatch;
+    int result;
+    if (!backend || !indirect || !invocations_out)
+        return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    buffer = (SwBuffer*)(uintptr_t)indirect->indirect_buffer_cookie;
+    if (!buffer || !buffer->bytes)
+        return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    for (uint32_t index = 0u; index < 3u; ++index) {
+        result = sw_indirect_read_u32(buffer, indirect->indirect_offset +
+                                      (uint64_t)index * sizeof(uint32_t),
+                                      &groups[index]);
+        if (result != RIN_GPU_OK) return result;
+        if (groups[index] == 0u || groups[index] > RIN_GPU_MAX_DISPATCH_GROUPS)
+            return RIN_GPU_ERROR_BOUNDS;
+    }
+    memset(&dispatch, 0, sizeof(dispatch));
+    dispatch.pipeline_cookie = indirect->pipeline_cookie;
+    dispatch.bind_group_cookie = indirect->bind_group_cookie;
+    dispatch.group_count_x = groups[0];
+    dispatch.group_count_y = groups[1];
+    dispatch.group_count_z = groups[2];
+    return sw_dispatch_compute(backend, &dispatch, push_constants,
+                               push_constant_size, invocations_out);
+}
+
 static int sw_submit(void* opaque, const RinGpuBackendCommandV1* commands,
                      uint32_t command_count)
 {
@@ -10111,6 +10369,25 @@ static int sw_submit(void* opaque, const RinGpuBackendCommandV1* commands,
                                              ? push_constants : NULL,
                                          push_constant_size,
                                          &invocation_count);
+            if (result != RIN_GPU_OK)
+                return result;
+            result = sw_query_add_pipeline(
+                backend, RIN_GPU_PIPELINE_STAT_COMPUTE_SHADER_INVOCATIONS,
+                invocation_count);
+            if (result != RIN_GPU_OK) return result;
+            result = sw_query_add_pipeline(
+                backend, RIN_GPU_PIPELINE_STAT_DISPATCH_CALLS, 1u);
+            if (result != RIN_GPU_OK) return result;
+            ++delta.dispatch_commands;
+            break;
+        case RIN_GPU_BACKEND_COMMAND_DISPATCH_INDIRECT:
+            if (active_pass.color != NULL)
+                return RIN_GPU_ERROR_STATE;
+            result = sw_dispatch_indirect(
+                (RinGpuSoftwareBackend*)opaque,
+                &command->value.dispatch_indirect,
+                push_constant_size != 0u ? push_constants : NULL,
+                push_constant_size, &invocation_count);
             if (result != RIN_GPU_OK)
                 return result;
             result = sw_query_add_pipeline(
@@ -10335,6 +10612,34 @@ static int sw_submit(void* opaque, const RinGpuBackendCommandV1* commands,
             if (result != RIN_GPU_OK) return result;
             ++delta.draw_commands;
             break;
+        case RIN_GPU_BACKEND_COMMAND_DRAW_INDIRECT: {
+            uint32_t executed = 0u;
+            if (active_pass.color != NULL &&
+                command->value.draw_indirect.color_target_cookie !=
+                    active_pass.color_cookie) {
+                return RIN_GPU_ERROR_STATE;
+            }
+            result = sw_draw_indirect(
+                backend, &command->value.draw_indirect,
+                active_pass.color != NULL ? &active_pass : NULL, &executed);
+            if (result != RIN_GPU_OK) return result;
+            delta.draw_commands += executed;
+            break;
+        }
+        case RIN_GPU_BACKEND_COMMAND_DRAW_INDEXED_INDIRECT: {
+            uint32_t executed = 0u;
+            if (active_pass.color != NULL &&
+                command->value.draw_indexed_indirect.color_target_cookie !=
+                    active_pass.color_cookie) {
+                return RIN_GPU_ERROR_STATE;
+            }
+            result = sw_draw_indexed_indirect(
+                backend, &command->value.draw_indexed_indirect,
+                active_pass.color != NULL ? &active_pass : NULL, &executed);
+            if (result != RIN_GPU_OK) return result;
+            delta.draw_commands += executed;
+            break;
+        }
         case RIN_GPU_BACKEND_COMMAND_DRAW_INDEXED:
             if (active_pass.color != NULL &&
                 command->value.draw_indexed.color_target_cookie !=
@@ -10360,6 +10665,7 @@ static int sw_submit(void* opaque, const RinGpuBackendCommandV1* commands,
             }
             result = sw_draw_indexed_v2_in_pass(
                 &command->value.draw_indexed_v2,
+                0,
                 active_pass.color != NULL ? &active_pass : NULL);
             if (result != RIN_GPU_OK)
                 return result;

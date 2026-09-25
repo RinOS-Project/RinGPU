@@ -529,6 +529,35 @@ int ringpu_runtime_command_dispatch(RinGpuRuntime* runtime,
     return ringpu_command_dispatch(&runtime->core, command_list, dispatch);
 }
 
+int ringpu_runtime_command_dispatch_indirect(
+    RinGpuRuntime* runtime, RinGpuHandle command_list,
+    const RinGpuDispatchIndirectV1* dispatch)
+{
+    if (runtime == NULL || runtime->initialized != RIN_GPU_RUNTIME_VERSION)
+        return RIN_GPU_ERROR_STATE;
+    return ringpu_command_dispatch_indirect(&runtime->core, command_list,
+                                            dispatch);
+}
+
+int ringpu_runtime_command_draw_indirect(
+    RinGpuRuntime* runtime, RinGpuHandle command_list,
+    const RinGpuDrawIndirectV1* draw)
+{
+    if (runtime == NULL || runtime->initialized != RIN_GPU_RUNTIME_VERSION)
+        return RIN_GPU_ERROR_STATE;
+    return ringpu_command_draw_indirect(&runtime->core, command_list, draw);
+}
+
+int ringpu_runtime_command_draw_indexed_indirect(
+    RinGpuRuntime* runtime, RinGpuHandle command_list,
+    const RinGpuDrawIndexedIndirectV1* draw)
+{
+    if (runtime == NULL || runtime->initialized != RIN_GPU_RUNTIME_VERSION)
+        return RIN_GPU_ERROR_STATE;
+    return ringpu_command_draw_indexed_indirect(&runtime->core, command_list,
+                                                draw);
+}
+
 int ringpu_runtime_command_end_render_pass(RinGpuRuntime* runtime,
                                            RinGpuHandle command_list)
 {

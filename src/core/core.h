@@ -57,7 +57,10 @@ typedef enum RinGpuBackendCommandTypeV1 {
     RIN_GPU_BACKEND_COMMAND_END_QUERY = 27,
     RIN_GPU_BACKEND_COMMAND_RESET_QUERY = 28,
     RIN_GPU_BACKEND_COMMAND_TRANSFER_IMAGE_OWNERSHIP = 29,
-    RIN_GPU_BACKEND_COMMAND_RESOLVE_IMAGE = 30
+    RIN_GPU_BACKEND_COMMAND_RESOLVE_IMAGE = 30,
+    RIN_GPU_BACKEND_COMMAND_DRAW_INDIRECT = 31,
+    RIN_GPU_BACKEND_COMMAND_DRAW_INDEXED_INDIRECT = 32,
+    RIN_GPU_BACKEND_COMMAND_DISPATCH_INDIRECT = 33
 } RinGpuBackendCommandTypeV1;
 
 typedef struct RinGpuBackendBufferCopyV1 {
@@ -147,6 +150,13 @@ typedef struct RinGpuBackendDispatchV1 {
     uint32_t group_count_z;
     uint32_t reserved;
 } RinGpuBackendDispatchV1;
+
+typedef struct RinGpuBackendDispatchIndirectV1 {
+    uint64_t pipeline_cookie;
+    uint64_t bind_group_cookie;
+    uint64_t indirect_buffer_cookie;
+    uint64_t indirect_offset;
+} RinGpuBackendDispatchIndirectV1;
 
 typedef struct RinGpuBackendComputeBarrierV1 {
     uint32_t source_access;
@@ -433,6 +443,43 @@ typedef struct RinGpuBackendDrawIndexedV2 {
         vertex_buffers[RIN_GPU_MAX_VERTEX_BUFFER_BINDINGS];
 } RinGpuBackendDrawIndexedV2;
 
+typedef struct RinGpuBackendDrawIndirectV1 {
+    uint64_t pipeline_cookie;
+    uint64_t color_target_cookie;
+    uint64_t bind_group_cookie;
+    uint64_t indirect_buffer_cookie;
+    uint64_t indirect_offset;
+    uint32_t mip_level;
+    uint32_t array_layer;
+    uint32_t draw_count;
+    uint32_t stride;
+    uint32_t vertex_binding_count;
+    uint32_t reserved;
+    RinGpuBackendVertexBufferBindingV1
+        vertex_buffers[RIN_GPU_MAX_VERTEX_BUFFER_BINDINGS];
+} RinGpuBackendDrawIndirectV1;
+
+typedef struct RinGpuBackendDrawIndexedIndirectV1 {
+    uint64_t pipeline_cookie;
+    uint64_t color_target_cookie;
+    uint64_t bind_group_cookie;
+    uint64_t index_buffer_cookie;
+    uint64_t indirect_buffer_cookie;
+    uint64_t index_offset;
+    uint64_t indirect_offset;
+    uint32_t index_format;
+    uint32_t mip_level;
+    uint32_t array_layer;
+    uint32_t draw_count;
+    uint32_t stride;
+    uint32_t vertex_count;
+    uint32_t vertex_binding_count;
+    int32_t base_vertex;
+    uint32_t reserved;
+    RinGpuBackendVertexBufferBindingV1
+        vertex_buffers[RIN_GPU_MAX_VERTEX_BUFFER_BINDINGS];
+} RinGpuBackendDrawIndexedIndirectV1;
+
 typedef struct RinGpuBackendDrawIndexedBaseVertexV1 {
     uint64_t pipeline_cookie;
     uint64_t color_target_cookie;
@@ -527,6 +574,7 @@ typedef struct RinGpuBackendCommandV1 {
         RinGpuBackendImageTransitionV1 image_transition;
         RinGpuBackendImageOwnershipTransferV1 image_ownership_transfer;
         RinGpuBackendDispatchV1 dispatch;
+        RinGpuBackendDispatchIndirectV1 dispatch_indirect;
         RinGpuBackendComputeBarrierV1 compute_barrier;
         RinGpuBackendGraphicsBarrierV1 graphics_barrier;
         RinGpuBackendComputeBarrierV2 compute_barrier_v2;
@@ -541,6 +589,8 @@ typedef struct RinGpuBackendCommandV1 {
         RinGpuBackendDrawVerticesV2 draw_vertices_v2;
         RinGpuBackendDrawIndexedV1 draw_indexed;
         RinGpuBackendDrawIndexedV2 draw_indexed_v2;
+        RinGpuBackendDrawIndirectV1 draw_indirect;
+        RinGpuBackendDrawIndexedIndirectV1 draw_indexed_indirect;
         RinGpuBackendDrawIndexedBaseVertexV1 draw_indexed_base_vertex;
         RinGpuBackendRenderPassDepthBeginV1 render_pass_depth_begin;
         RinGpuBackendRenderPassDepthStencilBeginV1 render_pass_depth_stencil_begin;
@@ -680,6 +730,7 @@ typedef struct RinGpuRecordedCommand {
         RinGpuImageTransitionV1 image_transition;
         RinGpuImageOwnershipTransferV1 image_ownership_transfer;
         RinGpuDispatchV1 dispatch;
+        RinGpuDispatchIndirectV1 dispatch_indirect;
         RinGpuComputeBarrierV1 compute_barrier;
         RinGpuGraphicsBarrierV1 graphics_barrier;
         RinGpuComputeBarrierV2 compute_barrier_v2;
@@ -697,6 +748,8 @@ typedef struct RinGpuRecordedCommand {
         RinGpuDrawVerticesV2 draw_vertices_v2;
         RinGpuDrawIndexedV1 draw_indexed;
         RinGpuDrawIndexedV2 draw_indexed_v2;
+        RinGpuDrawIndirectV1 draw_indirect;
+        RinGpuDrawIndexedIndirectV1 draw_indexed_indirect;
         RinGpuRenderPassDepthDescV1 render_pass_depth;
         RinGpuRenderPassDepthStencilDescV1 render_pass_depth_stencil;
         RinGpuRasterStateV5 raster_state;
@@ -959,6 +1012,10 @@ _Static_assert(sizeof(RinGpuBackendDrawIndexedV2) == 848u,
                "RinGPU backend multi-buffer indexed draw drift");
 _Static_assert(sizeof(RinGpuBackendDrawIndexedBaseVertexV1) == 96u,
                "RinGPU backend base-vertex indexed draw drift");
+_Static_assert(sizeof(RinGpuBackendDrawIndirectV1) == 832u,
+               "RinGPU backend indirect draw drift");
+_Static_assert(sizeof(RinGpuBackendDrawIndexedIndirectV1) == 864u,
+               "RinGPU backend indirect indexed draw drift");
 #if UINTPTR_MAX == UINT64_MAX || defined(__MINGW32__)
 _Static_assert(sizeof(RinGpuBackendRenderPassDepthBeginV1) == 136u,
                "RinGPU backend depth render-pass begin drift");
@@ -973,7 +1030,7 @@ _Static_assert(sizeof(RinGpuBackendRenderPassDepthStencilBeginV1) == 152u,
 _Static_assert(sizeof(RinGpuBackendRenderPassDepthStencilBeginV1) == 148u,
                "RinGPU backend separate depth/stencil render-pass begin drift");
 #endif
-_Static_assert(sizeof(RinGpuBackendCommandV1) == 856u,
+_Static_assert(sizeof(RinGpuBackendCommandV1) == 872u,
                "RinGPU backend command drift");
 #endif
 

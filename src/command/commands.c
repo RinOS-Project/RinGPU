@@ -550,3 +550,63 @@ int ringpu_command_dispatch(RinGpuCore* core, RinGpuHandle command_list,
     bind_group->value.compute_bind_group.reference_count++;
     return RIN_GPU_OK;
 }
+
+int ringpu_command_dispatch_indirect(
+    RinGpuCore* core, RinGpuHandle command_list,
+    const RinGpuDispatchIndirectV1* dispatch)
+{
+    RinGpuObjectSlot* list;
+    RinGpuObjectSlot* pipeline;
+    RinGpuObjectSlot* bind_group;
+    RinGpuObjectSlot* indirect_buffer;
+    RinGpuRecordedCommand* command;
+    int result = ringpu_core_ready(core);
+    if (result != RIN_GPU_OK) return result;
+    if (!dispatch || !ringpu_versioned(dispatch->abi_version,
+                                       dispatch->struct_size,
+                                       sizeof(*dispatch)) ||
+        dispatch->flags != 0u || dispatch->reserved0 != 0u ||
+        dispatch->reserved1 != 0u || (dispatch->indirect_offset & 3u) != 0u) {
+        return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    }
+    result = ringpu_slot(core, command_list, RIN_GPU_OBJECT_COMMAND_LIST,
+                         NULL, &list);
+    if (result != RIN_GPU_OK) return result;
+    if (list->value.command_list.state != RIN_GPU_COMMAND_RECORDING ||
+        list->value.command_list.render_pass_active != 0u ||
+        (list->value.command_list.capabilities & RIN_GPU_QUEUE_COMPUTE) == 0u)
+        return RIN_GPU_ERROR_STATE;
+    result = ringpu_slot(core, dispatch->pipeline,
+                         RIN_GPU_OBJECT_COMPUTE_PIPELINE, NULL, &pipeline);
+    if (result != RIN_GPU_OK) return result;
+    result = ringpu_slot(core, dispatch->bind_group,
+                         RIN_GPU_OBJECT_COMPUTE_BIND_GROUP, NULL, &bind_group);
+    if (result != RIN_GPU_OK) return result;
+    if (bind_group->value.compute_bind_group.pipeline != dispatch->pipeline)
+        return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    result = ringpu_slot(core, dispatch->indirect_buffer,
+                         RIN_GPU_OBJECT_BUFFER, NULL, &indirect_buffer);
+    if (result != RIN_GPU_OK) return result;
+    if ((indirect_buffer->value.buffer.usage & RIN_GPU_BUFFER_INDIRECT) == 0u ||
+        !ringpu_buffer_upload_ready(indirect_buffer) ||
+        dispatch->indirect_offset > indirect_buffer->value.buffer.size_bytes ||
+        UINT64_C(12) > indirect_buffer->value.buffer.size_bytes -
+                            dispatch->indirect_offset)
+        return RIN_GPU_ERROR_BOUNDS;
+    if (ringpu_dispatch_has_hazard(core, list, bind_group))
+        return RIN_GPU_ERROR_STATE;
+    result = ringpu_record_command(list, &command);
+    if (result != RIN_GPU_OK) return result;
+    command->type = RIN_GPU_BACKEND_COMMAND_DISPATCH_INDIRECT;
+    command->destination = dispatch->pipeline;
+    command->source = dispatch->bind_group;
+    command->auxiliary = dispatch->indirect_buffer;
+    command->value.dispatch_indirect = *dispatch;
+    command->value.dispatch_indirect.struct_size =
+        sizeof(command->value.dispatch_indirect);
+    list->value.command_list.count++;
+    pipeline->value.compute_pipeline.reference_count++;
+    bind_group->value.compute_bind_group.reference_count++;
+    indirect_buffer->value.buffer.reference_count++;
+    return RIN_GPU_OK;
+}

@@ -88,6 +88,13 @@ void ringpu_release_command_references(RinGpuCore* core,
             release_reference(core, command->source,
                               RIN_GPU_OBJECT_COMPUTE_BIND_GROUP);
             break;
+        case RIN_GPU_BACKEND_COMMAND_DISPATCH_INDIRECT:
+            release_reference(core, command->destination,
+                              RIN_GPU_OBJECT_COMPUTE_PIPELINE);
+            release_reference(core, command->source,
+                              RIN_GPU_OBJECT_COMPUTE_BIND_GROUP);
+            release_reference(core, command->auxiliary, RIN_GPU_OBJECT_BUFFER);
+            break;
         case RIN_GPU_BACKEND_COMMAND_DRAW:
             release_reference(core, command->destination,
                               RIN_GPU_OBJECT_GRAPHICS_PIPELINE);
@@ -140,6 +147,38 @@ void ringpu_release_command_references(RinGpuCore* core,
                 release_reference(
                     core,
                     command->value.draw_indexed_v2.vertex_buffers[binding].buffer,
+                    RIN_GPU_OBJECT_BUFFER);
+            }
+            release_graphics_bind_group_reference(core, command->resources);
+            break;
+        case RIN_GPU_BACKEND_COMMAND_DRAW_INDIRECT:
+            release_reference(core, command->destination,
+                              RIN_GPU_OBJECT_GRAPHICS_PIPELINE);
+            release_reference(core, command->source, RIN_GPU_OBJECT_IMAGE);
+            release_reference(core, command->auxiliary, RIN_GPU_OBJECT_BUFFER);
+            for (uint32_t binding = 0u;
+                 binding < command->value.draw_indirect.binding_count;
+                 ++binding) {
+                release_reference(
+                    core,
+                    command->value.draw_indirect.vertex_buffers[binding].buffer,
+                    RIN_GPU_OBJECT_BUFFER);
+            }
+            release_graphics_bind_group_reference(core, command->resources);
+            break;
+        case RIN_GPU_BACKEND_COMMAND_DRAW_INDEXED_INDIRECT:
+            release_reference(core, command->destination,
+                              RIN_GPU_OBJECT_GRAPHICS_PIPELINE);
+            release_reference(core, command->source, RIN_GPU_OBJECT_IMAGE);
+            release_reference(core, command->auxiliary, RIN_GPU_OBJECT_BUFFER);
+            release_reference(core, command->value.draw_indexed_indirect.index_buffer,
+                              RIN_GPU_OBJECT_BUFFER);
+            for (uint32_t binding = 0u;
+                 binding < command->value.draw_indexed_indirect.binding_count;
+                 ++binding) {
+                release_reference(
+                    core,
+                    command->value.draw_indexed_indirect.vertex_buffers[binding].buffer,
                     RIN_GPU_OBJECT_BUFFER);
             }
             release_graphics_bind_group_reference(core, command->resources);

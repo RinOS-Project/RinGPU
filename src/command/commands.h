@@ -26,5 +26,8 @@ int ringpu_command_clear_image(RinGpuCore* core, RinGpuHandle command_list,
                                const RinGpuImageClearV1* clear);
 int ringpu_command_dispatch(RinGpuCore* core, RinGpuHandle command_list,
                             const RinGpuDispatchV1* dispatch);
+int ringpu_command_dispatch_indirect(
+    RinGpuCore* core, RinGpuHandle command_list,
+    const RinGpuDispatchIndirectV1* dispatch);
 
 #endif /* RIN_GPU_COMMAND_COMMANDS_H */

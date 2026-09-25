@@ -136,7 +136,10 @@ int main(void)
     RinGpuHandle bind_group = 0u;
     RinGpuHandle queue = 0u;
     RinGpuHandle command_list = 0u;
+    RinGpuHandle indirect_buffer = 0u;
+    RinGpuHandle indirect_command_list = 0u;
     RinGpuSubmitInfoV1 submit;
+    uint32_t indirect_groups[3] = {1u, 1u, 1u};
 
     make_shared_shader(shader);
     memset(&core, 0, sizeof(core));
@@ -198,6 +201,42 @@ int main(void)
     submit.abi_version = RIN_GPU_ABI_VERSION;
     submit.struct_size = sizeof(submit);
     submit.command_list = command_list;
+    CHECK(ringpu_queue_submit(&core, queue, &submit) == RIN_GPU_OK);
+
+    memset(&buffer_desc, 0, sizeof(buffer_desc));
+    buffer_desc.abi_version = RIN_GPU_ABI_VERSION;
+    buffer_desc.struct_size = sizeof(buffer_desc);
+    buffer_desc.size_bytes = sizeof(indirect_groups);
+    buffer_desc.usage = RIN_GPU_BUFFER_INDIRECT |
+                        RIN_GPU_BUFFER_COPY_DESTINATION;
+    buffer_desc.flags = RIN_GPU_BUFFER_CPU_VISIBLE;
+    CHECK(ringpu_create_buffer(&core, &buffer_desc, &indirect_buffer) ==
+          RIN_GPU_OK);
+    CHECK(ringpu_upload_buffer(&core, indirect_buffer, 0u, indirect_groups,
+                               sizeof(indirect_groups)) == RIN_GPU_OK);
+    CHECK(ringpu_create_command_list(&core, &command_desc,
+                                     &indirect_command_list) == RIN_GPU_OK);
+    {
+        RinGpuDispatchIndirectV1 indirect = {0};
+        indirect.abi_version = RIN_GPU_ABI_VERSION;
+        indirect.struct_size = sizeof(indirect);
+        indirect.pipeline = pipeline;
+        indirect.bind_group = bind_group;
+        indirect.indirect_buffer = indirect_buffer;
+        indirect.indirect_offset = 4u;
+        CHECK(ringpu_command_dispatch_indirect(
+                  &core, indirect_command_list, &indirect) ==
+              RIN_GPU_ERROR_BOUNDS);
+        indirect.indirect_offset = 0u;
+        CHECK(ringpu_command_dispatch_indirect(
+                  &core, indirect_command_list, &indirect) == RIN_GPU_OK);
+    }
+    CHECK(ringpu_command_list_close(&core, indirect_command_list) ==
+          RIN_GPU_OK);
+    memset(&submit, 0, sizeof(submit));
+    submit.abi_version = RIN_GPU_ABI_VERSION;
+    submit.struct_size = sizeof(submit);
+    submit.command_list = indirect_command_list;
     CHECK(ringpu_queue_submit(&core, queue, &submit) == RIN_GPU_OK);
 
     ringpu_core_shutdown(&core);

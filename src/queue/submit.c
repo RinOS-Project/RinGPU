@@ -663,6 +663,45 @@ static int ringpu_queue_submit_internal(
             commands[index].value.dispatch.group_count_z =
                 command->value.dispatch.group_count_z;
         } else if (command->type ==
+                   RIN_GPU_BACKEND_COMMAND_DISPATCH_INDIRECT) {
+            RinGpuObjectSlot* indirect_buffer;
+            const RinGpuDispatchIndirectV1* dispatch =
+                &command->value.dispatch_indirect;
+            if (active_render_target != 0u || active_depth_target != 0u ||
+                active_stencil_target != 0u) {
+                result = RIN_GPU_ERROR_STATE;
+                break;
+            }
+            result = ringpu_slot(core, command->destination,
+                                 RIN_GPU_OBJECT_COMPUTE_PIPELINE, NULL,
+                                 &destination);
+            if (result != RIN_GPU_OK) break;
+            result = ringpu_slot(core, command->source,
+                                 RIN_GPU_OBJECT_COMPUTE_BIND_GROUP, NULL,
+                                 &source);
+            if (result != RIN_GPU_OK) break;
+            result = ringpu_slot(core, command->auxiliary,
+                                 RIN_GPU_OBJECT_BUFFER, NULL,
+                                 &indirect_buffer);
+            if (result != RIN_GPU_OK) break;
+            if (source->value.compute_bind_group.pipeline != command->destination ||
+                (indirect_buffer->value.buffer.usage & RIN_GPU_BUFFER_INDIRECT) == 0u ||
+                !ringpu_buffer_upload_ready(indirect_buffer) ||
+                dispatch->indirect_offset > indirect_buffer->value.buffer.size_bytes ||
+                UINT64_C(12) > indirect_buffer->value.buffer.size_bytes -
+                                    dispatch->indirect_offset) {
+                result = RIN_GPU_ERROR_STATE;
+                break;
+            }
+            commands[index].value.dispatch_indirect.pipeline_cookie =
+                destination->value.compute_pipeline.backend_cookie;
+            commands[index].value.dispatch_indirect.bind_group_cookie =
+                source->value.compute_bind_group.backend_cookie;
+            commands[index].value.dispatch_indirect.indirect_buffer_cookie =
+                indirect_buffer->value.buffer.backend_cookie;
+            commands[index].value.dispatch_indirect.indirect_offset =
+                dispatch->indirect_offset;
+        } else if (command->type ==
                    RIN_GPU_BACKEND_COMMAND_COMPUTE_BARRIER) {
             commands[index].value.compute_barrier.source_access =
                 command->value.compute_barrier.source_access;
@@ -1812,6 +1851,203 @@ static int ringpu_queue_submit_internal(
                     .buffer_cookie =
                         vertex_buffers[binding]->value.buffer.backend_cookie;
                 commands[index].value.draw_vertices_v2.vertex_buffers[binding]
+                    .offset = draw->vertex_buffers[binding].offset;
+            }
+        } else if (command->type == RIN_GPU_BACKEND_COMMAND_DRAW_INDIRECT) {
+            const RinGpuDrawIndirectV1* draw = &command->value.draw_indirect;
+            RinGpuObjectSlot* indirect_buffer;
+            RinGpuObjectSlot* vertex_buffers[
+                RIN_GPU_MAX_VERTEX_BUFFER_BINDINGS] = {0};
+            uint64_t bind_group_cookie;
+            if (active_render_target != command->source ||
+                active_render_mip_level != draw->mip_level ||
+                active_render_array_layer != draw->array_layer) {
+                result = RIN_GPU_ERROR_STATE;
+                break;
+            }
+            result = ringpu_slot(core, command->destination,
+                                 RIN_GPU_OBJECT_GRAPHICS_PIPELINE, NULL,
+                                 &destination);
+            if (result != RIN_GPU_OK) break;
+            result = ringpu_backend_graphics_bind_group(
+                core, command->destination, destination, command->resources,
+                &bind_group_cookie);
+            if (result != RIN_GPU_OK) break;
+            if (ringpu_graphics_draw_has_hazard(
+                    core, list, command->resources, index)) {
+                result = RIN_GPU_ERROR_STATE;
+                break;
+            }
+            result = ringpu_validate_graphics_sampled_submit(
+                core, command->resources, staged_states,
+                active_render_target, active_render_mip_level,
+                active_render_array_layer, active_depth_target,
+                active_depth_mip_level, active_depth_array_layer,
+                active_stencil_target, active_stencil_mip_level,
+                active_stencil_array_layer);
+            if (result != RIN_GPU_OK) break;
+            result = ringpu_slot(core, command->source,
+                                 RIN_GPU_OBJECT_IMAGE, &source_index, &source);
+            if (result != RIN_GPU_OK) break;
+            result = ringpu_stage_image_states(source, source_index,
+                                               staged_states);
+            if (result != RIN_GPU_OK) break;
+            source_states = staged_states[source_index];
+            result = ringpu_slot(core, command->auxiliary,
+                                 RIN_GPU_OBJECT_BUFFER, NULL,
+                                 &indirect_buffer);
+            if (result != RIN_GPU_OK) break;
+            if ((destination->value.graphics_pipeline.depth_format != 0u &&
+                 (active_depth_target == 0u ||
+                  active_depth_format !=
+                      destination->value.graphics_pipeline.depth_format)) ||
+                source_states[draw->array_layer *
+                                  source->value.image.descriptor.mip_levels +
+                                  draw->mip_level] !=
+                    RIN_GPU_IMAGE_STATE_COLOR_TARGET ||
+                source->value.image.descriptor.format !=
+                    destination->value.graphics_pipeline.color_format ||
+                (indirect_buffer->value.buffer.usage & RIN_GPU_BUFFER_INDIRECT) == 0u ||
+                !ringpu_buffer_upload_ready(indirect_buffer)) {
+                result = RIN_GPU_ERROR_STATE;
+                break;
+            }
+            result = ringpu_vertex_bindings_for_draw(
+                core, destination, draw->vertex_buffers, draw->binding_count,
+                0u, 1u, 0u, 1u, vertex_buffers);
+            if (result != RIN_GPU_OK) break;
+            commands[index].value.draw_indirect.pipeline_cookie =
+                destination->value.graphics_pipeline.backend_cookie;
+            commands[index].value.draw_indirect.color_target_cookie =
+                source->value.image.backend_cookie;
+            commands[index].value.draw_indirect.bind_group_cookie =
+                bind_group_cookie;
+            commands[index].value.draw_indirect.indirect_buffer_cookie =
+                indirect_buffer->value.buffer.backend_cookie;
+            commands[index].value.draw_indirect.indirect_offset =
+                draw->indirect_offset;
+            commands[index].value.draw_indirect.mip_level = draw->mip_level;
+            commands[index].value.draw_indirect.array_layer = draw->array_layer;
+            commands[index].value.draw_indirect.draw_count = draw->draw_count;
+            commands[index].value.draw_indirect.stride = draw->stride;
+            commands[index].value.draw_indirect.vertex_binding_count =
+                draw->binding_count;
+            for (uint32_t binding = 0u; binding < draw->binding_count;
+                 ++binding) {
+                commands[index].value.draw_indirect.vertex_buffers[binding]
+                    .binding = draw->vertex_buffers[binding].binding;
+                commands[index].value.draw_indirect.vertex_buffers[binding]
+                    .buffer_cookie =
+                        vertex_buffers[binding]->value.buffer.backend_cookie;
+                commands[index].value.draw_indirect.vertex_buffers[binding]
+                    .offset = draw->vertex_buffers[binding].offset;
+            }
+        } else if (command->type ==
+                   RIN_GPU_BACKEND_COMMAND_DRAW_INDEXED_INDIRECT) {
+            const RinGpuDrawIndexedIndirectV1* draw =
+                &command->value.draw_indexed_indirect;
+            RinGpuObjectSlot* index_buffer;
+            RinGpuObjectSlot* indirect_buffer;
+            RinGpuObjectSlot* vertex_buffers[
+                RIN_GPU_MAX_VERTEX_BUFFER_BINDINGS] = {0};
+            uint64_t bind_group_cookie;
+            uint32_t index_stride = ringpu_index_format_bytes(draw->index_format);
+            if (active_render_target != command->source ||
+                active_render_mip_level != draw->mip_level ||
+                active_render_array_layer != draw->array_layer) {
+                result = RIN_GPU_ERROR_STATE;
+                break;
+            }
+            result = ringpu_slot(core, command->destination,
+                                 RIN_GPU_OBJECT_GRAPHICS_PIPELINE, NULL,
+                                 &destination);
+            if (result != RIN_GPU_OK) break;
+            result = ringpu_backend_graphics_bind_group(
+                core, command->destination, destination, command->resources,
+                &bind_group_cookie);
+            if (result != RIN_GPU_OK) break;
+            if (ringpu_graphics_draw_has_hazard(
+                    core, list, command->resources, index)) {
+                result = RIN_GPU_ERROR_STATE;
+                break;
+            }
+            result = ringpu_validate_graphics_sampled_submit(
+                core, command->resources, staged_states,
+                active_render_target, active_render_mip_level,
+                active_render_array_layer, active_depth_target,
+                active_depth_mip_level, active_depth_array_layer,
+                active_stencil_target, active_stencil_mip_level,
+                active_stencil_array_layer);
+            if (result != RIN_GPU_OK) break;
+            result = ringpu_slot(core, command->source,
+                                 RIN_GPU_OBJECT_IMAGE, &source_index, &source);
+            if (result != RIN_GPU_OK) break;
+            result = ringpu_stage_image_states(source, source_index,
+                                               staged_states);
+            if (result != RIN_GPU_OK) break;
+            source_states = staged_states[source_index];
+            result = ringpu_slot(core, draw->index_buffer,
+                                 RIN_GPU_OBJECT_BUFFER, NULL, &index_buffer);
+            if (result != RIN_GPU_OK) break;
+            result = ringpu_slot(core, command->auxiliary,
+                                 RIN_GPU_OBJECT_BUFFER, NULL,
+                                 &indirect_buffer);
+            if (result != RIN_GPU_OK) break;
+            if (index_stride == 0u ||
+                (index_buffer->value.buffer.usage & RIN_GPU_BUFFER_INDEX) == 0u ||
+                !ringpu_buffer_upload_ready(index_buffer) ||
+                draw->index_offset > index_buffer->value.buffer.size_bytes ||
+                (indirect_buffer->value.buffer.usage & RIN_GPU_BUFFER_INDIRECT) == 0u ||
+                !ringpu_buffer_upload_ready(indirect_buffer) ||
+                (destination->value.graphics_pipeline.depth_format != 0u &&
+                 (active_depth_target == 0u ||
+                  active_depth_format !=
+                      destination->value.graphics_pipeline.depth_format)) ||
+                source_states[draw->array_layer *
+                                  source->value.image.descriptor.mip_levels +
+                                  draw->mip_level] !=
+                    RIN_GPU_IMAGE_STATE_COLOR_TARGET ||
+                source->value.image.descriptor.format !=
+                    destination->value.graphics_pipeline.color_format) {
+                result = RIN_GPU_ERROR_STATE;
+                break;
+            }
+            result = ringpu_vertex_bindings_for_draw(
+                core, destination, draw->vertex_buffers, draw->binding_count,
+                0u, 1u, 0u, 1u, vertex_buffers);
+            if (result != RIN_GPU_OK) break;
+            commands[index].value.draw_indexed_indirect.pipeline_cookie =
+                destination->value.graphics_pipeline.backend_cookie;
+            commands[index].value.draw_indexed_indirect.color_target_cookie =
+                source->value.image.backend_cookie;
+            commands[index].value.draw_indexed_indirect.bind_group_cookie =
+                bind_group_cookie;
+            commands[index].value.draw_indexed_indirect.index_buffer_cookie =
+                index_buffer->value.buffer.backend_cookie;
+            commands[index].value.draw_indexed_indirect.indirect_buffer_cookie =
+                indirect_buffer->value.buffer.backend_cookie;
+            commands[index].value.draw_indexed_indirect.index_offset =
+                draw->index_offset;
+            commands[index].value.draw_indexed_indirect.indirect_offset =
+                draw->indirect_offset;
+            commands[index].value.draw_indexed_indirect.index_format =
+                draw->index_format;
+            commands[index].value.draw_indexed_indirect.mip_level = draw->mip_level;
+            commands[index].value.draw_indexed_indirect.array_layer = draw->array_layer;
+            commands[index].value.draw_indexed_indirect.draw_count = draw->draw_count;
+            commands[index].value.draw_indexed_indirect.stride = draw->stride;
+            commands[index].value.draw_indexed_indirect.vertex_count = draw->vertex_count;
+            commands[index].value.draw_indexed_indirect.vertex_binding_count =
+                draw->binding_count;
+            commands[index].value.draw_indexed_indirect.base_vertex = 0;
+            for (uint32_t binding = 0u; binding < draw->binding_count;
+                 ++binding) {
+                commands[index].value.draw_indexed_indirect.vertex_buffers[binding]
+                    .binding = draw->vertex_buffers[binding].binding;
+                commands[index].value.draw_indexed_indirect.vertex_buffers[binding]
+                    .buffer_cookie =
+                        vertex_buffers[binding]->value.buffer.backend_cookie;
+                commands[index].value.draw_indexed_indirect.vertex_buffers[binding]
                     .offset = draw->vertex_buffers[binding].offset;
             }
         } else if (command->type == RIN_GPU_BACKEND_COMMAND_DRAW_INDEXED ||

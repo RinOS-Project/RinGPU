@@ -57,7 +57,8 @@ typedef enum RinGpuObjectType {
 #define RIN_GPU_BUFFER_STORAGE          0x00000004u
 #define RIN_GPU_BUFFER_VERTEX           0x00000008u
 #define RIN_GPU_BUFFER_INDEX            0x00000010u
-#define RIN_GPU_BUFFER_KNOWN_USAGE      0x0000001fu
+#define RIN_GPU_BUFFER_INDIRECT         0x00000020u
+#define RIN_GPU_BUFFER_KNOWN_USAGE      0x0000003fu
 
 /* CPU-visible buffers accept immediate CPU uploads through
  * ringpu_upload_buffer(). They must also declare COPY_DESTINATION and remain
@@ -183,6 +184,7 @@ typedef enum RinGpuImageState {
 #define RIN_GPU_MAX_DRAW_VERTICES 16777216u
 #define RIN_GPU_MAX_DRAW_INDICES 16777216u
 #define RIN_GPU_MAX_DRAW_INSTANCES 1048576u
+#define RIN_GPU_MAX_INDIRECT_COMMANDS 1024u
 #define RIN_GPU_MAX_VERTEX_ATTRIBUTES RIN_SHADER_MAX_IO
 #define RIN_GPU_MAX_VERTEX_BUFFER_BINDINGS RIN_GPU_MAX_VERTEX_ATTRIBUTES
 #define RIN_GPU_MAX_VERTEX_STRIDE 2048u
@@ -1140,6 +1142,64 @@ typedef struct RinGpuDrawIndexedV2 {
         vertex_buffers[RIN_GPU_MAX_VERTEX_BUFFER_BINDINGS];
 } RinGpuDrawIndexedV2;
 
+/* Bounded indirect graphics contracts. The argument buffer is a GPU buffer
+ * with RIN_GPU_BUFFER_INDIRECT usage. Each packet is read by the selected
+ * backend at submission time; the vertex bindings are fixed by the command
+ * and the packet supplies only draw counts/offsets. */
+typedef struct RinGpuDrawIndirectV1 {
+    uint32_t abi_version;
+    uint32_t struct_size;
+    RinGpuHandle pipeline;
+    RinGpuHandle color_target;
+    RinGpuHandle indirect_buffer;
+    uint64_t indirect_offset;
+    uint32_t mip_level;
+    uint32_t array_layer;
+    uint32_t draw_count;
+    uint32_t stride;
+    uint32_t binding_count;
+    uint32_t flags;
+    uint32_t reserved0;
+    uint32_t reserved1;
+    RinGpuVertexBufferBindingV1
+        vertex_buffers[RIN_GPU_MAX_VERTEX_BUFFER_BINDINGS];
+} RinGpuDrawIndirectV1;
+
+typedef struct RinGpuDrawIndexedIndirectV1 {
+    uint32_t abi_version;
+    uint32_t struct_size;
+    RinGpuHandle pipeline;
+    RinGpuHandle color_target;
+    RinGpuHandle index_buffer;
+    RinGpuHandle indirect_buffer;
+    uint64_t index_offset;
+    uint64_t indirect_offset;
+    uint32_t index_format;
+    uint32_t mip_level;
+    uint32_t array_layer;
+    uint32_t draw_count;
+    uint32_t stride;
+    uint32_t vertex_count;
+    uint32_t binding_count;
+    uint32_t flags;
+    uint32_t reserved0;
+    uint32_t reserved1;
+    RinGpuVertexBufferBindingV1
+        vertex_buffers[RIN_GPU_MAX_VERTEX_BUFFER_BINDINGS];
+} RinGpuDrawIndexedIndirectV1;
+
+typedef struct RinGpuDispatchIndirectV1 {
+    uint32_t abi_version;
+    uint32_t struct_size;
+    RinGpuHandle pipeline;
+    RinGpuHandle bind_group;
+    RinGpuHandle indirect_buffer;
+    uint64_t indirect_offset;
+    uint32_t flags;
+    uint32_t reserved0;
+    uint32_t reserved1;
+} RinGpuDispatchIndirectV1;
+
 /* Additive indexed-draw form. Existing V1 callers retain the exact original
  * layout and implicitly use base_vertex == 0. */
 typedef struct RinGpuDrawIndexedBaseVertexV1 {
@@ -1627,6 +1687,15 @@ int ringpu_command_draw_indexed_v2(RinGpuCore* core,
 int ringpu_command_draw_indexed_base_vertex(
     RinGpuCore* core, RinGpuHandle command_list,
     const RinGpuDrawIndexedBaseVertexV1* draw);
+int ringpu_command_draw_indirect(
+    RinGpuCore* core, RinGpuHandle command_list,
+    const RinGpuDrawIndirectV1* draw);
+int ringpu_command_draw_indexed_indirect(
+    RinGpuCore* core, RinGpuHandle command_list,
+    const RinGpuDrawIndexedIndirectV1* draw);
+int ringpu_command_dispatch_indirect(
+    RinGpuCore* core, RinGpuHandle command_list,
+    const RinGpuDispatchIndirectV1* dispatch);
 int ringpu_command_end_render_pass(RinGpuCore* core,
                                    RinGpuHandle command_list);
 int ringpu_command_present(RinGpuCore* core, RinGpuHandle command_list,
