@@ -91,6 +91,12 @@ if(RINGPU_BUILD_TESTS)
     add_executable(ringpu-runtime-test tests/ringpu_runtime_test.c)
     target_link_libraries(ringpu-runtime-test PRIVATE RinGPU::RinGPU)
     add_test(NAME ringpu-runtime COMMAND ringpu-runtime-test)
+    add_executable(ringpu-resource-requirements-test
+                   tests/ringpu_resource_requirements_test.c)
+    target_link_libraries(ringpu-resource-requirements-test PRIVATE
+                          RinGPU::RinGPU)
+    add_test(NAME ringpu-resource-requirements
+             COMMAND ringpu-resource-requirements-test)
     add_executable(ringpu-cross-process-ipc-test
                    tests/ringpu_cross_process_ipc_test.c)
     target_link_libraries(ringpu-cross-process-ipc-test PRIVATE RinGPU::RinGPU)

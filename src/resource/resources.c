@@ -8,6 +8,101 @@
 #include <stdlib.h>
 #include <string.h>
 
+static int ringpu_resource_memory_align_up(uint64_t value,
+                                           uint64_t alignment,
+                                           uint64_t* result_out)
+{
+    uint64_t mask;
+
+    if (!result_out || alignment == 0u ||
+        (alignment & (alignment - 1u)) != 0u) {
+        return 0;
+    }
+    mask = alignment - 1u;
+    if (value > UINT64_MAX - mask) return 0;
+    *result_out = (value + mask) & ~mask;
+    return 1;
+}
+
+static uint32_t ringpu_resource_memory_type_bits(const RinGpuCore* core)
+{
+    uint32_t bits = 0u;
+
+    if (core->adapter.dedicated_memory_bytes != 0u)
+        bits |= RIN_GPU_RESOURCE_MEMORY_TYPE_LOCAL;
+    if (core->adapter.shared_memory_bytes != 0u)
+        bits |= RIN_GPU_RESOURCE_MEMORY_TYPE_SYSTEM;
+    /* A host-only core may not have physical telemetry.  The mask remains a
+     * portable allocator namespace in that case; physical backends must
+     * replace it with their admitted heap mask before binding. */
+    return bits != 0u ? bits : RIN_GPU_RESOURCE_MEMORY_TYPE_LOCAL |
+                                  RIN_GPU_RESOURCE_MEMORY_TYPE_SYSTEM;
+}
+
+static int ringpu_resource_memory_requirements_fill(
+    const RinGpuCore* core, uint32_t resource_type, uint64_t size_bytes,
+    uint64_t alignment, RinGpuResourceMemoryRequirementsV1* requirements)
+{
+    uint64_t rounded_size;
+
+    if (!core || !requirements || size_bytes == 0u ||
+        !ringpu_resource_memory_align_up(size_bytes, alignment,
+                                         &rounded_size) ||
+        rounded_size > core->max_total_allocation_size) {
+        return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    }
+    memset(requirements, 0, sizeof(*requirements));
+    requirements->abi_version = RIN_GPU_ABI_VERSION;
+    requirements->struct_size = sizeof(*requirements);
+    requirements->resource_type = resource_type;
+    requirements->size_bytes = rounded_size;
+    requirements->alignment = alignment;
+    requirements->memory_type_bits =
+        ringpu_resource_memory_type_bits(core);
+    return RIN_GPU_OK;
+}
+
+int ringpu_get_buffer_memory_requirements(
+    const RinGpuCore* core, const RinGpuBufferDescV1* desc,
+    RinGpuResourceMemoryRequirementsV1* requirements)
+{
+    int result;
+
+    result = ringpu_core_ready(core);
+    if (result != RIN_GPU_OK) return result;
+    if (!desc || !requirements ||
+        !ringpu_versioned(desc->abi_version, desc->struct_size,
+                          sizeof(*desc)) ||
+        desc->size_bytes == 0u ||
+        desc->size_bytes > core->max_buffer_size || desc->usage == 0u ||
+        (desc->usage & ~RIN_GPU_BUFFER_KNOWN_USAGE) != 0u ||
+        (desc->flags & ~RIN_GPU_BUFFER_KNOWN_FLAGS) != 0u ||
+        ((desc->flags & RIN_GPU_BUFFER_CPU_VISIBLE) != 0u &&
+         (desc->usage & RIN_GPU_BUFFER_COPY_DESTINATION) == 0u)) {
+        return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    }
+    return ringpu_resource_memory_requirements_fill(
+        core, RIN_GPU_RESOURCE_MEMORY_BUFFER, desc->size_bytes, 256u,
+        requirements);
+}
+
+int ringpu_get_image_memory_requirements(
+    const RinGpuCore* core, const RinGpuImageDescV1* desc,
+    RinGpuResourceMemoryRequirementsV1* requirements)
+{
+    uint64_t allocation_bytes = 0u;
+    int result;
+
+    result = ringpu_core_ready(core);
+    if (result != RIN_GPU_OK) return result;
+    if (!requirements) return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    result = ringpu_image_allocation_size(core, desc, &allocation_bytes);
+    if (result != RIN_GPU_OK) return result;
+    return ringpu_resource_memory_requirements_fill(
+        core, RIN_GPU_RESOURCE_MEMORY_IMAGE, allocation_bytes,
+        RIN_GPU_MEMORY_MIN_PAGE_SIZE, requirements);
+}
+
 int ringpu_create_buffer(RinGpuCore* core, const RinGpuBufferDescV1* desc,
                          RinGpuHandle* buffer)
 {
