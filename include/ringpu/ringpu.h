@@ -181,6 +181,7 @@ typedef enum RinGpuImageState {
 #define RIN_GPU_MAX_VERTEX_BUFFER_BINDINGS RIN_GPU_MAX_VERTEX_ATTRIBUTES
 #define RIN_GPU_MAX_VERTEX_STRIDE 2048u
 #define RIN_GPU_MAX_VARYINGS (RIN_SHADER_MAX_IO - 4u)
+#define RIN_GPU_MAX_COLOR_TARGETS 4u
 #define RIN_GPU_GRAPHICS_PIPELINE_NATIVE_POINT_SIZE_OUTPUT 0x00000001u
 #define RIN_GPU_GRAPHICS_PIPELINE_NATIVE_PRIMITIVE_RESTART 0x00000002u
 #define RIN_GPU_GRAPHICS_PIPELINE_NATIVE_KNOWN_FLAGS \
@@ -740,6 +741,29 @@ typedef struct RinGpuGraphicsPipelineNativeDescV2 {
     float blend_constant_alpha;
 } RinGpuGraphicsPipelineNativeDescV2;
 
+/* Per-attachment blend state for the additive independent-blend profile.
+ * The enclosing V3 descriptor requires all four target slots to be supplied;
+ * a disabled slot must carry canonical zero factors and operations. Blend
+ * constants remain the V2 descriptor's shared RGBA value. */
+typedef struct RinGpuBlendTargetV1 {
+    uint32_t blend_enabled;
+    uint32_t source_color_factor;
+    uint32_t destination_color_factor;
+    uint32_t color_operation;
+    uint32_t source_alpha_factor;
+    uint32_t destination_alpha_factor;
+    uint32_t alpha_operation;
+    uint32_t color_write_mask;
+    uint32_t reserved;
+} RinGpuBlendTargetV1;
+
+typedef struct RinGpuGraphicsPipelineNativeDescV3 {
+    RinGpuGraphicsPipelineNativeDescV2 base;
+    uint32_t blend_target_mask;
+    uint32_t reserved;
+    RinGpuBlendTargetV1 blend_targets[RIN_GPU_MAX_COLOR_TARGETS];
+} RinGpuGraphicsPipelineNativeDescV3;
+
 typedef struct RinGpuVaryingV1 {
     uint32_t abi_version;
     uint32_t struct_size;
@@ -1061,8 +1085,6 @@ typedef struct RinGpuClearRegionV1 {
  * color attachments.  Keep the attachment description small and explicit:
  * a zero handle is legal only for a bit that is clear in the accompanying
  * active-color mask. */
-#define RIN_GPU_MAX_COLOR_TARGETS 4u
-
 typedef struct RinGpuColorAttachmentV1 {
     RinGpuHandle target;
     uint32_t mip_level;
@@ -1346,6 +1368,11 @@ int ringpu_create_graphics_pipeline_native_v2(
     const RinGpuVertexAttributeV1* attributes, uint32_t attribute_count,
     const RinGpuVaryingV1* varyings, uint32_t varying_count,
     RinGpuHandle* pipeline);
+int ringpu_create_graphics_pipeline_native_v3(
+    RinGpuCore* core, const RinGpuGraphicsPipelineNativeDescV3* desc,
+    const RinGpuVertexAttributeV1* attributes, uint32_t attribute_count,
+    const RinGpuVaryingV1* varyings, uint32_t varying_count,
+    RinGpuHandle* pipeline);
 int ringpu_create_graphics_pipeline_native_vertex_bindings(
     RinGpuCore* core, const RinGpuGraphicsPipelineNativeDescV1* desc,
     const RinGpuVertexAttributeV2* attributes, uint32_t attribute_count,
@@ -1529,6 +1556,10 @@ _Static_assert(sizeof(RinGpuGraphicsPipelineNativeDescV1) == 168u,
                "RinGPU native graphics pipeline ABI drift");
 _Static_assert(sizeof(RinGpuGraphicsPipelineNativeDescV2) == 184u,
                "RinGPU native graphics pipeline V2 ABI drift");
+_Static_assert(sizeof(RinGpuBlendTargetV1) == 36u,
+               "RinGPU blend target ABI drift");
+_Static_assert(sizeof(RinGpuGraphicsPipelineNativeDescV3) == 336u,
+               "RinGPU native graphics pipeline V3 ABI drift");
 #else
 _Static_assert(sizeof(RinGpuGraphicsPipelineBlendDescV1) == 84u,
                "RinGPU blend graphics pipeline ABI drift");
@@ -1536,6 +1567,10 @@ _Static_assert(sizeof(RinGpuGraphicsPipelineNativeDescV1) == 164u,
                "RinGPU native graphics pipeline ABI drift");
 _Static_assert(sizeof(RinGpuGraphicsPipelineNativeDescV2) == 180u,
                "RinGPU native graphics pipeline V2 ABI drift");
+_Static_assert(sizeof(RinGpuBlendTargetV1) == 36u,
+               "RinGPU blend target ABI drift");
+_Static_assert(sizeof(RinGpuGraphicsPipelineNativeDescV3) == 332u,
+               "RinGPU native graphics pipeline V3 ABI drift");
 #endif
 _Static_assert(sizeof(RinGpuVaryingV1) == 36u,
                "RinGPU varying ABI drift");

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 #include "software_backend.h"
 #include "../core/core.h"
+#include "../validation/pipeline.h"
 #include "../validation/resource.h"
 
 #include <float.h>
@@ -6063,6 +6064,44 @@ static int sw_blend_state_valid(const SwPipeline* pipeline)
 
     if (!pipeline) return RIN_GPU_ERROR_INVALID_ARGUMENT;
     desc = &pipeline->desc;
+    if (desc->independent_blend_enabled != 0u) {
+        if (desc->independent_blend_enabled != 1u ||
+            desc->independent_blend_mask !=
+                ((UINT32_C(1) << RIN_GPU_MAX_COLOR_TARGETS) - 1u))
+            return RIN_GPU_ERROR_UNSUPPORTED;
+        for (uint32_t target = 0u; target < RIN_GPU_MAX_COLOR_TARGETS;
+             ++target) {
+            const RinGpuBlendTargetV1* state = &desc->blend_targets[target];
+
+            if (state->blend_enabled > 1u ||
+                (state->color_write_mask & ~RIN_GPU_COLOR_WRITE_ALL) != 0u ||
+                state->reserved != 0u)
+                return RIN_GPU_ERROR_UNSUPPORTED;
+            if (state->blend_enabled == 0u) {
+                if (state->source_color_factor != 0u ||
+                    state->destination_color_factor != 0u ||
+                    state->color_operation != 0u ||
+                    state->source_alpha_factor != 0u ||
+                    state->destination_alpha_factor != 0u ||
+                    state->alpha_operation != 0u)
+                    return RIN_GPU_ERROR_UNSUPPORTED;
+            } else if (!ringpu_blend_source_factor_v2_valid(
+                           state->source_color_factor) ||
+                       !ringpu_blend_factor_v2_valid(
+                           state->destination_color_factor) ||
+                       !ringpu_blend_operation_valid(state->color_operation) ||
+                       !ringpu_blend_source_factor_v2_valid(
+                           state->source_alpha_factor) ||
+                       !ringpu_blend_factor_v2_valid(
+                           state->destination_alpha_factor) ||
+                       !ringpu_blend_operation_valid(state->alpha_operation)) {
+                return RIN_GPU_ERROR_UNSUPPORTED;
+            }
+        }
+        return RIN_GPU_OK;
+    }
+    if (desc->independent_blend_mask != 0u)
+        return RIN_GPU_ERROR_UNSUPPORTED;
     if ((desc->color_write_mask & ~RIN_GPU_COLOR_WRITE_ALL) != 0u)
         return RIN_GPU_ERROR_UNSUPPORTED;
     if (desc->blend_enabled == 0u)
@@ -6311,8 +6350,9 @@ static int sw_write_stencil_operation(SwImage* image, uint32_t x, uint32_t y,
 }
 
 static void sw_put_pixel_with_raster(const SwPipeline* pipeline, SwImage* image,
-                                     const SwRasterState* raster, int32_t x,
-                                     int32_t y, const float color[4]);
+                                     const SwRasterState* raster, uint32_t
+                                         color_index, int32_t x, int32_t y,
+                                     const float color[4]);
 
 static int sw_publish_fragment(const SwPipeline* pipeline,
                                const SwRenderPass* pass, int32_t x, int32_t y,
@@ -6402,15 +6442,16 @@ static int sw_publish_fragment(const SwPipeline* pipeline,
         if (pass->color_targets[color_index] == NULL)
             return RIN_GPU_ERROR_BACKEND;
         sw_put_pixel_with_raster(pipeline, pass->color_targets[color_index],
-                                 &pass->raster, x, y,
+                                 &pass->raster, color_index, x, y,
                                  color + color_index * 4u);
     }
     return RIN_GPU_OK;
 }
 
 static void sw_put_pixel_with_raster(const SwPipeline* pipeline, SwImage* image,
-                                     const SwRasterState* raster, int32_t x,
-                                     int32_t y, const float color[4])
+                                     const SwRasterState* raster,
+                                     uint32_t color_index, int32_t x, int32_t y,
+                                     const float color[4])
 {
     uint32_t bytes_per_pixel;
     uint64_t offset;
@@ -6418,6 +6459,13 @@ static void sw_put_pixel_with_raster(const SwPipeline* pipeline, SwImage* image,
     float destination[4];
     float output[4];
     uint32_t write_mask;
+    uint32_t blend_enabled;
+    uint32_t source_color_factor;
+    uint32_t destination_color_factor;
+    uint32_t color_operation;
+    uint32_t source_alpha_factor;
+    uint32_t destination_alpha_factor;
+    uint32_t alpha_operation;
     if (!image || x < 0 || y < 0 || (uint32_t)x >= image->desc.width ||
         (uint32_t)y >= image->desc.height)
         return;
@@ -6467,17 +6515,36 @@ static void sw_put_pixel_with_raster(const SwPipeline* pipeline, SwImage* image,
         destination[2] = (float)pixel[2] / 255.0f;
         destination[3] = (float)pixel[3] / 255.0f;
     }
+    blend_enabled = pipeline->desc.blend_enabled;
+    source_color_factor = pipeline->desc.source_color_factor;
+    destination_color_factor = pipeline->desc.destination_color_factor;
+    color_operation = pipeline->desc.color_operation;
+    source_alpha_factor = pipeline->desc.source_alpha_factor;
+    destination_alpha_factor = pipeline->desc.destination_alpha_factor;
+    alpha_operation = pipeline->desc.alpha_operation;
+    write_mask = pipeline->desc.color_write_mask;
+    if (pipeline->desc.independent_blend_enabled != 0u) {
+        const RinGpuBlendTargetV1* target =
+            &pipeline->desc.blend_targets[color_index];
+
+        blend_enabled = target->blend_enabled;
+        source_color_factor = target->source_color_factor;
+        destination_color_factor = target->destination_color_factor;
+        color_operation = target->color_operation;
+        source_alpha_factor = target->source_alpha_factor;
+        destination_alpha_factor = target->destination_alpha_factor;
+        alpha_operation = target->alpha_operation;
+        write_mask = target->color_write_mask;
+    }
     memcpy(output, color, sizeof(output));
-    if (pipeline->desc.blend_enabled != 0u) {
+    if (blend_enabled != 0u) {
         for (uint32_t component = 0u; component < 4u; ++component) {
             uint32_t source_factor = component == 3u
-                ? pipeline->desc.source_alpha_factor
-                : pipeline->desc.source_color_factor;
+                ? source_alpha_factor : source_color_factor;
             uint32_t destination_factor = component == 3u
-                ? pipeline->desc.destination_alpha_factor
-                : pipeline->desc.destination_color_factor;
+                ? destination_alpha_factor : destination_color_factor;
             uint32_t operation = component == 3u
-                ? pipeline->desc.alpha_operation : pipeline->desc.color_operation;
+                ? alpha_operation : color_operation;
             float source_value = color[component] *
                 sw_blend_factor(pipeline, source_factor, component, color,
                                 destination);
@@ -6493,7 +6560,6 @@ static void sw_put_pixel_with_raster(const SwPipeline* pipeline, SwImage* image,
     }
     /* Zero is a valid pipeline mask: depth/stencil work still executes but
      * no color component may be stored. */
-    write_mask = pipeline->desc.color_write_mask;
     sw_dither_packed_color(image, raster, (uint32_t)x, (uint32_t)y, output);
     sw_store_color_components(image, (uint32_t)x, (uint32_t)y, output,
                               write_mask);

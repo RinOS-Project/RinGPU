@@ -265,6 +265,9 @@ typedef struct RinGpuBackendGraphicsPipelineDescV1 {
         vertex_bindings[RIN_GPU_MAX_VERTEX_BUFFER_BINDINGS];
     RinGpuBackendVaryingV1 varyings[RIN_GPU_MAX_VARYINGS];
     uint32_t resource_kinds[RIN_SHADER_MAX_RESOURCES];
+    uint32_t independent_blend_enabled;
+    uint32_t independent_blend_mask;
+    RinGpuBlendTargetV1 blend_targets[RIN_GPU_MAX_COLOR_TARGETS];
 } RinGpuBackendGraphicsPipelineDescV1;
 
 typedef struct RinGpuBackendDrawV1 {
@@ -862,7 +865,7 @@ _Static_assert(sizeof(RinGpuBackendVaryingV1) == 16u,
                "RinGPU backend varying drift");
 _Static_assert(sizeof(RinGpuBackendRasterStateV1) == 80u,
                "RinGPU backend raster state drift");
-_Static_assert(sizeof(RinGpuBackendGraphicsPipelineDescV1) == 2028u,
+_Static_assert(sizeof(RinGpuBackendGraphicsPipelineDescV1) == 2180u,
                "RinGPU backend graphics-pipeline descriptor drift");
 _Static_assert(sizeof(RinGpuBackendDrawV1) == 56u,
                "RinGPU backend draw drift");

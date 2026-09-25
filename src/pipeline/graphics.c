@@ -10,6 +10,31 @@
 #include <stdlib.h>
 #include <string.h>
 
+static int ringpu_independent_blend_target_valid(
+    const RinGpuBlendTargetV1* target)
+{
+    int enabled;
+
+    if (!target || target->blend_enabled > 1u ||
+        (target->color_write_mask & ~RIN_GPU_COLOR_WRITE_ALL) != 0u ||
+        target->reserved != 0u)
+        return 0;
+    enabled = target->blend_enabled != 0u;
+    if (!enabled)
+        return target->source_color_factor == 0u &&
+               target->destination_color_factor == 0u &&
+               target->color_operation == 0u &&
+               target->source_alpha_factor == 0u &&
+               target->destination_alpha_factor == 0u &&
+               target->alpha_operation == 0u;
+    return ringpu_blend_source_factor_v2_valid(target->source_color_factor) &&
+           ringpu_blend_factor_v2_valid(target->destination_color_factor) &&
+           ringpu_blend_operation_valid(target->color_operation) &&
+           ringpu_blend_source_factor_v2_valid(target->source_alpha_factor) &&
+           ringpu_blend_factor_v2_valid(target->destination_alpha_factor) &&
+           ringpu_blend_operation_valid(target->alpha_operation);
+}
+
 static int ringpu_create_graphics_pipeline_internal(
     RinGpuCore* core, RinGpuHandle vertex_shader_handle,
     RinGpuHandle fragment_shader_handle, uint32_t color_format,
@@ -35,7 +60,9 @@ static int ringpu_create_graphics_pipeline_internal(
     uint32_t back_stencil_write_mask, uint32_t back_stencil_fail_operation,
     uint32_t back_stencil_depth_fail_operation,
     uint32_t back_stencil_pass_operation,
-    RinGpuHandle* pipeline, const float* blend_constants) {
+    RinGpuHandle* pipeline, const float* blend_constants,
+    const RinGpuBlendTargetV1* blend_targets,
+    uint32_t blend_target_mask) {
     RinGpuObjectSlot* vertex_shader;
     RinGpuObjectSlot* fragment_shader;
     RinGpuObjectSlot* slot;
@@ -177,6 +204,12 @@ static int ringpu_create_graphics_pipeline_internal(
     backend_desc.color_write_mask = color_write_mask;
     backend_desc.cull_mode = cull_mode;
     backend_desc.front_face = front_face;
+    if (blend_targets != NULL) {
+        backend_desc.independent_blend_enabled = 1u;
+        backend_desc.independent_blend_mask = blend_target_mask;
+        memcpy(backend_desc.blend_targets, blend_targets,
+               sizeof(backend_desc.blend_targets));
+    }
     result = core->backend.create_graphics_pipeline(
         core->backend_context,
         vertex_shader->value.shader_module.backend_cookie,
@@ -289,7 +322,7 @@ int ringpu_create_graphics_pipeline(
         RIN_GPU_COLOR_WRITE_ALL, 0, NULL, 0u, 0u, NULL, NULL, 0u,
         0, 0u, 0u, NULL, 0u,
         RIN_GPU_CULL_NONE, RIN_GPU_FRONT_FACE_COUNTER_CLOCKWISE,
-        0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, pipeline, NULL);
+        0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, pipeline, NULL, NULL, 0u);
 }
 
 int ringpu_create_graphics_pipeline_vertex(
@@ -316,7 +349,7 @@ int ringpu_create_graphics_pipeline_vertex(
         attribute_count, desc->vertex_stride, NULL, NULL, 0u,
         0, 0u, 0u, NULL, 0u,
         RIN_GPU_CULL_NONE, RIN_GPU_FRONT_FACE_COUNTER_CLOCKWISE,
-        0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, pipeline, NULL);
+        0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, pipeline, NULL, NULL, 0u);
 }
 
 int ringpu_create_graphics_pipeline_vertex_bindings(
@@ -346,7 +379,7 @@ int ringpu_create_graphics_pipeline_vertex_bindings(
         attributes, vertex_bindings, vertex_binding_count,
         0, 0u, 0u, NULL, 0u,
         RIN_GPU_CULL_NONE, RIN_GPU_FRONT_FACE_COUNTER_CLOCKWISE,
-        0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, pipeline, NULL);
+        0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, pipeline, NULL, NULL, 0u);
 }
 
 int ringpu_create_graphics_pipeline_depth(
@@ -375,7 +408,7 @@ int ringpu_create_graphics_pipeline_depth(
         RIN_GPU_COLOR_WRITE_ALL, 0, NULL, 0u, 0u, NULL, NULL, 0u,
         0, 0u, 0u, NULL, 0u,
         RIN_GPU_CULL_NONE, RIN_GPU_FRONT_FACE_COUNTER_CLOCKWISE,
-        0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, pipeline, NULL);
+        0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, pipeline, NULL, NULL, 0u);
 }
 
 int ringpu_create_graphics_pipeline_blend(
@@ -413,7 +446,7 @@ int ringpu_create_graphics_pipeline_blend(
         desc->alpha_operation, desc->color_write_mask, 0, NULL, 0u, 0u,
         NULL, NULL, 0u, 0, 0u, 0u, NULL, 0u, RIN_GPU_CULL_NONE,
         RIN_GPU_FRONT_FACE_COUNTER_CLOCKWISE,
-        0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, pipeline, NULL);
+        0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, pipeline, NULL, NULL, 0u);
 }
 
 int ringpu_create_graphics_pipeline_native(
@@ -487,7 +520,7 @@ int ringpu_create_graphics_pipeline_native(
         desc->back_stencil_reference, desc->back_stencil_read_mask,
         desc->back_stencil_write_mask, desc->back_stencil_fail_operation,
         desc->back_stencil_depth_fail_operation,
-        desc->back_stencil_pass_operation, pipeline, NULL);
+        desc->back_stencil_pass_operation, pipeline, NULL, NULL, 0u);
 }
 
 int ringpu_create_graphics_pipeline_native_vertex_bindings(
@@ -564,7 +597,7 @@ int ringpu_create_graphics_pipeline_native_vertex_bindings(
         desc->back_stencil_reference, desc->back_stencil_read_mask,
         desc->back_stencil_write_mask, desc->back_stencil_fail_operation,
         desc->back_stencil_depth_fail_operation,
-        desc->back_stencil_pass_operation, pipeline, NULL);
+        desc->back_stencil_pass_operation, pipeline, NULL, NULL, 0u);
 }
 
 int ringpu_create_graphics_pipeline_native_v2(
@@ -646,7 +679,113 @@ int ringpu_create_graphics_pipeline_native_v2(
         base->back_stencil_read_mask, base->back_stencil_write_mask,
         base->back_stencil_fail_operation,
         base->back_stencil_depth_fail_operation,
-        base->back_stencil_pass_operation, pipeline, blend_constants);
+        base->back_stencil_pass_operation, pipeline, blend_constants, NULL,
+        0u);
+}
+
+int ringpu_create_graphics_pipeline_native_v3(
+    RinGpuCore* core, const RinGpuGraphicsPipelineNativeDescV3* desc,
+    const RinGpuVertexAttributeV1* attributes, uint32_t attribute_count,
+    const RinGpuVaryingV1* varyings, uint32_t varying_count,
+    RinGpuHandle* pipeline)
+{
+    const RinGpuGraphicsPipelineNativeDescV2* base;
+    float blend_constants[4];
+    int blend_valid;
+    int result = ringpu_core_ready(core);
+
+    if (result != RIN_GPU_OK) return result;
+    if (!desc || !pipeline ||
+        !ringpu_versioned(desc->base.base.abi_version,
+                          desc->base.base.struct_size, sizeof(*desc)) ||
+        desc->blend_target_mask !=
+            ((UINT32_C(1) << RIN_GPU_MAX_COLOR_TARGETS) - 1u) ||
+        desc->reserved != 0u)
+        return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    for (uint32_t index = 0u; index < RIN_GPU_MAX_COLOR_TARGETS; ++index) {
+        if (!ringpu_independent_blend_target_valid(&desc->blend_targets[index]))
+            return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    }
+    base = &desc->base;
+    blend_constants[0] = base->blend_constant_red;
+    blend_constants[1] = base->blend_constant_green;
+    blend_constants[2] = base->blend_constant_blue;
+    blend_constants[3] = base->blend_constant_alpha;
+    if (!ringpu_blend_constants_valid(base->base.color_format,
+                                      blend_constants) ||
+        !ringpu_color_format(base->base.color_format) ||
+        !ringpu_primitive_topology_valid(base->base.primitive_topology) ||
+        !ringpu_depth_pipeline_valid(
+            base->base.depth_format, base->base.depth_compare,
+            base->base.depth_write_enabled, 1) ||
+        !ringpu_stencil_pipeline_valid(
+            base->base.depth_format, base->base.stencil_test_enabled,
+            base->base.stencil_compare, base->base.stencil_reference,
+            base->base.stencil_read_mask, base->base.stencil_write_mask,
+            base->base.stencil_fail_operation,
+            base->base.stencil_depth_fail_operation,
+            base->base.stencil_pass_operation,
+            base->base.separate_stencil_enabled,
+            base->base.back_stencil_compare,
+            base->base.back_stencil_reference,
+            base->base.back_stencil_read_mask,
+            base->base.back_stencil_write_mask,
+            base->base.back_stencil_fail_operation,
+            base->base.back_stencil_depth_fail_operation,
+            base->base.back_stencil_pass_operation) ||
+        base->base.blend_enabled > 1u ||
+        (base->base.color_write_mask & ~RIN_GPU_COLOR_WRITE_ALL) != 0u ||
+        !ringpu_cull_mode_valid(base->base.cull_mode) ||
+        !ringpu_front_face_valid(base->base.front_face) ||
+        (base->base.flags & ~RIN_GPU_GRAPHICS_PIPELINE_NATIVE_KNOWN_FLAGS) !=
+            0u ||
+        base->base.reserved0 != 0u)
+        return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    blend_valid = base->base.blend_enabled != 0u
+        ? ringpu_blend_source_factor_v2_valid(
+              base->base.source_color_factor) &&
+          ringpu_blend_factor_v2_valid(base->base.destination_color_factor) &&
+          ringpu_blend_operation_valid(base->base.color_operation) &&
+          ringpu_blend_source_factor_v2_valid(
+              base->base.source_alpha_factor) &&
+          ringpu_blend_factor_v2_valid(
+              base->base.destination_alpha_factor) &&
+          ringpu_blend_operation_valid(base->base.alpha_operation)
+        : base->base.source_color_factor == 0u &&
+          base->base.destination_color_factor == 0u &&
+          base->base.color_operation == 0u &&
+          base->base.source_alpha_factor == 0u &&
+          base->base.destination_alpha_factor == 0u &&
+          base->base.alpha_operation == 0u &&
+          blend_constants[0] == 0.0f && blend_constants[1] == 0.0f &&
+          blend_constants[2] == 0.0f && blend_constants[3] == 0.0f;
+    if (!blend_valid) return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    return ringpu_create_graphics_pipeline_internal(
+        core, base->base.vertex_shader, base->base.fragment_shader,
+        base->base.color_format, base->base.primitive_topology,
+        base->base.depth_format, base->base.depth_compare,
+        base->base.depth_write_enabled, base->base.stencil_test_enabled,
+        base->base.stencil_compare, base->base.stencil_reference,
+        base->base.stencil_read_mask, base->base.stencil_write_mask,
+        base->base.stencil_fail_operation,
+        base->base.stencil_depth_fail_operation,
+        base->base.stencil_pass_operation, base->base.blend_enabled,
+        base->base.source_color_factor,
+        base->base.destination_color_factor, base->base.color_operation,
+        base->base.source_alpha_factor,
+        base->base.destination_alpha_factor, base->base.alpha_operation,
+        base->base.color_write_mask, 1, attributes, attribute_count,
+        base->base.vertex_stride, NULL, NULL, 0u, 1, base->base.flags,
+        base->base.position_output_location, varyings, varying_count,
+        base->base.cull_mode, base->base.front_face,
+        base->base.separate_stencil_enabled,
+        base->base.back_stencil_compare, base->base.back_stencil_reference,
+        base->base.back_stencil_read_mask,
+        base->base.back_stencil_write_mask,
+        base->base.back_stencil_fail_operation,
+        base->base.back_stencil_depth_fail_operation,
+        base->base.back_stencil_pass_operation, pipeline, blend_constants,
+        desc->blend_targets, desc->blend_target_mask);
 }
 
 int ringpu_create_graphics_pipeline_native_vertex_bindings_v2(
@@ -730,7 +869,8 @@ int ringpu_create_graphics_pipeline_native_vertex_bindings_v2(
         base->back_stencil_read_mask, base->back_stencil_write_mask,
         base->back_stencil_fail_operation,
         base->back_stencil_depth_fail_operation,
-        base->back_stencil_pass_operation, pipeline, blend_constants);
+        base->back_stencil_pass_operation, pipeline, blend_constants, NULL,
+        0u);
 }
 
 int ringpu_graphics_image_kind(uint32_t kind) {
