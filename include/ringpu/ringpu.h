@@ -4,6 +4,8 @@
 
 #include <stdint.h>
 
+#include "memory.h"
+
 #include "version.h"
 #include "rin_shader.h"
 #include "presentation.h"
