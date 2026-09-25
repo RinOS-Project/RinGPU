@@ -3723,6 +3723,54 @@ static int sw_run_shader_typed(const SwShader* shader, const SwShaderIo* io)
             }
             break;
         }
+        case RIN_SHADER_OP_ATOMIC_ADD_I32:
+        case RIN_SHADER_OP_ATOMIC_EXCHANGE_I32:
+        case RIN_SHADER_OP_ATOMIC_MIN_I32:
+        case RIN_SHADER_OP_ATOMIC_MAX_I32: {
+            uint8_t* address;
+            int32_t observed;
+            int32_t replacement;
+
+            if (in->destination == RIN_SHADER_UNUSED ||
+                in->source0 == RIN_SHADER_UNUSED ||
+                in->source1 == RIN_SHADER_UNUSED ||
+                in->resource >= header->resource_count ||
+                in->flags != 0u || in->immediate != 0u ||
+                header->stage != RIN_SHADER_STAGE_COMPUTE ||
+                register_types[in->source0] != SW_SHADER_VALUE_I32 ||
+                register_types[in->source1] != SW_SHADER_VALUE_I32) {
+                return RIN_GPU_ERROR_UNSUPPORTED;
+            }
+            result = sw_compute_resource_address(
+                io, in->resource, i32_registers[in->source0],
+                RIN_GPU_RESOURCE_READ | RIN_GPU_RESOURCE_WRITE, &address);
+            if (result != RIN_GPU_OK)
+                return result;
+            memcpy(&observed, address, sizeof(observed));
+            switch (in->opcode) {
+            case RIN_SHADER_OP_ATOMIC_ADD_I32:
+                replacement = sw_i32_add(observed,
+                                         i32_registers[in->source1]);
+                break;
+            case RIN_SHADER_OP_ATOMIC_EXCHANGE_I32:
+                replacement = i32_registers[in->source1];
+                break;
+            case RIN_SHADER_OP_ATOMIC_MIN_I32:
+                replacement = observed < i32_registers[in->source1]
+                    ? observed : i32_registers[in->source1];
+                break;
+            case RIN_SHADER_OP_ATOMIC_MAX_I32:
+                replacement = observed > i32_registers[in->source1]
+                    ? observed : i32_registers[in->source1];
+                break;
+            default:
+                return RIN_GPU_ERROR_UNSUPPORTED;
+            }
+            memcpy(address, &replacement, sizeof(replacement));
+            i32_registers[in->destination] = observed;
+            register_types[in->destination] = SW_SHADER_VALUE_I32;
+            break;
+        }
         case RIN_SHADER_OP_SAMPLE_IMAGE_2D_F32:
             if (in->destination == RIN_SHADER_UNUSED ||
                 header->stage != RIN_SHADER_STAGE_FRAGMENT ||

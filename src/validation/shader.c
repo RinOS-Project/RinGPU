@@ -103,6 +103,18 @@ int ringpu_shader_resource_layout(const RinGpuObjectSlot* shader,
             }
             kinds[instruction->resource] = RIN_SHADER_RESOURCE_STORAGE_BUFFER;
             access[instruction->resource] |= RIN_GPU_RESOURCE_WRITE;
+        } else if (instruction->opcode == RIN_SHADER_OP_ATOMIC_ADD_I32 ||
+                   instruction->opcode == RIN_SHADER_OP_ATOMIC_EXCHANGE_I32 ||
+                   instruction->opcode == RIN_SHADER_OP_ATOMIC_MIN_I32 ||
+                   instruction->opcode == RIN_SHADER_OP_ATOMIC_MAX_I32) {
+            if (kinds[instruction->resource] != RIN_SHADER_RESOURCE_NONE &&
+                kinds[instruction->resource] !=
+                    RIN_SHADER_RESOURCE_STORAGE_BUFFER) {
+                return RIN_GPU_ERROR_SHADER_INVALID;
+            }
+            kinds[instruction->resource] = RIN_SHADER_RESOURCE_STORAGE_BUFFER;
+            access[instruction->resource] |= RIN_GPU_RESOURCE_READ |
+                                             RIN_GPU_RESOURCE_WRITE;
         } else if (instruction->opcode == RIN_SHADER_OP_SAMPLE_IMAGE_I32 ||
                    instruction->opcode == RIN_SHADER_OP_SAMPLE_IMAGE_F32 ||
                    instruction->opcode == RIN_SHADER_OP_SAMPLE_IMAGE_2D_I32 ||
@@ -215,6 +227,15 @@ static int shader_binary_operands(const RinShaderInstructionV1* instruction,
            shader_register(instruction->source1, register_count) &&
            shader_unused(instruction->resource) &&
            instruction->immediate == 0u;
+}
+
+static int shader_atomic_operands(const RinShaderInstructionV1* instruction,
+                                  uint32_t register_count) {
+    return shader_register(instruction->destination, register_count) &&
+           shader_register(instruction->source0, register_count) &&
+           shader_register(instruction->source1, register_count) &&
+           instruction->resource != RIN_SHADER_UNUSED &&
+           instruction->immediate == 0u && instruction->flags == 0u;
 }
 
 static int shader_builtin_type(uint32_t stage, uint32_t builtin,
@@ -656,6 +677,29 @@ int ringpu_shader_validate(const void* shader, size_t shader_size,
                 }
                 break;
             }
+            case RIN_SHADER_OP_ATOMIC_ADD_I32:
+            case RIN_SHADER_OP_ATOMIC_EXCHANGE_I32:
+            case RIN_SHADER_OP_ATOMIC_MIN_I32:
+            case RIN_SHADER_OP_ATOMIC_MAX_I32:
+                if (header.stage != RIN_SHADER_STAGE_COMPUTE ||
+                    !shader_atomic_operands(instruction,
+                                            header.register_count) ||
+                    instruction->resource >= header.resource_count ||
+                    !shader_has_type(i32_state, f32_state,
+                                     instruction->source0,
+                                     SHADER_VALUE_I32) ||
+                    !shader_has_type(i32_state, f32_state,
+                                     instruction->source1,
+                                     SHADER_VALUE_I32) ||
+                    !shader_resource_set_kind(
+                        resource_kinds, instruction->resource,
+                        RIN_SHADER_RESOURCE_STORAGE_BUFFER)) {
+                    result = RIN_SHADER_ERROR_INVALID_RESOURCE;
+                    break;
+                }
+                shader_define(i32_state, f32_state,
+                              instruction->destination, SHADER_VALUE_I32);
+                break;
             case RIN_SHADER_OP_SAMPLE_IMAGE_I32:
             case RIN_SHADER_OP_SAMPLE_IMAGE_F32: {
                 enum ShaderValueType type = instruction->opcode ==

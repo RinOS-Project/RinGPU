@@ -206,7 +206,16 @@ typedef enum RinShaderOpcode {
     RIN_SHADER_OP_SAMPLE_IMAGE_CUBE_F32 = 73,
     RIN_SHADER_OP_LOAD_PUSH_CONSTANT_I32 = 74,
     RIN_SHADER_OP_LOAD_PUSH_CONSTANT_F32 = 75,
-    RIN_SHADER_OP_LAST = RIN_SHADER_OP_LOAD_PUSH_CONSTANT_F32
+    /* Compute storage-buffer atomics.  source0 is an aligned byte offset,
+     * source1 is the I32 operand, and resource names the storage buffer.
+     * The destination receives the value observed before the operation.
+     * RSH1 exposes only operations with a single, explicit 32-bit word so
+     * validation and backend lowering cannot silently widen the contract. */
+    RIN_SHADER_OP_ATOMIC_ADD_I32 = 76,
+    RIN_SHADER_OP_ATOMIC_EXCHANGE_I32 = 77,
+    RIN_SHADER_OP_ATOMIC_MIN_I32 = 78,
+    RIN_SHADER_OP_ATOMIC_MAX_I32 = 79,
+    RIN_SHADER_OP_LAST = RIN_SHADER_OP_ATOMIC_MAX_I32
 } RinShaderOpcode;
 
 typedef enum RinShaderBuiltin {
