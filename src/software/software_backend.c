@@ -588,7 +588,17 @@ typedef struct SwRenderPass {
     SwRasterState raster;
     const uint8_t* push_constants;
     uint32_t push_constant_size;
+    struct RinGpuSoftwareBackend* backend;
 } SwRenderPass;
+
+typedef struct SwQueryState {
+    uint64_t cookie;
+    uint32_t query_type;
+    uint32_t active;
+    uint32_t available;
+    uint32_t reserved;
+    uint64_t values[RIN_GPU_QUERY_RESULT_VALUE_COUNT];
+} SwQueryState;
 
 struct RinGpuSoftwareBackend {
     uint64_t max_total_bytes;
@@ -601,6 +611,8 @@ struct RinGpuSoftwareBackend {
     uint32_t reserved0;
     uint64_t deterministic_seed;
     RinGpuSoftwareBackendStatsV1 stats;
+    uint64_t timestamp_ticks;
+    SwQueryState queries[RIN_GPU_CORE_MAX_OBJECTS];
 };
 
 static uint32_t sw_image_bytes_per_pixel(uint32_t format);
@@ -628,6 +640,163 @@ static void sw_initialize_render_pass(SwRenderPass* destination,
                                       SwImage* stencil);
 static int sw_external_image_configure(
     SwImage* image, const RinGpuSoftwareExternalImageV1* storage);
+
+static SwQueryState* sw_query_find(RinGpuSoftwareBackend* backend,
+                                   uint64_t cookie, uint32_t create)
+{
+    SwQueryState* free_slot = NULL;
+
+    if (!backend || cookie == 0u) return NULL;
+    for (uint32_t index = 0u; index < RIN_GPU_CORE_MAX_OBJECTS; ++index) {
+        SwQueryState* query = &backend->queries[index];
+        if (query->cookie == cookie) return query;
+        if (free_slot == NULL && query->cookie == 0u) free_slot = query;
+    }
+    if (!create || free_slot == NULL) return NULL;
+    memset(free_slot, 0, sizeof(*free_slot));
+    free_slot->cookie = cookie;
+    return free_slot;
+}
+
+static int sw_query_add(SwQueryState* query, uint64_t value)
+{
+    if (!query || UINT64_MAX - query->values[0] < value)
+        return RIN_GPU_ERROR_LIMIT;
+    query->values[0] += value;
+    return RIN_GPU_OK;
+}
+
+static int sw_query_add_pipeline(RinGpuSoftwareBackend* backend,
+                                 uint32_t value_index, uint64_t value)
+{
+    if (!backend || value_index >= RIN_GPU_QUERY_RESULT_VALUE_COUNT)
+        return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    for (uint32_t index = 0u; index < RIN_GPU_CORE_MAX_OBJECTS; ++index) {
+        SwQueryState* query = &backend->queries[index];
+        if (query->cookie == 0u || !query->active ||
+            query->query_type != RIN_GPU_QUERY_PIPELINE_STATISTICS)
+            continue;
+        if (UINT64_MAX - query->values[value_index] < value)
+            return RIN_GPU_ERROR_LIMIT;
+        query->values[value_index] += value;
+    }
+    return RIN_GPU_OK;
+}
+
+static int sw_query_record_draw(RinGpuSoftwareBackend* backend,
+                                uint32_t vertex_count,
+                                uint32_t instance_count)
+{
+    uint64_t invocations;
+    int result;
+
+    if (!sw_multiply_u64(vertex_count, instance_count, &invocations))
+        return RIN_GPU_ERROR_LIMIT;
+    result = sw_query_add_pipeline(
+        backend, RIN_GPU_PIPELINE_STAT_INPUT_ASSEMBLY_VERTICES, invocations);
+    if (result != RIN_GPU_OK) return result;
+    result = sw_query_add_pipeline(
+        backend, RIN_GPU_PIPELINE_STAT_VERTEX_SHADER_INVOCATIONS,
+        invocations);
+    if (result != RIN_GPU_OK) return result;
+    return sw_query_add_pipeline(
+        backend, RIN_GPU_PIPELINE_STAT_DRAW_CALLS, 1u);
+}
+
+static int sw_query_begin(RinGpuSoftwareBackend* backend,
+                          const RinGpuBackendQueryV1* command)
+{
+    SwQueryState* query;
+
+    if (!backend || !command || command->reserved != 0u ||
+        (command->query_type != RIN_GPU_QUERY_TIMESTAMP &&
+         command->query_type != RIN_GPU_QUERY_OCCLUSION &&
+         command->query_type != RIN_GPU_QUERY_PIPELINE_STATISTICS)) {
+        return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    }
+    query = sw_query_find(backend, command->query_cookie, 1u);
+    if (!query || query->active != 0u || query->available != 0u)
+        return RIN_GPU_ERROR_STATE;
+    memset(query->values, 0, sizeof(query->values));
+    query->query_type = command->query_type;
+    query->active = 1u;
+    if (query->query_type == RIN_GPU_QUERY_TIMESTAMP)
+        query->values[0] = backend->timestamp_ticks;
+    return RIN_GPU_OK;
+}
+
+static int sw_query_end(RinGpuSoftwareBackend* backend,
+                        const RinGpuBackendQueryV1* command)
+{
+    SwQueryState* query;
+
+    if (!backend || !command || command->reserved != 0u ||
+        (command->query_type != RIN_GPU_QUERY_TIMESTAMP &&
+         command->query_type != RIN_GPU_QUERY_OCCLUSION &&
+         command->query_type != RIN_GPU_QUERY_PIPELINE_STATISTICS))
+        return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    query = sw_query_find(backend, command->query_cookie, 0u);
+    if (!query || query->query_type != command->query_type ||
+        query->active == 0u)
+        return RIN_GPU_ERROR_STATE;
+    if (query->query_type == RIN_GPU_QUERY_TIMESTAMP)
+        query->values[0] = backend->timestamp_ticks;
+    query->active = 0u;
+    query->available = 1u;
+    return RIN_GPU_OK;
+}
+
+static int sw_query_reset(RinGpuSoftwareBackend* backend,
+                          const RinGpuBackendQueryV1* command)
+{
+    SwQueryState* query;
+
+    if (!backend || !command || command->reserved != 0u ||
+        (command->query_type != RIN_GPU_QUERY_TIMESTAMP &&
+         command->query_type != RIN_GPU_QUERY_OCCLUSION &&
+         command->query_type != RIN_GPU_QUERY_PIPELINE_STATISTICS))
+        return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    query = sw_query_find(backend, command->query_cookie, 1u);
+    if (!query || query->active != 0u)
+        return RIN_GPU_ERROR_STATE;
+    query->query_type = command->query_type;
+    query->available = 0u;
+    memset(query->values, 0, sizeof(query->values));
+    return RIN_GPU_OK;
+}
+
+static int sw_query_result(void* opaque, uint64_t cookie, uint32_t query_type,
+                           uint64_t values[RIN_GPU_QUERY_RESULT_VALUE_COUNT],
+                           uint32_t* available)
+{
+    RinGpuSoftwareBackend* backend = (RinGpuSoftwareBackend*)opaque;
+    SwQueryState* query;
+
+    if (!backend || !values || !available) return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    memset(values, 0, sizeof(uint64_t) * RIN_GPU_QUERY_RESULT_VALUE_COUNT);
+    *available = 0u;
+    query = sw_query_find(backend, cookie, 0u);
+    if (!query || query->query_type != query_type) return RIN_GPU_ERROR_BUSY;
+    if (query->available == 0u) return RIN_GPU_OK;
+    memcpy(values, query->values, sizeof(query->values));
+    *available = 1u;
+    return RIN_GPU_OK;
+}
+
+static int sw_timestamp_period(void* opaque, uint64_t* period_nanoseconds)
+{
+    if (!opaque || !period_nanoseconds) return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    *period_nanoseconds = 1u;
+    return RIN_GPU_OK;
+}
+
+static void sw_query_destroy(void* opaque, uint64_t cookie)
+{
+    RinGpuSoftwareBackend* backend = (RinGpuSoftwareBackend*)opaque;
+    SwQueryState* query = sw_query_find(backend, cookie, 0u);
+
+    if (query != NULL) memset(query, 0, sizeof(*query));
+}
 
 static uint64_t sw_hash_bytes(uint64_t hash, const void* bytes, size_t size)
 {
@@ -6378,6 +6547,12 @@ static int sw_publish_fragment(const SwPipeline* pipeline,
         depth < 0.0f || depth > 1.0f) {
         return RIN_GPU_ERROR_BACKEND;
     }
+    if (pass->backend != NULL) {
+        result = sw_query_add_pipeline(
+            pass->backend, RIN_GPU_PIPELINE_STAT_FRAGMENT_SHADER_INVOCATIONS,
+            1u);
+        if (result != RIN_GPU_OK) return result;
+    }
     stencil_compare = desc->stencil_compare;
     stencil_reference = desc->stencil_reference;
     stencil_read_mask = desc->stencil_read_mask;
@@ -6434,6 +6609,17 @@ static int sw_publish_fragment(const SwPipeline* pipeline,
     if (depth_enabled && desc->depth_write_enabled != 0u) {
         result = sw_store_depth(pass->depth, (uint32_t)x, (uint32_t)y, depth);
         if (result != RIN_GPU_OK) return result;
+    }
+    if (pass->backend != NULL) {
+        for (uint32_t query_index = 0u;
+             query_index < RIN_GPU_CORE_MAX_OBJECTS; ++query_index) {
+            SwQueryState* query = &pass->backend->queries[query_index];
+            if (query->cookie != 0u && query->active != 0u &&
+                query->query_type == RIN_GPU_QUERY_OCCLUSION) {
+                result = sw_query_add(query, 1u);
+                if (result != RIN_GPU_OK) return result;
+            }
+        }
     }
     for (uint32_t color_index = 0u;
          color_index < RIN_GPU_MAX_COLOR_TARGETS; ++color_index) {
@@ -9049,7 +9235,8 @@ static SwComputeShadow* sw_compute_shadow_for(SwComputeShadow* shadows,
 static int sw_dispatch_compute(RinGpuSoftwareBackend* backend,
                                const RinGpuBackendDispatchV1* dispatch,
                                const uint8_t* push_constants,
-                               uint32_t push_constant_size)
+                               uint32_t push_constant_size,
+                               uint64_t* invocation_count_out)
 {
     const SwComputePipeline* pipeline;
     const SwComputeBindGroup* group;
@@ -9063,6 +9250,7 @@ static int sw_dispatch_compute(RinGpuSoftwareBackend* backend,
     uint32_t shadow_count = 0u;
     int result = RIN_GPU_OK;
 
+    if (invocation_count_out != NULL) *invocation_count_out = 0u;
     if (!dispatch || dispatch->pipeline_cookie == 0u ||
         dispatch->bind_group_cookie == 0u || dispatch->group_count_x == 0u ||
         dispatch->group_count_y == 0u || dispatch->group_count_z == 0u ||
@@ -9095,6 +9283,8 @@ static int sw_dispatch_compute(RinGpuSoftwareBackend* backend,
         dispatch_invocations > SW_MAX_COMPUTE_INVOCATIONS) {
         return RIN_GPU_ERROR_UNSUPPORTED;
     }
+    if (invocation_count_out != NULL)
+        *invocation_count_out = dispatch_invocations;
     memset(shadows, 0, sizeof(shadows));
     memset(&execution, 0, sizeof(execution));
     execution.bind_group = group;
@@ -9209,6 +9399,7 @@ static int sw_submit(void* opaque, const RinGpuBackendCommandV1* commands,
     uint8_t push_constants[RIN_SHADER_PUSH_CONSTANT_BYTES];
     uint32_t push_constant_size = 0u;
     RinGpuSoftwareBackendStatsV1 delta;
+    uint64_t invocation_count = 0u;
     int result;
     if (!commands && command_count != 0u)
         return RIN_GPU_ERROR_INVALID_ARGUMENT;
@@ -9217,10 +9408,32 @@ static int sw_submit(void* opaque, const RinGpuBackendCommandV1* commands,
     memset(&delta, 0, sizeof(delta));
     for (index = 0u; index < command_count; ++index) {
         const RinGpuBackendCommandV1* command = &commands[index];
+        if (backend != NULL) {
+            if (backend->timestamp_ticks == UINT64_MAX)
+                return RIN_GPU_ERROR_LIMIT;
+            ++backend->timestamp_ticks;
+        }
         active_pass.push_constants = push_constant_size != 0u
             ? push_constants : NULL;
         active_pass.push_constant_size = push_constant_size;
+        active_pass.backend = backend;
         switch (command->type) {
+        case RIN_GPU_BACKEND_COMMAND_BEGIN_QUERY:
+            if (active_pass.color != NULL)
+                return RIN_GPU_ERROR_STATE;
+            result = sw_query_begin(backend, &command->value.query);
+            if (result != RIN_GPU_OK) return result;
+            break;
+        case RIN_GPU_BACKEND_COMMAND_END_QUERY:
+            result = sw_query_end(backend, &command->value.query);
+            if (result != RIN_GPU_OK) return result;
+            break;
+        case RIN_GPU_BACKEND_COMMAND_RESET_QUERY:
+            if (active_pass.color != NULL)
+                return RIN_GPU_ERROR_STATE;
+            result = sw_query_reset(backend, &command->value.query);
+            if (result != RIN_GPU_OK) return result;
+            break;
         case RIN_GPU_BACKEND_COMMAND_COPY_BUFFER:
             if (active_pass.color != NULL)
                 return RIN_GPU_ERROR_STATE;
@@ -9280,9 +9493,17 @@ static int sw_submit(void* opaque, const RinGpuBackendCommandV1* commands,
                                          &command->value.dispatch,
                                          push_constant_size != 0u
                                              ? push_constants : NULL,
-                                         push_constant_size);
+                                         push_constant_size,
+                                         &invocation_count);
             if (result != RIN_GPU_OK)
                 return result;
+            result = sw_query_add_pipeline(
+                backend, RIN_GPU_PIPELINE_STAT_COMPUTE_SHADER_INVOCATIONS,
+                invocation_count);
+            if (result != RIN_GPU_OK) return result;
+            result = sw_query_add_pipeline(
+                backend, RIN_GPU_PIPELINE_STAT_DISPATCH_CALLS, 1u);
+            if (result != RIN_GPU_OK) return result;
             ++delta.dispatch_commands;
             break;
         case RIN_GPU_BACKEND_COMMAND_COMPUTE_BARRIER:
@@ -9475,6 +9696,10 @@ static int sw_submit(void* opaque, const RinGpuBackendCommandV1* commands,
                                                   ? &active_pass : NULL);
             if (result != RIN_GPU_OK)
                 return result;
+            result = sw_query_record_draw(
+                backend, command->value.draw_vertices.vertex_count,
+                command->value.draw_vertices.instance_count);
+            if (result != RIN_GPU_OK) return result;
             ++delta.draw_commands;
             break;
         case RIN_GPU_BACKEND_COMMAND_DRAW_VERTICES_V2:
@@ -9488,6 +9713,10 @@ static int sw_submit(void* opaque, const RinGpuBackendCommandV1* commands,
                 active_pass.color != NULL ? &active_pass : NULL);
             if (result != RIN_GPU_OK)
                 return result;
+            result = sw_query_record_draw(
+                backend, command->value.draw_vertices_v2.vertex_count,
+                command->value.draw_vertices_v2.instance_count);
+            if (result != RIN_GPU_OK) return result;
             ++delta.draw_commands;
             break;
         case RIN_GPU_BACKEND_COMMAND_DRAW_INDEXED:
@@ -9501,6 +9730,10 @@ static int sw_submit(void* opaque, const RinGpuBackendCommandV1* commands,
                                                  ? &active_pass : NULL);
             if (result != RIN_GPU_OK)
                 return result;
+            result = sw_query_record_draw(
+                backend, command->value.draw_indexed.vertex_count,
+                command->value.draw_indexed.instance_count);
+            if (result != RIN_GPU_OK) return result;
             ++delta.draw_commands;
             break;
         case RIN_GPU_BACKEND_COMMAND_DRAW_INDEXED_V2:
@@ -9514,6 +9747,10 @@ static int sw_submit(void* opaque, const RinGpuBackendCommandV1* commands,
                 active_pass.color != NULL ? &active_pass : NULL);
             if (result != RIN_GPU_OK)
                 return result;
+            result = sw_query_record_draw(
+                backend, command->value.draw_indexed_v2.vertex_count,
+                command->value.draw_indexed_v2.instance_count);
+            if (result != RIN_GPU_OK) return result;
             ++delta.draw_commands;
             break;
         case RIN_GPU_BACKEND_COMMAND_DRAW:
@@ -9527,6 +9764,10 @@ static int sw_submit(void* opaque, const RinGpuBackendCommandV1* commands,
                 active_pass.color != NULL ? &active_pass : NULL);
             if (result != RIN_GPU_OK)
                 return result;
+            result = sw_query_record_draw(
+                backend, command->value.draw.vertex_count,
+                command->value.draw.instance_count);
+            if (result != RIN_GPU_OK) return result;
             ++delta.draw_commands;
             break;
         case RIN_GPU_BACKEND_COMMAND_DRAW_INDEXED_BASE_VERTEX:
@@ -9540,6 +9781,10 @@ static int sw_submit(void* opaque, const RinGpuBackendCommandV1* commands,
                 active_pass.color != NULL ? &active_pass : NULL);
             if (result != RIN_GPU_OK)
                 return result;
+            result = sw_query_record_draw(
+                backend, command->value.draw_indexed_base_vertex.vertex_count,
+                command->value.draw_indexed_base_vertex.instance_count);
+            if (result != RIN_GPU_OK) return result;
             ++delta.draw_commands;
             break;
         default:
@@ -9583,6 +9828,9 @@ static const RinGpuBackendOpsV1 g_sw_ops = {
     .create_graphics_bind_group = sw_create_graphics_bind_group,
     .destroy_graphics_bind_group = sw_destroy_graphics_bind_group,
     .submit_commands = sw_submit,
+    .get_query_result = sw_query_result,
+    .get_timestamp_period = sw_timestamp_period,
+    .destroy_query = sw_query_destroy,
     .wait_for_completion = sw_wait_for_completion,
     .readback_image = sw_readback_image,
 };

@@ -52,7 +52,10 @@ typedef enum RinGpuBackendCommandTypeV1 {
     RIN_GPU_BACKEND_COMMAND_BLIT_IMAGE = 22,
     RIN_GPU_BACKEND_COMMAND_COMPUTE_BARRIER_V2 = 23,
     RIN_GPU_BACKEND_COMMAND_GRAPHICS_BARRIER_V2 = 24,
-    RIN_GPU_BACKEND_COMMAND_SET_PUSH_CONSTANTS = 25
+    RIN_GPU_BACKEND_COMMAND_SET_PUSH_CONSTANTS = 25,
+    RIN_GPU_BACKEND_COMMAND_BEGIN_QUERY = 26,
+    RIN_GPU_BACKEND_COMMAND_END_QUERY = 27,
+    RIN_GPU_BACKEND_COMMAND_RESET_QUERY = 28
 } RinGpuBackendCommandTypeV1;
 
 typedef struct RinGpuBackendBufferCopyV1 {
@@ -169,6 +172,12 @@ typedef struct RinGpuBackendPushConstantsV1 {
     uint32_t reserved;
     uint8_t data[RIN_SHADER_PUSH_CONSTANT_BYTES];
 } RinGpuBackendPushConstantsV1;
+
+typedef struct RinGpuBackendQueryV1 {
+    uint64_t query_cookie;
+    uint32_t query_type;
+    uint32_t reserved;
+} RinGpuBackendQueryV1;
 
 typedef struct RinGpuBackendVertexAttributeV1 {
     uint32_t location;
@@ -506,8 +515,9 @@ typedef struct RinGpuBackendCommandV1 {
         RinGpuBackendComputeBarrierV1 compute_barrier;
         RinGpuBackendGraphicsBarrierV1 graphics_barrier;
         RinGpuBackendComputeBarrierV2 compute_barrier_v2;
-        RinGpuBackendGraphicsBarrierV2 graphics_barrier_v2;
-        RinGpuBackendPushConstantsV1 push_constants;
+    RinGpuBackendGraphicsBarrierV2 graphics_barrier_v2;
+    RinGpuBackendPushConstantsV1 push_constants;
+    RinGpuBackendQueryV1 query;
         RinGpuBackendDrawV1 draw;
         RinGpuBackendRenderPassBeginV1 render_pass_begin;
         RinGpuBackendRenderPassMrtBeginV1 render_pass_mrt_begin;
@@ -578,6 +588,15 @@ typedef struct RinGpuBackendOpsV1 {
     int (*submit_commands)(void* context,
                            const RinGpuBackendCommandV1* commands,
                            uint32_t command_count);
+    /* Query callbacks are optional for backends that do not advertise the
+     * bounded query profile. A submission containing a query is rejected when
+     * these callbacks are absent; it is never reported as an empty success. */
+    int (*get_query_result)(void* context, uint64_t query_cookie,
+                            uint32_t query_type,
+                            uint64_t values[RIN_GPU_QUERY_RESULT_VALUE_COUNT],
+                            uint32_t* available);
+    int (*get_timestamp_period)(void* context, uint64_t* period_nanoseconds);
+    void (*destroy_query)(void* context, uint64_t query_cookie);
     /* Optional. Waits for all commands submitted before the call to finish. */
     int (*wait_for_completion)(void* context, uint64_t timeout_ns);
     /* Optional. Reads a canonical CPU-readable COPY_SOURCE image region. */
@@ -649,6 +668,10 @@ typedef struct RinGpuRecordedCommand {
         RinGpuComputeBarrierV2 compute_barrier_v2;
         RinGpuGraphicsBarrierV2 graphics_barrier_v2;
         RinGpuPushConstantsV1 push_constants;
+        struct {
+            uint32_t query_type;
+            uint32_t reserved;
+        } query;
         RinGpuDrawV1 draw;
         RinGpuRenderPassDescV1 render_pass;
         RinGpuRenderPassMrtDescV1 render_pass_mrt;
@@ -805,6 +828,13 @@ typedef struct RinGpuObjectSlot {
         struct {
             uint64_t value;
         } fence;
+        struct {
+            uint32_t query_type;
+            uint32_t active;
+            uint32_t available;
+            uint32_t reserved;
+            uint64_t values[RIN_GPU_QUERY_RESULT_VALUE_COUNT];
+        } query;
     } value;
 } RinGpuObjectSlot;
 
@@ -848,6 +878,8 @@ _Static_assert(sizeof(RinGpuBackendDispatchV1) == 32u,
                "RinGPU backend dispatch drift");
 _Static_assert(sizeof(RinGpuBackendComputeBarrierV1) == 16u,
                "RinGPU backend compute-barrier drift");
+_Static_assert(sizeof(RinGpuBackendQueryV1) == 16u,
+               "RinGPU backend query drift");
 _Static_assert(sizeof(RinGpuBackendGraphicsBarrierV1) == 16u,
                "RinGPU backend graphics-barrier drift");
 _Static_assert(sizeof(RinGpuBackendComputeBarrierV2) == 24u,

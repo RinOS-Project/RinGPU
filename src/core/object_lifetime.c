@@ -190,6 +190,10 @@ int ringpu_destroy(RinGpuCore* core, RinGpuHandle object) {
     } else if (slot->type == RIN_GPU_OBJECT_COMMAND_LIST) {
         ringpu_release_command_references(core, slot);
         free(slot->value.command_list.commands);
+    } else if (slot->type == RIN_GPU_OBJECT_QUERY) {
+        if (core->backend.destroy_query != NULL) {
+            core->backend.destroy_query(core->backend_context, object);
+        }
     }
     ringpu_release_slot(slot);
     return RIN_GPU_OK;

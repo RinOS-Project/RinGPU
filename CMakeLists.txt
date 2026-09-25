@@ -31,6 +31,7 @@ set(RINGPU_SOURCES
     src/queue/submit.c
     src/pipeline/graphics.c
     src/resource/resources.c
+    src/query/queries.c
     src/shader/modules.c
     src/shader/spirv_frontend.c
     src/capability/cross_process_capability.c
@@ -109,6 +110,9 @@ if(RINGPU_BUILD_TESTS)
     add_executable(ringpu-srgb-test tests/ringpu_srgb_test.c)
     target_link_libraries(ringpu-srgb-test PRIVATE RinGPU::RinGPU)
     add_test(NAME ringpu-srgb COMMAND ringpu-srgb-test)
+    add_executable(ringpu-query-test tests/ringpu_query_test.c)
+    target_link_libraries(ringpu-query-test PRIVATE RinGPU::RinGPU)
+    add_test(NAME ringpu-query COMMAND ringpu-query-test)
 endif()
 
 if(RINGPU_BUILD_DIFFERENTIAL_TESTS)

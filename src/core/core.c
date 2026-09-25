@@ -360,6 +360,13 @@ void ringpu_core_shutdown(RinGpuCore* core) {
                     slot->value.shader_module.backend_cookie);
                 free(slot->value.shader_module.rin_shader_ir);
             }
+        } else if (slot->type == RIN_GPU_OBJECT_QUERY &&
+                   core->backend.destroy_query != NULL) {
+            uint64_t raw = ((uint64_t)slot->generation << 32) |
+                           ((uint64_t)RIN_GPU_OBJECT_QUERY << 16) |
+                           (uint64_t)(index + 1u);
+            core->backend.destroy_query(
+                core->backend_context, raw ^ core->handle_secret);
         }
     }
     memset(core, 0, sizeof(*core));

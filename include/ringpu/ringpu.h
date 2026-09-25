@@ -47,7 +47,8 @@ typedef enum RinGpuObjectType {
     RIN_GPU_OBJECT_COMPUTE_BIND_GROUP = 8,
     RIN_GPU_OBJECT_GRAPHICS_PIPELINE = 9,
     RIN_GPU_OBJECT_GRAPHICS_BIND_GROUP = 10,
-    RIN_GPU_OBJECT_SAMPLER = 11
+    RIN_GPU_OBJECT_SAMPLER = 11,
+    RIN_GPU_OBJECT_QUERY = 12
 } RinGpuObjectType;
 
 #define RIN_GPU_BUFFER_COPY_SOURCE      0x00000001u
@@ -190,6 +191,27 @@ typedef enum RinGpuImageState {
 #define RIN_GPU_PRIMARY_DISPLAY 0u
 #define RIN_GPU_TIMEOUT_INFINITE UINT64_MAX
 #define RIN_GPU_MAX_SUBMIT_WAITS 8u
+#define RIN_GPU_QUERY_RESULT_VALUE_COUNT 8u
+#define RIN_GPU_QUERY_RESULT_WAIT UINT32_C(0x00000001)
+#define RIN_GPU_QUERY_RESULT_KNOWN_FLAGS RIN_GPU_QUERY_RESULT_WAIT
+
+#define RIN_GPU_QUERY_TIMESTAMP UINT32_C(1)
+#define RIN_GPU_QUERY_OCCLUSION UINT32_C(2)
+#define RIN_GPU_QUERY_PIPELINE_STATISTICS UINT32_C(3)
+#define RIN_GPU_QUERY_KNOWN_TYPES \
+    (RIN_GPU_QUERY_TIMESTAMP | RIN_GPU_QUERY_OCCLUSION | \
+     RIN_GPU_QUERY_PIPELINE_STATISTICS)
+
+/* Values returned by the bounded pipeline-statistics query. The software
+ * profile counts accepted vertex work, shader invocations, accepted samples,
+ * compute invocations, and command counts in submission order. */
+#define RIN_GPU_PIPELINE_STAT_INPUT_ASSEMBLY_VERTICES 0u
+#define RIN_GPU_PIPELINE_STAT_VERTEX_SHADER_INVOCATIONS 1u
+#define RIN_GPU_PIPELINE_STAT_FRAGMENT_SHADER_INVOCATIONS 2u
+#define RIN_GPU_PIPELINE_STAT_COMPUTE_SHADER_INVOCATIONS 3u
+#define RIN_GPU_PIPELINE_STAT_DRAW_CALLS 4u
+#define RIN_GPU_PIPELINE_STAT_DISPATCH_CALLS 5u
+#define RIN_GPU_PIPELINE_STAT_COUNT 6u
 
 #define RIN_GPU_DISPLAY_CONNECTED 0x00000001u
 #define RIN_GPU_DISPLAY_PRIMARY   0x00000002u
@@ -1291,6 +1313,25 @@ typedef struct RinGpuSubmitInfoV2 {
     RinGpuSubmitWaitV1 waits[RIN_GPU_MAX_SUBMIT_WAITS];
 } RinGpuSubmitInfoV2;
 
+typedef struct RinGpuQueryDescV1 {
+    uint32_t abi_version;
+    uint32_t struct_size;
+    uint32_t query_type;
+    uint32_t flags;
+    uint32_t reserved0;
+    uint32_t reserved1;
+} RinGpuQueryDescV1;
+
+typedef struct RinGpuQueryResultV1 {
+    uint32_t abi_version;
+    uint32_t struct_size;
+    uint32_t query_type;
+    uint32_t available;
+    uint32_t reserved0;
+    uint32_t reserved1;
+    uint64_t values[RIN_GPU_QUERY_RESULT_VALUE_COUNT];
+} RinGpuQueryResultV1;
+
 typedef struct RinGpuCore RinGpuCore;
 
 int ringpu_get_adapter_info(const RinGpuCore* core, RinGpuAdapterInfoV1* info);
@@ -1403,7 +1444,9 @@ int ringpu_create_command_list(RinGpuCore* core,
                                const RinGpuCommandListDescV1* desc,
                                RinGpuHandle* command_list);
 int ringpu_create_fence(RinGpuCore* core, uint64_t initial_value,
-                        RinGpuHandle* fence);
+                         RinGpuHandle* fence);
+int ringpu_create_query(RinGpuCore* core, const RinGpuQueryDescV1* desc,
+                        RinGpuHandle* query);
 int ringpu_command_list_reset(RinGpuCore* core, RinGpuHandle command_list);
 int ringpu_command_copy_buffer(RinGpuCore* core, RinGpuHandle command_list,
                                RinGpuHandle destination,
@@ -1439,6 +1482,12 @@ int ringpu_command_compute_barrier_v2(
 int ringpu_command_set_push_constants(
     RinGpuCore* core, RinGpuHandle command_list,
     const RinGpuPushConstantsV1* constants);
+int ringpu_command_begin_query(RinGpuCore* core, RinGpuHandle command_list,
+                               RinGpuHandle query);
+int ringpu_command_end_query(RinGpuCore* core, RinGpuHandle command_list,
+                             RinGpuHandle query);
+int ringpu_command_reset_query(RinGpuCore* core, RinGpuHandle command_list,
+                               RinGpuHandle query);
 int ringpu_command_begin_render_pass(
     RinGpuCore* core, RinGpuHandle command_list,
     const RinGpuRenderPassDescV1* render_pass);
@@ -1491,6 +1540,10 @@ int ringpu_queue_submit_v2(RinGpuCore* core, RinGpuHandle queue,
                            const RinGpuSubmitInfoV2* submit);
 int ringpu_fence_value(const RinGpuCore* core, RinGpuHandle fence,
                        uint64_t* value);
+int ringpu_get_timestamp_period(const RinGpuCore* core,
+                                uint64_t* period_nanoseconds);
+int ringpu_get_query_result(RinGpuCore* core, RinGpuHandle query,
+                            uint32_t flags, RinGpuQueryResultV1* result);
 /* Waits until all work submitted before the requested fence value has
  * completed. Submission success alone does not establish this guarantee. */
 int ringpu_wait_fence(RinGpuCore* core, RinGpuHandle fence,
@@ -1594,6 +1647,11 @@ _Static_assert(sizeof(RinGpuGraphicsBindingV1) == 64u,
                "RinGPU graphics binding ABI drift");
 _Static_assert(sizeof(RinGpuDispatchV1) == 48u,
                "RinGPU dispatch ABI drift");
+_Static_assert(sizeof(RinGpuQueryDescV1) == 24u,
+               "RinGPU query descriptor ABI drift");
+_Static_assert(sizeof(RinGpuQueryResultV1) ==
+                   24u + RIN_GPU_QUERY_RESULT_VALUE_COUNT * sizeof(uint64_t),
+               "RinGPU query result ABI drift");
 _Static_assert(sizeof(RinGpuComputeBarrierV1) == 24u,
                "RinGPU compute barrier ABI drift");
 _Static_assert(sizeof(RinGpuGraphicsBarrierV1) == 24u,

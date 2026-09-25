@@ -123,6 +123,13 @@ static int ringpu_queue_submit_internal(
     uint32_t active_stencil_array_layer = 0u;
     uint32_t active_depth_format = 0u;
     uint32_t present_count = 0u;
+    uint8_t query_active[RIN_GPU_CORE_MAX_OBJECTS] = {0};
+    uint8_t query_available[RIN_GPU_CORE_MAX_OBJECTS] = {0};
+    uint8_t query_touched[RIN_GPU_CORE_MAX_OBJECTS] = {0};
+    uint8_t query_ended[RIN_GPU_CORE_MAX_OBJECTS] = {0};
+    RinGpuHandle query_handles[RIN_GPU_CORE_MAX_OBJECTS] = {0};
+    uint8_t query_backend_required = 0u;
+    uint8_t query_timestamp_required = 0u;
     int result = ringpu_core_ready(core);
     if (result != RIN_GPU_OK) return result;
     if (!submit ||
@@ -509,6 +516,63 @@ static int ringpu_queue_submit_internal(
             commands[index].value.push_constants.reserved = constants->reserved;
             memcpy(commands[index].value.push_constants.data, constants->data,
                    sizeof(constants->data));
+        } else if (command->type == RIN_GPU_BACKEND_COMMAND_BEGIN_QUERY ||
+                   command->type == RIN_GPU_BACKEND_COMMAND_END_QUERY ||
+                   command->type == RIN_GPU_BACKEND_COMMAND_RESET_QUERY) {
+            RinGpuBackendQueryV1* backend_query = &commands[index].value.query;
+            uint32_t query_type;
+
+            result = ringpu_slot(core, command->destination,
+                                 RIN_GPU_OBJECT_QUERY, &destination_index,
+                                 &destination);
+            if (result != RIN_GPU_OK) break;
+            query_type = destination->value.query.query_type;
+            if (command->value.query.query_type != query_type ||
+                command->value.query.reserved != 0u ||
+                (query_type != RIN_GPU_QUERY_TIMESTAMP &&
+                 query_type != RIN_GPU_QUERY_OCCLUSION &&
+                 query_type != RIN_GPU_QUERY_PIPELINE_STATISTICS)) {
+                result = RIN_GPU_ERROR_STATE;
+                break;
+            }
+            if (query_touched[destination_index] == 0u) {
+                query_active[destination_index] =
+                    (uint8_t)(destination->value.query.active != 0u);
+                query_available[destination_index] =
+                    (uint8_t)(destination->value.query.available != 0u);
+                query_touched[destination_index] = 1u;
+                query_handles[destination_index] = command->destination;
+            }
+            if (command->type == RIN_GPU_BACKEND_COMMAND_BEGIN_QUERY) {
+                if (query_active[destination_index] != 0u ||
+                    query_available[destination_index] != 0u) {
+                    result = RIN_GPU_ERROR_STATE;
+                    break;
+                }
+                query_active[destination_index] = 1u;
+                query_available[destination_index] = 0u;
+                query_ended[destination_index] = 0u;
+            } else if (command->type == RIN_GPU_BACKEND_COMMAND_END_QUERY) {
+                if (query_active[destination_index] == 0u) {
+                    result = RIN_GPU_ERROR_STATE;
+                    break;
+                }
+                query_active[destination_index] = 0u;
+                query_ended[destination_index] = 1u;
+            } else {
+                if (query_active[destination_index] != 0u) {
+                    result = RIN_GPU_ERROR_STATE;
+                    break;
+                }
+                query_available[destination_index] = 0u;
+                query_ended[destination_index] = 0u;
+            }
+            backend_query->query_cookie = command->destination;
+            backend_query->query_type = query_type;
+            backend_query->reserved = 0u;
+            query_backend_required = 1u;
+            if (query_type == RIN_GPU_QUERY_TIMESTAMP)
+                query_timestamp_required = 1u;
         } else if (command->type ==
                    RIN_GPU_BACKEND_COMMAND_BEGIN_RENDER_PASS_MRT) {
             const RinGpuRenderPassMrtDescV1* pass =
@@ -1852,6 +1916,20 @@ static int ringpu_queue_submit_internal(
         result = RIN_GPU_ERROR_STATE;
     }
     if (result == RIN_GPU_OK) {
+        for (uint32_t index = 0u; index < RIN_GPU_CORE_MAX_OBJECTS; ++index) {
+            if (query_touched[index] != 0u && query_active[index] != 0u) {
+                result = RIN_GPU_ERROR_STATE;
+                break;
+            }
+        }
+    }
+    if (result == RIN_GPU_OK && query_backend_required != 0u &&
+        (!core->backend.get_query_result ||
+         (query_timestamp_required != 0u &&
+          !core->backend.get_timestamp_period))) {
+        result = RIN_GPU_ERROR_UNSUPPORTED;
+    }
+    if (result == RIN_GPU_OK) {
         for (uint32_t index = 0u;
              index < list->value.command_list.count; ++index) {
             if (commands[index].type == RIN_GPU_BACKEND_COMMAND_PRESENT)
@@ -1862,6 +1940,39 @@ static int ringpu_queue_submit_internal(
         result = core->backend.submit_commands(
             core->backend_context, commands,
             list->value.command_list.count);
+    }
+    if (result == RIN_GPU_OK && query_backend_required != 0u) {
+        for (uint32_t index = 0u; index < RIN_GPU_CORE_MAX_OBJECTS; ++index) {
+            RinGpuObjectSlot* query;
+            uint64_t values[RIN_GPU_QUERY_RESULT_VALUE_COUNT] = {0};
+            uint32_t available = 0u;
+
+            if (query_touched[index] == 0u) continue;
+            query = &core->objects[index];
+            if (!query->occupied || query->type != RIN_GPU_OBJECT_QUERY) {
+                result = RIN_GPU_ERROR_STATE;
+                break;
+            }
+            if (query_ended[index] != 0u) {
+                result = core->backend.get_query_result(
+                    core->backend_context,
+                    query_handles[index],
+                    query->value.query.query_type, values, &available);
+                if (result != RIN_GPU_OK) break;
+                if (available != 0u) {
+                    memcpy(query->value.query.values, values,
+                           sizeof(query->value.query.values));
+                    query->value.query.available = 1u;
+                } else {
+                    query->value.query.available = 0u;
+                }
+            } else {
+                memset(query->value.query.values, 0,
+                       sizeof(query->value.query.values));
+                query->value.query.available = 0u;
+            }
+            query->value.query.active = 0u;
+        }
     }
     ringpu_core_diagnostic(core, RIN_GPU_DIAGNOSTIC_SUBMISSION,
                            submit->command_list, queue,
