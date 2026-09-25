@@ -421,25 +421,53 @@ int ringpu_get_display_info(const RinGpuCore* core, uint32_t index,
 
 
 
-int ringpu_create_queue(RinGpuCore* core, const RinGpuQueueDescV1* desc,
-                        RinGpuHandle* queue) {
+static int ringpu_create_queue_owner(RinGpuCore* core, uint32_t capabilities,
+                                     uint32_t flags, uint32_t family_index,
+                                     uint32_t engine_index,
+                                     RinGpuHandle* queue) {
     RinGpuObjectSlot* slot;
     int result = ringpu_core_ready(core);
     if (result != RIN_GPU_OK) return result;
-    if (!desc || !queue ||
-        !ringpu_versioned(desc->abi_version, desc->struct_size, sizeof(*desc)) ||
-        desc->capabilities == 0u ||
-        (desc->capabilities & ~core->adapter.queue_capabilities) != 0u ||
-        desc->flags != 0u) {
+    if (!queue || capabilities == 0u ||
+        (capabilities & ~core->adapter.queue_capabilities) != 0u ||
+        flags != 0u) {
         return RIN_GPU_ERROR_INVALID_ARGUMENT;
     }
     result = ringpu_allocate(core, RIN_GPU_OBJECT_QUEUE, queue, &slot);
     if (result == RIN_GPU_OK) {
-        slot->value.queue.capabilities = desc->capabilities;
+        slot->value.queue.capabilities = capabilities;
+        slot->value.queue.family_index = family_index;
+        slot->value.queue.engine_index = engine_index;
         ringpu_core_diagnostic(core, RIN_GPU_DIAGNOSTIC_QUEUE, *queue, *queue,
-                               desc->capabilities, 0u, RIN_GPU_OK);
+                               capabilities, 0u, RIN_GPU_OK);
     }
     return result;
+}
+
+int ringpu_create_queue(RinGpuCore* core, const RinGpuQueueDescV1* desc,
+                        RinGpuHandle* queue) {
+    int result = ringpu_core_ready(core);
+    if (result != RIN_GPU_OK) return result;
+    if (!desc || !queue ||
+        !ringpu_versioned(desc->abi_version, desc->struct_size, sizeof(*desc)))
+        return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    return ringpu_create_queue_owner(core, desc->capabilities, desc->flags, 0u,
+                                     0u, queue);
+}
+
+int ringpu_create_queue_v2(RinGpuCore* core, const RinGpuQueueDescV2* desc,
+                           RinGpuHandle* queue) {
+    int result = ringpu_core_ready(core);
+    if (result != RIN_GPU_OK) return result;
+    if (!desc || !queue ||
+        !ringpu_versioned(desc->base.abi_version, desc->base.struct_size,
+                          sizeof(desc->base)) ||
+        desc->reserved0 != 0u || desc->reserved1 != 0u) {
+        return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    }
+    return ringpu_create_queue_owner(core, desc->base.capabilities,
+                                     desc->base.flags, desc->family_index,
+                                     desc->engine_index, queue);
 }
 
 int ringpu_create_command_list(RinGpuCore* core,

@@ -166,6 +166,15 @@ int ringpu_runtime_create_queue(RinGpuRuntime* runtime,
     return ringpu_create_queue(&runtime->core, desc, queue_out);
 }
 
+int ringpu_runtime_create_queue_v2(RinGpuRuntime* runtime,
+                                   const RinGpuQueueDescV2* desc,
+                                   RinGpuHandle* queue_out)
+{
+    if (runtime == NULL || runtime->initialized != RIN_GPU_RUNTIME_VERSION)
+        return RIN_GPU_ERROR_STATE;
+    return ringpu_create_queue_v2(&runtime->core, desc, queue_out);
+}
+
 int ringpu_runtime_create_fence(RinGpuRuntime* runtime,
                                 uint64_t initial_value,
                                 RinGpuHandle* fence_out)
@@ -336,6 +345,16 @@ int ringpu_runtime_command_transition_image(
         return RIN_GPU_ERROR_STATE;
     return ringpu_command_transition_image(&runtime->core, command_list, image,
                                            transition);
+}
+
+int ringpu_runtime_command_transfer_image_ownership(
+    RinGpuRuntime* runtime, RinGpuHandle command_list, RinGpuHandle image,
+    const RinGpuImageOwnershipTransferV1* transfer)
+{
+    if (runtime == NULL || runtime->initialized != RIN_GPU_RUNTIME_VERSION)
+        return RIN_GPU_ERROR_STATE;
+    return ringpu_command_transfer_image_ownership(
+        &runtime->core, command_list, image, transfer);
 }
 
 int ringpu_runtime_command_begin_render_pass(

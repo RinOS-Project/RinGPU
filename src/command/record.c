@@ -185,6 +185,9 @@ void ringpu_release_command_references(RinGpuCore* core,
         case RIN_GPU_BACKEND_COMMAND_TRANSITION_IMAGE:
             release_reference(core, command->destination, RIN_GPU_OBJECT_IMAGE);
             break;
+        case RIN_GPU_BACKEND_COMMAND_TRANSFER_IMAGE_OWNERSHIP:
+            release_reference(core, command->destination, RIN_GPU_OBJECT_IMAGE);
+            break;
         default:
             break;
         }

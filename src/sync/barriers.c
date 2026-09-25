@@ -61,6 +61,60 @@ int ringpu_command_transition_image(
     return RIN_GPU_OK;
 }
 
+int ringpu_command_transfer_image_ownership(
+    RinGpuCore* core, RinGpuHandle command_list, RinGpuHandle image,
+    const RinGpuImageOwnershipTransferV1* transfer)
+{
+    RinGpuObjectSlot* list;
+    RinGpuObjectSlot* image_slot;
+    RinGpuRecordedCommand* command;
+    const RinGpuImageDescV1* desc;
+    int result = ringpu_core_ready(core);
+
+    if (result != RIN_GPU_OK) return result;
+    if (!transfer ||
+        !ringpu_versioned(transfer->abi_version, transfer->struct_size,
+                          sizeof(*transfer)) ||
+        transfer->flags != 0u || transfer->reserved != 0u ||
+        (transfer->source_family_index == transfer->destination_family_index &&
+         transfer->source_engine_index == transfer->destination_engine_index) ||
+        transfer->before_state == transfer->after_state) {
+        return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    }
+    result = ringpu_slot(core, command_list, RIN_GPU_OBJECT_COMMAND_LIST, NULL,
+                         &list);
+    if (result != RIN_GPU_OK) return result;
+    if (list->value.command_list.state != RIN_GPU_COMMAND_RECORDING ||
+        list->value.command_list.render_pass_active != 0u ||
+        (list->value.command_list.capabilities &
+         RIN_GPU_QUEUE_KNOWN_CAPABILITIES) == 0u) {
+        return RIN_GPU_ERROR_STATE;
+    }
+    result = ringpu_slot(core, image, RIN_GPU_OBJECT_IMAGE, NULL, &image_slot);
+    if (result != RIN_GPU_OK) return result;
+    desc = &image_slot->value.image.descriptor;
+    /* The first profile is deliberately image-wide.  It cannot claim
+     * subresource ownership while the core stores one owner per image. */
+    if (transfer->base_mip_level != 0u ||
+        transfer->mip_level_count != desc->mip_levels ||
+        transfer->base_array_layer != 0u ||
+        transfer->array_layer_count != desc->array_layers ||
+        !ringpu_image_state_allowed(desc, transfer->before_state) ||
+        !ringpu_image_state_allowed(desc, transfer->after_state)) {
+        return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    }
+    result = ringpu_record_command(list, &command);
+    if (result != RIN_GPU_OK) return result;
+    command->type = RIN_GPU_BACKEND_COMMAND_TRANSFER_IMAGE_OWNERSHIP;
+    command->destination = image;
+    command->value.image_ownership_transfer = *transfer;
+    command->value.image_ownership_transfer.struct_size =
+        sizeof(command->value.image_ownership_transfer);
+    list->value.command_list.count++;
+    image_slot->value.image.reference_count++;
+    return RIN_GPU_OK;
+}
+
 int ringpu_command_compute_barrier(
     RinGpuCore* core, RinGpuHandle command_list,
     const RinGpuComputeBarrierV1* barrier)

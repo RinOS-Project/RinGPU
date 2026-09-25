@@ -60,6 +60,9 @@ int ringpu_runtime_upload_buffer(RinGpuRuntime* runtime,
 int ringpu_runtime_create_queue(RinGpuRuntime* runtime,
                                 const RinGpuQueueDescV1* desc,
                                 RinGpuHandle* queue_out);
+int ringpu_runtime_create_queue_v2(RinGpuRuntime* runtime,
+                                   const RinGpuQueueDescV2* desc,
+                                   RinGpuHandle* queue_out);
 int ringpu_runtime_create_fence(RinGpuRuntime* runtime,
                                 uint64_t initial_value,
                                 RinGpuHandle* fence_out);
@@ -121,6 +124,9 @@ int ringpu_runtime_command_list_close(RinGpuRuntime* runtime,
 int ringpu_runtime_command_transition_image(
     RinGpuRuntime* runtime, RinGpuHandle command_list, RinGpuHandle image,
     const RinGpuImageTransitionV1* transition);
+int ringpu_runtime_command_transfer_image_ownership(
+    RinGpuRuntime* runtime, RinGpuHandle command_list, RinGpuHandle image,
+    const RinGpuImageOwnershipTransferV1* transfer);
 int ringpu_runtime_command_begin_render_pass(
     RinGpuRuntime* runtime, RinGpuHandle command_list,
     const RinGpuRenderPassDescV1* render_pass);

@@ -55,7 +55,8 @@ typedef enum RinGpuBackendCommandTypeV1 {
     RIN_GPU_BACKEND_COMMAND_SET_PUSH_CONSTANTS = 25,
     RIN_GPU_BACKEND_COMMAND_BEGIN_QUERY = 26,
     RIN_GPU_BACKEND_COMMAND_END_QUERY = 27,
-    RIN_GPU_BACKEND_COMMAND_RESET_QUERY = 28
+    RIN_GPU_BACKEND_COMMAND_RESET_QUERY = 28,
+    RIN_GPU_BACKEND_COMMAND_TRANSFER_IMAGE_OWNERSHIP = 29
 } RinGpuBackendCommandTypeV1;
 
 typedef struct RinGpuBackendBufferCopyV1 {
@@ -105,6 +106,11 @@ typedef struct RinGpuBackendImageTransitionV1 {
     uint64_t image_cookie;
     RinGpuImageTransitionV1 transition;
 } RinGpuBackendImageTransitionV1;
+
+typedef struct RinGpuBackendImageOwnershipTransferV1 {
+    uint64_t image_cookie;
+    RinGpuImageOwnershipTransferV1 transfer;
+} RinGpuBackendImageOwnershipTransferV1;
 
 typedef struct RinGpuBackendBufferBindingV1 {
     uint64_t buffer_cookie;
@@ -511,6 +517,7 @@ typedef struct RinGpuBackendCommandV1 {
         RinGpuBackendBufferClearV1 buffer_clear;
         RinGpuBackendImageClearV1 image_clear;
         RinGpuBackendImageTransitionV1 image_transition;
+        RinGpuBackendImageOwnershipTransferV1 image_ownership_transfer;
         RinGpuBackendDispatchV1 dispatch;
         RinGpuBackendComputeBarrierV1 compute_barrier;
         RinGpuBackendGraphicsBarrierV1 graphics_barrier;
@@ -662,6 +669,7 @@ typedef struct RinGpuRecordedCommand {
         RinGpuImageBlitV1 image_blit;
         RinGpuImageClearV1 image_clear;
         RinGpuImageTransitionV1 image_transition;
+        RinGpuImageOwnershipTransferV1 image_ownership_transfer;
         RinGpuDispatchV1 dispatch;
         RinGpuComputeBarrierV1 compute_barrier;
         RinGpuGraphicsBarrierV1 graphics_barrier;
@@ -711,6 +719,8 @@ typedef struct RinGpuObjectSlot {
             uint8_t* cpu_upload_complete;
             uint32_t reference_count;
             uint32_t cpu_upload_pending;
+            uint32_t owner_family_index;
+            uint32_t owner_engine_index;
         } image;
         struct {
             RinGpuSamplerDescV1 descriptor;
@@ -801,6 +811,9 @@ typedef struct RinGpuObjectSlot {
         } graphics_bind_group;
         struct {
             uint32_t capabilities;
+            uint32_t family_index;
+            uint32_t engine_index;
+            uint32_t reserved;
         } queue;
         struct {
             RinGpuRecordedCommand* commands;

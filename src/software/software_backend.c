@@ -9525,6 +9525,24 @@ static int sw_submit(void* opaque, const RinGpuBackendCommandV1* commands,
         case RIN_GPU_BACKEND_COMMAND_TRANSITION_IMAGE:
             ++delta.transition_commands;
             break;
+        case RIN_GPU_BACKEND_COMMAND_TRANSFER_IMAGE_OWNERSHIP:
+            if (active_pass.color != NULL ||
+                command->value.image_ownership_transfer.image_cookie == 0u ||
+                command->value.image_ownership_transfer.transfer.flags != 0u ||
+                command->value.image_ownership_transfer.transfer.reserved != 0u ||
+                (command->value.image_ownership_transfer.transfer.source_family_index ==
+                     command->value.image_ownership_transfer.transfer.destination_family_index &&
+                 command->value.image_ownership_transfer.transfer.source_engine_index ==
+                     command->value.image_ownership_transfer.transfer.destination_engine_index)) {
+                return RIN_GPU_ERROR_INVALID_ARGUMENT;
+            }
+            /* Ownership is committed transactionally by RinGPU core after
+             * this backend accepts the command.  Keeping this marker in the
+             * stream lets native backends lower it to their queue engine,
+             * while the software profile has a concrete owner state rather
+             * than an ignored transfer. */
+            ++delta.transition_commands;
+            break;
         case RIN_GPU_BACKEND_COMMAND_SET_PUSH_CONSTANTS:
             if (command->value.push_constants.flags != 0u ||
                 command->value.push_constants.reserved != 0u) {

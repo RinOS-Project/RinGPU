@@ -579,6 +579,27 @@ typedef struct RinGpuImageTransitionV1 {
     uint32_t reserved;
 } RinGpuImageTransitionV1;
 
+/* The portable ownership profile is image-wide: a transfer must cover every
+ * mip and array layer.  This is an additive boundary for backends with
+ * separate queue families/engines; it does not advertise physical engine
+ * topology. */
+typedef struct RinGpuImageOwnershipTransferV1 {
+    uint32_t abi_version;
+    uint32_t struct_size;
+    uint32_t base_mip_level;
+    uint32_t mip_level_count;
+    uint32_t base_array_layer;
+    uint32_t array_layer_count;
+    uint32_t source_family_index;
+    uint32_t source_engine_index;
+    uint32_t destination_family_index;
+    uint32_t destination_engine_index;
+    uint32_t before_state;
+    uint32_t after_state;
+    uint32_t flags;
+    uint32_t reserved;
+} RinGpuImageOwnershipTransferV1;
+
 typedef struct RinGpuComputePipelineDescV1 {
     uint32_t abi_version;
     uint32_t struct_size;
@@ -1280,6 +1301,15 @@ typedef struct RinGpuQueueDescV1 {
     uint32_t flags;
 } RinGpuQueueDescV1;
 
+/* Additive queue owner identity.  V1 queues use family=0, engine=0. */
+typedef struct RinGpuQueueDescV2 {
+    RinGpuQueueDescV1 base;
+    uint32_t family_index;
+    uint32_t engine_index;
+    uint32_t reserved0;
+    uint32_t reserved1;
+} RinGpuQueueDescV2;
+
 typedef struct RinGpuCommandListDescV1 {
     uint32_t abi_version;
     uint32_t struct_size;
@@ -1440,6 +1470,8 @@ int ringpu_create_graphics_bind_group_typed(
     RinGpuHandle* bind_group);
 int ringpu_create_queue(RinGpuCore* core, const RinGpuQueueDescV1* desc,
                         RinGpuHandle* queue);
+int ringpu_create_queue_v2(RinGpuCore* core, const RinGpuQueueDescV2* desc,
+                           RinGpuHandle* queue);
 int ringpu_create_command_list(RinGpuCore* core,
                                const RinGpuCommandListDescV1* desc,
                                RinGpuHandle* command_list);
@@ -1471,6 +1503,9 @@ int ringpu_command_transition_image(RinGpuCore* core,
                                     RinGpuHandle command_list,
                                     RinGpuHandle image,
                                     const RinGpuImageTransitionV1* transition);
+int ringpu_command_transfer_image_ownership(
+    RinGpuCore* core, RinGpuHandle command_list, RinGpuHandle image,
+    const RinGpuImageOwnershipTransferV1* transfer);
 int ringpu_command_dispatch(RinGpuCore* core, RinGpuHandle command_list,
                             const RinGpuDispatchV1* dispatch);
 int ringpu_command_compute_barrier(
@@ -1582,6 +1617,10 @@ _Static_assert(sizeof(RinGpuImageReadbackV1) == 64u,
                "RinGPU image readback ABI drift");
 _Static_assert(sizeof(RinGpuImageTransitionV1) == 40u,
                "RinGPU image transition ABI drift");
+_Static_assert(sizeof(RinGpuImageOwnershipTransferV1) == 56u,
+               "RinGPU image ownership transfer ABI drift");
+_Static_assert(sizeof(RinGpuQueueDescV2) == 32u,
+               "RinGPU queue V2 ABI drift");
 _Static_assert(sizeof(RinGpuComputePipelineDescV1) == 24u,
                "RinGPU compute pipeline ABI drift");
 _Static_assert(sizeof(RinGpuGraphicsPipelineDescV1) == 40u,

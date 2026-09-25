@@ -104,6 +104,94 @@ static int ringpu_validate_graphics_sampled_submit(
     return RIN_GPU_OK;
 }
 
+static int ringpu_validate_image_owner_handle(
+    RinGpuCore* core, RinGpuHandle image_handle, uint32_t family_index,
+    uint32_t engine_index, const uint8_t* staged_owner_valid,
+    const uint32_t* staged_owner_family, const uint32_t* staged_owner_engine)
+{
+    RinGpuObjectSlot* image;
+    uint32_t object_index;
+    int result;
+
+    if (image_handle == 0u) return RIN_GPU_OK;
+    result = ringpu_slot(core, image_handle, RIN_GPU_OBJECT_IMAGE,
+                         &object_index, &image);
+    if (result != RIN_GPU_OK) return result;
+    if (staged_owner_valid[object_index] != 0u) {
+        return staged_owner_family[object_index] == family_index &&
+                       staged_owner_engine[object_index] == engine_index
+                   ? RIN_GPU_OK
+                   : RIN_GPU_ERROR_STATE;
+    }
+    return image->value.image.owner_family_index == family_index &&
+                   image->value.image.owner_engine_index == engine_index
+               ? RIN_GPU_OK
+               : RIN_GPU_ERROR_STATE;
+}
+
+static int ringpu_validate_command_image_owners(
+    RinGpuCore* core, const RinGpuRecordedCommand* command,
+    uint32_t family_index, uint32_t engine_index,
+    const uint8_t* staged_owner_valid, const uint32_t* staged_owner_family,
+    const uint32_t* staged_owner_engine)
+{
+    int result;
+    if (!core || !command) return RIN_GPU_ERROR_INVALID_ARGUMENT;
+#define CHECK_IMAGE_OWNER(handle) do {                                      \
+        result = ringpu_validate_image_owner_handle(                        \
+            core, (handle), family_index, engine_index, staged_owner_valid,  \
+            staged_owner_family, staged_owner_engine);                       \
+        if (result != RIN_GPU_OK) return result;                              \
+    } while (0)
+    switch (command->type) {
+    case RIN_GPU_BACKEND_COMMAND_COPY_IMAGE:
+    case RIN_GPU_BACKEND_COMMAND_BLIT_IMAGE:
+        CHECK_IMAGE_OWNER(command->destination);
+        CHECK_IMAGE_OWNER(command->source);
+        break;
+    case RIN_GPU_BACKEND_COMMAND_CLEAR_IMAGE:
+    case RIN_GPU_BACKEND_COMMAND_TRANSITION_IMAGE:
+    case RIN_GPU_BACKEND_COMMAND_PRESENT:
+        CHECK_IMAGE_OWNER(command->destination);
+        break;
+    case RIN_GPU_BACKEND_COMMAND_BEGIN_RENDER_PASS:
+        CHECK_IMAGE_OWNER(command->destination);
+        break;
+    case RIN_GPU_BACKEND_COMMAND_BEGIN_RENDER_PASS_DEPTH:
+        CHECK_IMAGE_OWNER(command->destination);
+        CHECK_IMAGE_OWNER(command->source);
+        break;
+    case RIN_GPU_BACKEND_COMMAND_BEGIN_RENDER_PASS_DEPTH_STENCIL:
+        CHECK_IMAGE_OWNER(command->destination);
+        CHECK_IMAGE_OWNER(command->source);
+        CHECK_IMAGE_OWNER(command->auxiliary);
+        break;
+    case RIN_GPU_BACKEND_COMMAND_BEGIN_RENDER_PASS_MRT: {
+        const RinGpuRenderPassMrtDescV1* pass =
+            &command->value.render_pass_mrt;
+        for (uint32_t index = 0u; index < RIN_GPU_MAX_COLOR_TARGETS; ++index) {
+            if ((pass->active_color_mask & (1u << index)) != 0u)
+                CHECK_IMAGE_OWNER(pass->color_attachments[index].target);
+        }
+        CHECK_IMAGE_OWNER(pass->depth_target);
+        CHECK_IMAGE_OWNER(pass->stencil_target);
+        break;
+    }
+    case RIN_GPU_BACKEND_COMMAND_DRAW:
+    case RIN_GPU_BACKEND_COMMAND_DRAW_VERTICES:
+    case RIN_GPU_BACKEND_COMMAND_DRAW_VERTICES_V2:
+    case RIN_GPU_BACKEND_COMMAND_DRAW_INDEXED:
+    case RIN_GPU_BACKEND_COMMAND_DRAW_INDEXED_V2:
+    case RIN_GPU_BACKEND_COMMAND_DRAW_INDEXED_BASE_VERTEX:
+        CHECK_IMAGE_OWNER(command->source);
+        break;
+    default:
+        break;
+    }
+#undef CHECK_IMAGE_OWNER
+    return RIN_GPU_OK;
+}
+
 static int ringpu_queue_submit_internal(
     RinGpuCore* core, RinGpuHandle queue, const RinGpuSubmitInfoV1* submit,
     uint32_t wait_count, const RinGpuSubmitWaitV1* waits) {
@@ -112,6 +200,9 @@ static int ringpu_queue_submit_internal(
     RinGpuObjectSlot* fence = NULL;
     RinGpuBackendCommandV1* commands = NULL;
     uint32_t* staged_states[RIN_GPU_CORE_MAX_OBJECTS] = {0};
+    uint8_t staged_owner_valid[RIN_GPU_CORE_MAX_OBJECTS] = {0};
+    uint32_t staged_owner_family[RIN_GPU_CORE_MAX_OBJECTS] = {0};
+    uint32_t staged_owner_engine[RIN_GPU_CORE_MAX_OBJECTS] = {0};
     RinGpuHandle active_render_target = 0u;
     RinGpuHandle active_depth_target = 0u;
     RinGpuHandle active_stencil_target = 0u;
@@ -198,6 +289,14 @@ static int ringpu_queue_submit_internal(
         uint32_t* source_states;
         uint32_t* auxiliary_states;
         commands[index].type = command->type;
+        if (command->type !=
+            RIN_GPU_BACKEND_COMMAND_TRANSFER_IMAGE_OWNERSHIP) {
+            result = ringpu_validate_command_image_owners(
+                core, command, queue_slot->value.queue.family_index,
+                queue_slot->value.queue.engine_index, staged_owner_valid,
+                staged_owner_family, staged_owner_engine);
+            if (result != RIN_GPU_OK) break;
+        }
         if (command->type == RIN_GPU_BACKEND_COMMAND_COPY_BUFFER) {
             result = ringpu_slot(core, command->destination,
                                  RIN_GPU_OBJECT_BUFFER, NULL, &destination);
@@ -413,6 +512,71 @@ static int ringpu_queue_submit_internal(
             commands[index].value.image_transition.image_cookie =
                 destination->value.image.backend_cookie;
             commands[index].value.image_transition.transition = *transition;
+        } else if (command->type ==
+                   RIN_GPU_BACKEND_COMMAND_TRANSFER_IMAGE_OWNERSHIP) {
+            const RinGpuImageOwnershipTransferV1* transfer =
+                &command->value.image_ownership_transfer;
+            uint32_t current_family;
+            uint32_t current_engine;
+            result = ringpu_slot(core, command->destination,
+                                 RIN_GPU_OBJECT_IMAGE, &destination_index,
+                                 &destination);
+            if (result != RIN_GPU_OK) break;
+            if (transfer->base_mip_level != 0u ||
+                transfer->mip_level_count !=
+                    destination->value.image.descriptor.mip_levels ||
+                transfer->base_array_layer != 0u ||
+                transfer->array_layer_count !=
+                    destination->value.image.descriptor.array_layers) {
+                result = RIN_GPU_ERROR_INVALID_ARGUMENT;
+                break;
+            }
+            if (staged_owner_valid[destination_index] != 0u) {
+                current_family = staged_owner_family[destination_index];
+                current_engine = staged_owner_engine[destination_index];
+            } else {
+                current_family = destination->value.image.owner_family_index;
+                current_engine = destination->value.image.owner_engine_index;
+            }
+            if (current_family != transfer->source_family_index ||
+                current_engine != transfer->source_engine_index ||
+                queue_slot->value.queue.family_index !=
+                    transfer->destination_family_index ||
+                queue_slot->value.queue.engine_index !=
+                    transfer->destination_engine_index) {
+                result = RIN_GPU_ERROR_STATE;
+                break;
+            }
+            result = ringpu_stage_image_states(destination, destination_index,
+                                               staged_states);
+            if (result != RIN_GPU_OK) break;
+            destination_states = staged_states[destination_index];
+            for (uint32_t layer = 0u;
+                 layer < transfer->array_layer_count && result == RIN_GPU_OK;
+                 ++layer) {
+                for (uint32_t mip = 0u;
+                     mip < transfer->mip_level_count; ++mip) {
+                    uint32_t subresource =
+                        (transfer->base_array_layer + layer) *
+                            destination->value.image.descriptor.mip_levels +
+                        transfer->base_mip_level + mip;
+                    if (destination_states[subresource] !=
+                        transfer->before_state) {
+                        result = RIN_GPU_ERROR_STATE;
+                        break;
+                    }
+                    destination_states[subresource] = transfer->after_state;
+                }
+            }
+            if (result != RIN_GPU_OK) break;
+            staged_owner_valid[destination_index] = 1u;
+            staged_owner_family[destination_index] =
+                transfer->destination_family_index;
+            staged_owner_engine[destination_index] =
+                transfer->destination_engine_index;
+            commands[index].value.image_ownership_transfer.image_cookie =
+                destination->value.image.backend_cookie;
+            commands[index].value.image_ownership_transfer.transfer = *transfer;
         } else if (command->type == RIN_GPU_BACKEND_COMMAND_DISPATCH) {
             result = ringpu_slot(core, command->destination,
                                  RIN_GPU_OBJECT_COMPUTE_PIPELINE, NULL,
@@ -1988,6 +2152,13 @@ static int ringpu_queue_submit_internal(
                    staged_states[index],
                    (size_t)core->objects[index].value.image.subresource_count *
                        sizeof(*staged_states[index]));
+        }
+        for (uint32_t index = 0u; index < RIN_GPU_CORE_MAX_OBJECTS; index++) {
+            if (staged_owner_valid[index] == 0u) continue;
+            core->objects[index].value.image.owner_family_index =
+                staged_owner_family[index];
+            core->objects[index].value.image.owner_engine_index =
+                staged_owner_engine[index];
         }
     }
     for (uint32_t index = 0u; index < RIN_GPU_CORE_MAX_OBJECTS; index++) {
