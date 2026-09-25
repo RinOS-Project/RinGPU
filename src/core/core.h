@@ -49,7 +49,9 @@ typedef enum RinGpuBackendCommandTypeV1 {
     RIN_GPU_BACKEND_COMMAND_BEGIN_RENDER_PASS_MRT = 19,
     RIN_GPU_BACKEND_COMMAND_CLEAR_BUFFER = 20,
     RIN_GPU_BACKEND_COMMAND_CLEAR_IMAGE = 21,
-    RIN_GPU_BACKEND_COMMAND_BLIT_IMAGE = 22
+    RIN_GPU_BACKEND_COMMAND_BLIT_IMAGE = 22,
+    RIN_GPU_BACKEND_COMMAND_COMPUTE_BARRIER_V2 = 23,
+    RIN_GPU_BACKEND_COMMAND_GRAPHICS_BARRIER_V2 = 24
 } RinGpuBackendCommandTypeV1;
 
 typedef struct RinGpuBackendBufferCopyV1 {
@@ -142,6 +144,24 @@ typedef struct RinGpuBackendGraphicsBarrierV1 {
     uint32_t flags;
     uint32_t reserved;
 } RinGpuBackendGraphicsBarrierV1;
+
+typedef struct RinGpuBackendComputeBarrierV2 {
+    uint32_t source_stage;
+    uint32_t destination_stage;
+    uint32_t source_access;
+    uint32_t destination_access;
+    uint32_t flags;
+    uint32_t reserved;
+} RinGpuBackendComputeBarrierV2;
+
+typedef struct RinGpuBackendGraphicsBarrierV2 {
+    uint32_t source_stage;
+    uint32_t destination_stage;
+    uint32_t source_access;
+    uint32_t destination_access;
+    uint32_t flags;
+    uint32_t reserved;
+} RinGpuBackendGraphicsBarrierV2;
 
 typedef struct RinGpuBackendVertexAttributeV1 {
     uint32_t location;
@@ -475,6 +495,8 @@ typedef struct RinGpuBackendCommandV1 {
         RinGpuBackendDispatchV1 dispatch;
         RinGpuBackendComputeBarrierV1 compute_barrier;
         RinGpuBackendGraphicsBarrierV1 graphics_barrier;
+        RinGpuBackendComputeBarrierV2 compute_barrier_v2;
+        RinGpuBackendGraphicsBarrierV2 graphics_barrier_v2;
         RinGpuBackendDrawV1 draw;
         RinGpuBackendRenderPassBeginV1 render_pass_begin;
         RinGpuBackendRenderPassMrtBeginV1 render_pass_mrt_begin;
@@ -613,6 +635,8 @@ typedef struct RinGpuRecordedCommand {
         RinGpuDispatchV1 dispatch;
         RinGpuComputeBarrierV1 compute_barrier;
         RinGpuGraphicsBarrierV1 graphics_barrier;
+        RinGpuComputeBarrierV2 compute_barrier_v2;
+        RinGpuGraphicsBarrierV2 graphics_barrier_v2;
         RinGpuDrawV1 draw;
         RinGpuRenderPassDescV1 render_pass;
         RinGpuRenderPassMrtDescV1 render_pass_mrt;
@@ -814,6 +838,10 @@ _Static_assert(sizeof(RinGpuBackendComputeBarrierV1) == 16u,
                "RinGPU backend compute-barrier drift");
 _Static_assert(sizeof(RinGpuBackendGraphicsBarrierV1) == 16u,
                "RinGPU backend graphics-barrier drift");
+_Static_assert(sizeof(RinGpuBackendComputeBarrierV2) == 24u,
+               "RinGPU backend compute-barrier V2 drift");
+_Static_assert(sizeof(RinGpuBackendGraphicsBarrierV2) == 24u,
+               "RinGPU backend graphics-barrier V2 drift");
 _Static_assert(sizeof(RinGpuBackendVertexAttributeV1) == 20u,
                "RinGPU backend vertex-attribute drift");
 _Static_assert(sizeof(RinGpuBackendVertexBufferBindingV1) == 24u,

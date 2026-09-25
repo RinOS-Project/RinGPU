@@ -77,6 +77,7 @@ int main(void)
     RinGpuBufferClearV1 buffer_clear;
     RinGpuImageClearV1 image_clear;
     RinGpuImageBlitV1 image_blit;
+    RinGpuComputeBarrierV2 compute_barrier_v2;
     RinGpuImageUploadV1 upload;
     RinGpuImageReadbackV1 readback;
     RinGpuImageTransitionV1 transition;
@@ -143,14 +144,14 @@ int main(void)
     memset(&queue_desc, 0, sizeof(queue_desc));
     queue_desc.abi_version = RIN_GPU_ABI_VERSION;
     queue_desc.struct_size = sizeof(queue_desc);
-    queue_desc.capabilities = RIN_GPU_QUEUE_COPY;
+    queue_desc.capabilities = RIN_GPU_QUEUE_COPY | RIN_GPU_QUEUE_COMPUTE;
     buffer_desc.size_bytes = 16u;
     buffer_desc.usage = RIN_GPU_BUFFER_COPY_DESTINATION;
     buffer_desc.flags = 0u;
     memset(&command_desc, 0, sizeof(command_desc));
     command_desc.abi_version = RIN_GPU_ABI_VERSION;
     command_desc.struct_size = sizeof(command_desc);
-    command_desc.capabilities = RIN_GPU_QUEUE_COPY;
+    command_desc.capabilities = RIN_GPU_QUEUE_COPY | RIN_GPU_QUEUE_COMPUTE;
     if (ringpu_create_queue(&core, &queue_desc, &queue) != RIN_GPU_OK ||
         ringpu_create_buffer(&core, &buffer_desc, &buffer) != RIN_GPU_OK) {
         goto done;
@@ -274,7 +275,19 @@ int main(void)
     if (ringpu_readback_image(&core, blit_image, &readback, image_readback,
                               sizeof(image_readback)) != RIN_GPU_OK ||
         image_readback[0] != 191u || image_readback[1] != 128u ||
-        image_readback[2] != 64u || image_readback[3] != 255u ||
+        image_readback[2] != 64u || image_readback[3] != 255u) {
+        goto done;
+    }
+    memset(&compute_barrier_v2, 0, sizeof(compute_barrier_v2));
+    compute_barrier_v2.abi_version = RIN_GPU_ABI_VERSION;
+    compute_barrier_v2.struct_size = sizeof(compute_barrier_v2);
+    compute_barrier_v2.source_stage = RIN_GPU_PIPELINE_STAGE_COPY;
+    compute_barrier_v2.destination_stage =
+        RIN_GPU_PIPELINE_STAGE_COMPUTE_SHADER;
+    compute_barrier_v2.source_access = RIN_GPU_RESOURCE_WRITE;
+    compute_barrier_v2.destination_access = RIN_GPU_RESOURCE_READ;
+    if (ringpu_command_compute_barrier_v2(&core, command_list,
+                                          &compute_barrier_v2) != RIN_GPU_OK ||
         ringpu_command_list_close(&core, command_list) != RIN_GPU_OK) {
         goto done;
     }

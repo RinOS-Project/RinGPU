@@ -437,6 +437,21 @@ static int ringpu_queue_submit_internal(
             commands[index].value.compute_barrier.destination_access =
                 command->value.compute_barrier.destination_access;
         } else if (command->type ==
+                   RIN_GPU_BACKEND_COMMAND_COMPUTE_BARRIER_V2) {
+            const RinGpuComputeBarrierV2* barrier =
+                &command->value.compute_barrier_v2;
+            commands[index].value.compute_barrier_v2.source_stage =
+                barrier->source_stage;
+            commands[index].value.compute_barrier_v2.destination_stage =
+                barrier->destination_stage;
+            commands[index].value.compute_barrier_v2.source_access =
+                barrier->source_access;
+            commands[index].value.compute_barrier_v2.destination_access =
+                barrier->destination_access;
+            commands[index].value.compute_barrier_v2.flags = barrier->flags;
+            commands[index].value.compute_barrier_v2.reserved =
+                barrier->reserved;
+        } else if (command->type ==
                    RIN_GPU_BACKEND_COMMAND_GRAPHICS_BARRIER) {
             const RinGpuGraphicsBarrierV1* barrier =
                 &command->value.graphics_barrier;
@@ -452,6 +467,36 @@ static int ringpu_queue_submit_internal(
                 barrier->source_access;
             commands[index].value.graphics_barrier.destination_access =
                 barrier->destination_access;
+        } else if (command->type ==
+                   RIN_GPU_BACKEND_COMMAND_GRAPHICS_BARRIER_V2) {
+            const RinGpuGraphicsBarrierV2* barrier =
+                &command->value.graphics_barrier_v2;
+            if (active_render_target == 0u || barrier->source_stage == 0u ||
+                barrier->destination_stage == 0u ||
+                (barrier->source_stage & ~RIN_GPU_PIPELINE_STAGE_KNOWN) != 0u ||
+                (barrier->destination_stage &
+                 ~RIN_GPU_PIPELINE_STAGE_KNOWN) != 0u ||
+                barrier->source_access == 0u ||
+                barrier->destination_access == 0u ||
+                (barrier->source_access & ~RIN_GPU_RESOURCE_KNOWN_ACCESS) !=
+                    0u ||
+                (barrier->destination_access &
+                 ~RIN_GPU_RESOURCE_KNOWN_ACCESS) != 0u ||
+                barrier->flags != 0u || barrier->reserved != 0u) {
+                result = RIN_GPU_ERROR_STATE;
+                break;
+            }
+            commands[index].value.graphics_barrier_v2.source_stage =
+                barrier->source_stage;
+            commands[index].value.graphics_barrier_v2.destination_stage =
+                barrier->destination_stage;
+            commands[index].value.graphics_barrier_v2.source_access =
+                barrier->source_access;
+            commands[index].value.graphics_barrier_v2.destination_access =
+                barrier->destination_access;
+            commands[index].value.graphics_barrier_v2.flags = barrier->flags;
+            commands[index].value.graphics_barrier_v2.reserved =
+                barrier->reserved;
         } else if (command->type ==
                    RIN_GPU_BACKEND_COMMAND_BEGIN_RENDER_PASS_MRT) {
             const RinGpuRenderPassMrtDescV1* pass =

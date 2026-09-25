@@ -355,7 +355,8 @@ static int ringpu_dispatch_has_hazard(
         const RinGpuRecordedCommand* previous =
             &list->value.command_list.commands[reverse - 1u];
         RinGpuObjectSlot* previous_group;
-        if (previous->type == RIN_GPU_BACKEND_COMMAND_COMPUTE_BARRIER) {
+        if (previous->type == RIN_GPU_BACKEND_COMMAND_COMPUTE_BARRIER ||
+            previous->type == RIN_GPU_BACKEND_COMMAND_COMPUTE_BARRIER_V2) {
             return 0;
         }
         if (previous->type != RIN_GPU_BACKEND_COMMAND_DISPATCH) continue;

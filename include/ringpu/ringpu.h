@@ -67,6 +67,27 @@ typedef enum RinGpuObjectType {
 #define RIN_GPU_RESOURCE_WRITE 0x00000002u
 #define RIN_GPU_RESOURCE_KNOWN_ACCESS 0x00000003u
 
+/* Vendor-neutral execution scopes for the additive V2 barrier ABI. */
+#define RIN_GPU_PIPELINE_STAGE_TOP_OF_PIPE UINT32_C(0x00000001)
+#define RIN_GPU_PIPELINE_STAGE_COPY UINT32_C(0x00000002)
+#define RIN_GPU_PIPELINE_STAGE_COMPUTE_SHADER UINT32_C(0x00000004)
+#define RIN_GPU_PIPELINE_STAGE_VERTEX_INPUT UINT32_C(0x00000008)
+#define RIN_GPU_PIPELINE_STAGE_VERTEX_SHADER UINT32_C(0x00000010)
+#define RIN_GPU_PIPELINE_STAGE_FRAGMENT_SHADER UINT32_C(0x00000020)
+#define RIN_GPU_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS UINT32_C(0x00000040)
+#define RIN_GPU_PIPELINE_STAGE_LATE_FRAGMENT_TESTS UINT32_C(0x00000080)
+#define RIN_GPU_PIPELINE_STAGE_COLOR_OUTPUT UINT32_C(0x00000100)
+#define RIN_GPU_PIPELINE_STAGE_HOST UINT32_C(0x00000200)
+#define RIN_GPU_PIPELINE_STAGE_BOTTOM_OF_PIPE UINT32_C(0x00000400)
+#define RIN_GPU_PIPELINE_STAGE_KNOWN \
+    (RIN_GPU_PIPELINE_STAGE_TOP_OF_PIPE | RIN_GPU_PIPELINE_STAGE_COPY | \
+     RIN_GPU_PIPELINE_STAGE_COMPUTE_SHADER | RIN_GPU_PIPELINE_STAGE_VERTEX_INPUT | \
+     RIN_GPU_PIPELINE_STAGE_VERTEX_SHADER | RIN_GPU_PIPELINE_STAGE_FRAGMENT_SHADER | \
+     RIN_GPU_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS | \
+     RIN_GPU_PIPELINE_STAGE_LATE_FRAGMENT_TESTS | \
+     RIN_GPU_PIPELINE_STAGE_COLOR_OUTPUT | RIN_GPU_PIPELINE_STAGE_HOST | \
+     RIN_GPU_PIPELINE_STAGE_BOTTOM_OF_PIPE)
+
 /* A sampled-image graphics binding normally names one subresource. This flag
  * exposes the contiguous mip chain from mip_level through the image's final
  * level for implicit-LOD sampling. All exposed levels must be SHADER_READ. */
@@ -864,6 +885,28 @@ typedef struct RinGpuGraphicsBarrierV1 {
     uint32_t reserved;
 } RinGpuGraphicsBarrierV1;
 
+typedef struct RinGpuComputeBarrierV2 {
+    uint32_t abi_version;
+    uint32_t struct_size;
+    uint32_t source_stage;
+    uint32_t destination_stage;
+    uint32_t source_access;
+    uint32_t destination_access;
+    uint32_t flags;
+    uint32_t reserved;
+} RinGpuComputeBarrierV2;
+
+typedef struct RinGpuGraphicsBarrierV2 {
+    uint32_t abi_version;
+    uint32_t struct_size;
+    uint32_t source_stage;
+    uint32_t destination_stage;
+    uint32_t source_access;
+    uint32_t destination_access;
+    uint32_t flags;
+    uint32_t reserved;
+} RinGpuGraphicsBarrierV2;
+
 typedef struct RinGpuDrawV1 {
     uint32_t abi_version;
     uint32_t struct_size;
@@ -1346,6 +1389,9 @@ int ringpu_command_dispatch(RinGpuCore* core, RinGpuHandle command_list,
 int ringpu_command_compute_barrier(
     RinGpuCore* core, RinGpuHandle command_list,
     const RinGpuComputeBarrierV1* barrier);
+int ringpu_command_compute_barrier_v2(
+    RinGpuCore* core, RinGpuHandle command_list,
+    const RinGpuComputeBarrierV2* barrier);
 int ringpu_command_begin_render_pass(
     RinGpuCore* core, RinGpuHandle command_list,
     const RinGpuRenderPassDescV1* render_pass);
@@ -1364,6 +1410,9 @@ int ringpu_command_bind_graphics_resources(RinGpuCore* core,
 int ringpu_command_graphics_barrier(
     RinGpuCore* core, RinGpuHandle command_list,
     const RinGpuGraphicsBarrierV1* barrier);
+int ringpu_command_graphics_barrier_v2(
+    RinGpuCore* core, RinGpuHandle command_list,
+    const RinGpuGraphicsBarrierV2* barrier);
 int ringpu_command_set_raster_state(
     RinGpuCore* core, RinGpuHandle command_list,
     const RinGpuRasterStateV1* state);
@@ -1494,6 +1543,10 @@ _Static_assert(sizeof(RinGpuComputeBarrierV1) == 24u,
                "RinGPU compute barrier ABI drift");
 _Static_assert(sizeof(RinGpuGraphicsBarrierV1) == 24u,
                "RinGPU graphics barrier ABI drift");
+_Static_assert(sizeof(RinGpuComputeBarrierV2) == 32u,
+               "RinGPU compute barrier V2 ABI drift");
+_Static_assert(sizeof(RinGpuGraphicsBarrierV2) == 32u,
+               "RinGPU graphics barrier V2 ABI drift");
 _Static_assert(sizeof(RinGpuDrawV1) == 56u,
                "RinGPU draw ABI drift");
 _Static_assert(sizeof(RinGpuDrawVerticesV1) == 72u,

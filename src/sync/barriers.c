@@ -96,6 +96,57 @@ int ringpu_command_compute_barrier(
     return RIN_GPU_OK;
 }
 
+static int ringpu_scoped_barrier_valid(uint32_t source_stage,
+                                       uint32_t destination_stage,
+                                       uint32_t source_access,
+                                       uint32_t destination_access,
+                                       uint32_t flags, uint32_t reserved)
+{
+    return source_stage != 0u && destination_stage != 0u &&
+           (source_stage & ~RIN_GPU_PIPELINE_STAGE_KNOWN) == 0u &&
+           (destination_stage & ~RIN_GPU_PIPELINE_STAGE_KNOWN) == 0u &&
+           source_access != 0u && destination_access != 0u &&
+           (source_access & ~RIN_GPU_RESOURCE_KNOWN_ACCESS) == 0u &&
+           (destination_access & ~RIN_GPU_RESOURCE_KNOWN_ACCESS) == 0u &&
+           flags == 0u && reserved == 0u;
+}
+
+int ringpu_command_compute_barrier_v2(
+    RinGpuCore* core, RinGpuHandle command_list,
+    const RinGpuComputeBarrierV2* barrier)
+{
+    RinGpuObjectSlot* list;
+    RinGpuRecordedCommand* command;
+    int result = ringpu_core_ready(core);
+
+    if (result != RIN_GPU_OK) return result;
+    if (!barrier ||
+        !ringpu_versioned(barrier->abi_version, barrier->struct_size,
+                          sizeof(*barrier)) ||
+        !ringpu_scoped_barrier_valid(
+            barrier->source_stage, barrier->destination_stage,
+            barrier->source_access, barrier->destination_access,
+            barrier->flags, barrier->reserved)) {
+        return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    }
+    result = ringpu_slot(core, command_list, RIN_GPU_OBJECT_COMMAND_LIST, NULL,
+                         &list);
+    if (result != RIN_GPU_OK) return result;
+    if (list->value.command_list.state != RIN_GPU_COMMAND_RECORDING ||
+        list->value.command_list.render_pass_active != 0u ||
+        (list->value.command_list.capabilities & RIN_GPU_QUEUE_COMPUTE) == 0u) {
+        return RIN_GPU_ERROR_STATE;
+    }
+    result = ringpu_record_command(list, &command);
+    if (result != RIN_GPU_OK) return result;
+    command->type = RIN_GPU_BACKEND_COMMAND_COMPUTE_BARRIER_V2;
+    command->value.compute_barrier_v2 = *barrier;
+    command->value.compute_barrier_v2.struct_size =
+        sizeof(command->value.compute_barrier_v2);
+    list->value.command_list.count++;
+    return RIN_GPU_OK;
+}
+
 int ringpu_command_graphics_barrier(
     RinGpuCore* core, RinGpuHandle command_list,
     const RinGpuGraphicsBarrierV1* barrier)
@@ -128,6 +179,43 @@ int ringpu_command_graphics_barrier(
     command->value.graphics_barrier = *barrier;
     command->value.graphics_barrier.struct_size =
         sizeof(command->value.graphics_barrier);
+    list->value.command_list.count++;
+    return RIN_GPU_OK;
+}
+
+int ringpu_command_graphics_barrier_v2(
+    RinGpuCore* core, RinGpuHandle command_list,
+    const RinGpuGraphicsBarrierV2* barrier)
+{
+    RinGpuObjectSlot* list;
+    RinGpuRecordedCommand* command;
+    int result = ringpu_core_ready(core);
+
+    if (result != RIN_GPU_OK) return result;
+    if (!barrier ||
+        !ringpu_versioned(barrier->abi_version, barrier->struct_size,
+                          sizeof(*barrier)) ||
+        !ringpu_scoped_barrier_valid(
+            barrier->source_stage, barrier->destination_stage,
+            barrier->source_access, barrier->destination_access,
+            barrier->flags, barrier->reserved)) {
+        return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    }
+    result = ringpu_slot(core, command_list, RIN_GPU_OBJECT_COMMAND_LIST, NULL,
+                         &list);
+    if (result != RIN_GPU_OK) return result;
+    if (list->value.command_list.state != RIN_GPU_COMMAND_RECORDING ||
+        list->value.command_list.render_pass_active == 0u ||
+        (list->value.command_list.capabilities & RIN_GPU_QUEUE_GRAPHICS) ==
+            0u) {
+        return RIN_GPU_ERROR_STATE;
+    }
+    result = ringpu_record_command(list, &command);
+    if (result != RIN_GPU_OK) return result;
+    command->type = RIN_GPU_BACKEND_COMMAND_GRAPHICS_BARRIER_V2;
+    command->value.graphics_barrier_v2 = *barrier;
+    command->value.graphics_barrier_v2.struct_size =
+        sizeof(command->value.graphics_barrier_v2);
     list->value.command_list.count++;
     return RIN_GPU_OK;
 }

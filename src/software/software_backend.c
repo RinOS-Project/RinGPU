@@ -9050,6 +9050,26 @@ static int sw_submit(void* opaque, const RinGpuBackendCommandV1* commands,
              * so the validated public barrier has no additional CPU work. */
             ++delta.barrier_commands;
             break;
+        case RIN_GPU_BACKEND_COMMAND_COMPUTE_BARRIER_V2:
+            if (active_pass.color != NULL ||
+                command->value.compute_barrier_v2.source_stage == 0u ||
+                command->value.compute_barrier_v2.destination_stage == 0u ||
+                (command->value.compute_barrier_v2.source_stage &
+                 ~RIN_GPU_PIPELINE_STAGE_KNOWN) != 0u ||
+                (command->value.compute_barrier_v2.destination_stage &
+                 ~RIN_GPU_PIPELINE_STAGE_KNOWN) != 0u ||
+                command->value.compute_barrier_v2.source_access == 0u ||
+                command->value.compute_barrier_v2.destination_access == 0u ||
+                (command->value.compute_barrier_v2.source_access &
+                 ~RIN_GPU_RESOURCE_KNOWN_ACCESS) != 0u ||
+                (command->value.compute_barrier_v2.destination_access &
+                 ~RIN_GPU_RESOURCE_KNOWN_ACCESS) != 0u ||
+                command->value.compute_barrier_v2.flags != 0u ||
+                command->value.compute_barrier_v2.reserved != 0u) {
+                return RIN_GPU_ERROR_INVALID_ARGUMENT;
+            }
+            ++delta.barrier_commands;
+            break;
         case RIN_GPU_BACKEND_COMMAND_GRAPHICS_BARRIER:
             if (active_pass.color == NULL)
                 return RIN_GPU_ERROR_STATE;
@@ -9064,6 +9084,26 @@ static int sw_submit(void* opaque, const RinGpuBackendCommandV1* commands,
             /* Raster work is completed synchronously before this command is
              * reached. Validation preserves the public ordering boundary
              * without fabricating an asynchronous cache operation. */
+            ++delta.barrier_commands;
+            break;
+        case RIN_GPU_BACKEND_COMMAND_GRAPHICS_BARRIER_V2:
+            if (active_pass.color == NULL ||
+                command->value.graphics_barrier_v2.source_stage == 0u ||
+                command->value.graphics_barrier_v2.destination_stage == 0u ||
+                (command->value.graphics_barrier_v2.source_stage &
+                 ~RIN_GPU_PIPELINE_STAGE_KNOWN) != 0u ||
+                (command->value.graphics_barrier_v2.destination_stage &
+                 ~RIN_GPU_PIPELINE_STAGE_KNOWN) != 0u ||
+                command->value.graphics_barrier_v2.source_access == 0u ||
+                command->value.graphics_barrier_v2.destination_access == 0u ||
+                (command->value.graphics_barrier_v2.source_access &
+                 ~RIN_GPU_RESOURCE_KNOWN_ACCESS) != 0u ||
+                (command->value.graphics_barrier_v2.destination_access &
+                 ~RIN_GPU_RESOURCE_KNOWN_ACCESS) != 0u ||
+                command->value.graphics_barrier_v2.flags != 0u ||
+                command->value.graphics_barrier_v2.reserved != 0u) {
+                return RIN_GPU_ERROR_INVALID_ARGUMENT;
+            }
             ++delta.barrier_commands;
             break;
         case RIN_GPU_BACKEND_COMMAND_BEGIN_RENDER_PASS:
