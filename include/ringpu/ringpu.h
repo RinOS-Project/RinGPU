@@ -388,6 +388,15 @@ typedef struct RinGpuBufferDescV1 {
     uint32_t flags;
 } RinGpuBufferDescV1;
 
+typedef struct RinGpuBufferInfoV1 {
+    uint32_t abi_version;
+    uint32_t struct_size;
+    uint64_t size_bytes;
+    uint32_t usage;
+    uint32_t flags;
+    uint64_t reserved[2];
+} RinGpuBufferInfoV1;
+
 /* Resource requirements are the portable hand-off between a resource
  * descriptor and a backend-owned memory allocator.  The core deliberately
  * reports requirements without allocating or binding anything; a backend
@@ -1484,6 +1493,8 @@ int ringpu_create_buffer(RinGpuCore* core, const RinGpuBufferDescV1* desc,
 int ringpu_get_buffer_memory_requirements(
     const RinGpuCore* core, const RinGpuBufferDescV1* desc,
     RinGpuResourceMemoryRequirementsV1* requirements);
+int ringpu_get_buffer_info(const RinGpuCore* core, RinGpuHandle buffer,
+                           RinGpuBufferInfoV1* info);
 int ringpu_create_memory(RinGpuCore* core, const RinGpuMemoryDescV1* desc,
                          RinGpuHandle* memory);
 int ringpu_bind_buffer_memory(

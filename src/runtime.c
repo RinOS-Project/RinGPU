@@ -185,6 +185,15 @@ int ringpu_runtime_readback_buffer(RinGpuRuntime* runtime,
                                   destination, size_bytes);
 }
 
+int ringpu_runtime_get_buffer_info(const RinGpuRuntime* runtime,
+                                   RinGpuHandle buffer,
+                                   RinGpuBufferInfoV1* info)
+{
+    if (runtime == NULL || runtime->initialized != RIN_GPU_RUNTIME_VERSION)
+        return RIN_GPU_ERROR_STATE;
+    return ringpu_get_buffer_info(&runtime->core, buffer, info);
+}
+
 int ringpu_runtime_create_queue(RinGpuRuntime* runtime,
                                 const RinGpuQueueDescV1* desc,
                                 RinGpuHandle* queue_out)

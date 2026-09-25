@@ -6,6 +6,8 @@
 
 int ringpu_create_buffer(RinGpuCore* core, const RinGpuBufferDescV1* desc,
                          RinGpuHandle* buffer);
+int ringpu_get_buffer_info(const RinGpuCore* core, RinGpuHandle buffer,
+                           RinGpuBufferInfoV1* info);
 int ringpu_create_memory(RinGpuCore* core, const RinGpuMemoryDescV1* desc,
                          RinGpuHandle* memory);
 int ringpu_bind_buffer_memory(

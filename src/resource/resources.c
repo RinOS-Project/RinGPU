@@ -214,6 +214,26 @@ int ringpu_get_buffer_memory_requirements(
         requirements);
 }
 
+int ringpu_get_buffer_info(const RinGpuCore* core, RinGpuHandle buffer,
+                          RinGpuBufferInfoV1* info)
+{
+    const RinGpuObjectSlot* slot;
+    int result = ringpu_core_ready(core);
+
+    if (result != RIN_GPU_OK) return result;
+    if (!info) return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    result = ringpu_slot_const(core, buffer, RIN_GPU_OBJECT_BUFFER, NULL,
+                               &slot);
+    if (result != RIN_GPU_OK) return result;
+    memset(info, 0, sizeof(*info));
+    info->abi_version = RIN_GPU_ABI_VERSION;
+    info->struct_size = sizeof(*info);
+    info->size_bytes = slot->value.buffer.size_bytes;
+    info->usage = slot->value.buffer.usage;
+    info->flags = slot->value.buffer.flags;
+    return RIN_GPU_OK;
+}
+
 int ringpu_get_image_memory_requirements(
     const RinGpuCore* core, const RinGpuImageDescV1* desc,
     RinGpuResourceMemoryRequirementsV1* requirements)
