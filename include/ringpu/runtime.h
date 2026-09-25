@@ -75,6 +75,9 @@ int ringpu_runtime_create_fence(RinGpuRuntime* runtime,
 int ringpu_runtime_create_command_list(
     RinGpuRuntime* runtime, const RinGpuCommandListDescV1* desc,
     RinGpuHandle* command_list_out);
+int ringpu_runtime_get_image_info(const RinGpuRuntime* runtime,
+                                  RinGpuHandle image,
+                                  RinGpuImageInfoV1* info);
 int ringpu_runtime_create_image(RinGpuRuntime* runtime,
                                 const RinGpuImageDescV1* desc,
                                 RinGpuHandle* image_out);
@@ -137,6 +140,20 @@ int ringpu_runtime_command_list_reset(RinGpuRuntime* runtime,
                                       RinGpuHandle command_list);
 int ringpu_runtime_command_list_close(RinGpuRuntime* runtime,
                                       RinGpuHandle command_list);
+int ringpu_runtime_command_copy_buffer(
+    RinGpuRuntime* runtime, RinGpuHandle command_list,
+    RinGpuHandle destination, uint64_t destination_offset,
+    RinGpuHandle source, uint64_t source_offset, uint64_t size_bytes);
+int ringpu_runtime_command_clear_buffer(
+    RinGpuRuntime* runtime, RinGpuHandle command_list,
+    RinGpuHandle destination, const RinGpuBufferClearV1* clear);
+int ringpu_runtime_command_copy_image(
+    RinGpuRuntime* runtime, RinGpuHandle command_list,
+    RinGpuHandle destination, RinGpuHandle source,
+    const RinGpuImageCopyRegionV1* region);
+int ringpu_runtime_command_clear_image(
+    RinGpuRuntime* runtime, RinGpuHandle command_list,
+    RinGpuHandle destination, const RinGpuImageClearV1* clear);
 int ringpu_runtime_command_transition_image(
     RinGpuRuntime* runtime, RinGpuHandle command_list, RinGpuHandle image,
     const RinGpuImageTransitionV1* transition);

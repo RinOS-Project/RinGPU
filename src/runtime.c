@@ -211,6 +211,15 @@ int ringpu_runtime_create_command_list(
     return ringpu_create_command_list(&runtime->core, desc, command_list_out);
 }
 
+int ringpu_runtime_get_image_info(const RinGpuRuntime* runtime,
+                                  RinGpuHandle image,
+                                  RinGpuImageInfoV1* info)
+{
+    if (runtime == NULL || runtime->initialized != RIN_GPU_RUNTIME_VERSION)
+        return RIN_GPU_ERROR_STATE;
+    return ringpu_get_image_info(&runtime->core, image, info);
+}
+
 int ringpu_runtime_create_image(RinGpuRuntime* runtime,
                                 const RinGpuImageDescV1* desc,
                                 RinGpuHandle* image_out)
@@ -382,6 +391,49 @@ int ringpu_runtime_command_list_close(RinGpuRuntime* runtime,
     if (runtime == NULL || runtime->initialized != RIN_GPU_RUNTIME_VERSION)
         return RIN_GPU_ERROR_STATE;
     return ringpu_command_list_close(&runtime->core, command_list);
+}
+
+int ringpu_runtime_command_copy_buffer(
+    RinGpuRuntime* runtime, RinGpuHandle command_list,
+    RinGpuHandle destination, uint64_t destination_offset,
+    RinGpuHandle source, uint64_t source_offset, uint64_t size_bytes)
+{
+    if (runtime == NULL || runtime->initialized != RIN_GPU_RUNTIME_VERSION)
+        return RIN_GPU_ERROR_STATE;
+    return ringpu_command_copy_buffer(&runtime->core, command_list,
+                                      destination, destination_offset, source,
+                                      source_offset, size_bytes);
+}
+
+int ringpu_runtime_command_clear_buffer(
+    RinGpuRuntime* runtime, RinGpuHandle command_list,
+    RinGpuHandle destination, const RinGpuBufferClearV1* clear)
+{
+    if (runtime == NULL || runtime->initialized != RIN_GPU_RUNTIME_VERSION)
+        return RIN_GPU_ERROR_STATE;
+    return ringpu_command_clear_buffer(&runtime->core, command_list,
+                                       destination, clear);
+}
+
+int ringpu_runtime_command_copy_image(
+    RinGpuRuntime* runtime, RinGpuHandle command_list,
+    RinGpuHandle destination, RinGpuHandle source,
+    const RinGpuImageCopyRegionV1* region)
+{
+    if (runtime == NULL || runtime->initialized != RIN_GPU_RUNTIME_VERSION)
+        return RIN_GPU_ERROR_STATE;
+    return ringpu_command_copy_image(&runtime->core, command_list, destination,
+                                     source, region);
+}
+
+int ringpu_runtime_command_clear_image(
+    RinGpuRuntime* runtime, RinGpuHandle command_list,
+    RinGpuHandle destination, const RinGpuImageClearV1* clear)
+{
+    if (runtime == NULL || runtime->initialized != RIN_GPU_RUNTIME_VERSION)
+        return RIN_GPU_ERROR_STATE;
+    return ringpu_command_clear_image(&runtime->core, command_list, destination,
+                                      clear);
 }
 
 int ringpu_runtime_command_transition_image(

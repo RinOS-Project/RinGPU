@@ -217,9 +217,20 @@ void ringpu_release_command_references(RinGpuCore* core,
                               RIN_GPU_OBJECT_BUFFER);
             release_reference(core, command->source, RIN_GPU_OBJECT_BUFFER);
             break;
+        case RIN_GPU_BACKEND_COMMAND_CLEAR_BUFFER:
+            release_reference(core, command->destination,
+                              RIN_GPU_OBJECT_BUFFER);
+            break;
         case RIN_GPU_BACKEND_COMMAND_COPY_IMAGE:
             release_reference(core, command->destination, RIN_GPU_OBJECT_IMAGE);
             release_reference(core, command->source, RIN_GPU_OBJECT_IMAGE);
+            break;
+        case RIN_GPU_BACKEND_COMMAND_BLIT_IMAGE:
+            release_reference(core, command->destination, RIN_GPU_OBJECT_IMAGE);
+            release_reference(core, command->source, RIN_GPU_OBJECT_IMAGE);
+            break;
+        case RIN_GPU_BACKEND_COMMAND_CLEAR_IMAGE:
+            release_reference(core, command->destination, RIN_GPU_OBJECT_IMAGE);
             break;
         case RIN_GPU_BACKEND_COMMAND_RESOLVE_IMAGE:
             release_reference(core, command->destination, RIN_GPU_OBJECT_IMAGE);
