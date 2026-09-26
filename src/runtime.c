@@ -709,6 +709,14 @@ int ringpu_runtime_wait_fence(RinGpuRuntime* runtime, RinGpuHandle fence,
     return ringpu_wait_fence(&runtime->core, fence, value, timeout_ns);
 }
 
+int ringpu_runtime_get_fence_value(const RinGpuRuntime* runtime,
+                                   RinGpuHandle fence, uint64_t* value_out)
+{
+    if (runtime == NULL || runtime->initialized != RIN_GPU_RUNTIME_VERSION)
+        return RIN_GPU_ERROR_STATE;
+    return ringpu_fence_value(&runtime->core, fence, value_out);
+}
+
 int ringpu_runtime_get_query_result(RinGpuRuntime* runtime,
                                     RinGpuHandle query, uint32_t flags,
                                     RinGpuQueryResultV1* result)

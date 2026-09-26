@@ -5,6 +5,29 @@
 #include <stdint.h>
 #include <string.h>
 
+#if defined(_MSC_VER)
+#include <intrin.h>
+static uint32_t ringpu_device_lock_exchange(volatile uint32_t* value,
+                                            uint32_t replacement) {
+    return (uint32_t)_InterlockedExchange((volatile long*)(void*)value,
+                                          (long)replacement);
+}
+static void ringpu_device_lock_store(volatile uint32_t* value,
+                                     uint32_t replacement) {
+    (void)_InterlockedExchange((volatile long*)(void*)value,
+                               (long)replacement);
+}
+#else
+static uint32_t ringpu_device_lock_exchange(volatile uint32_t* value,
+                                            uint32_t replacement) {
+    return __atomic_exchange_n(value, replacement, __ATOMIC_ACQUIRE);
+}
+static void ringpu_device_lock_store(volatile uint32_t* value,
+                                     uint32_t replacement) {
+    __atomic_store_n(value, replacement, __ATOMIC_RELEASE);
+}
+#endif
+
 #define RIN_GPU_DEVICE_RUNTIME_MAGIC UINT64_C(0x52474452554e5631)
 
 typedef struct RinGpuDeviceQueueState {
@@ -106,16 +129,16 @@ static int ringpu_device_lock(RinGpuDeviceRuntime* runtime,
     if (state->magic != RIN_GPU_DEVICE_RUNTIME_MAGIC) {
         return RIN_GPU_DEVICE_STATE;
     }
-    if (__atomic_exchange_n(&state->api_lock, 1u, __ATOMIC_ACQUIRE) != 0u) {
+    if (ringpu_device_lock_exchange(&state->api_lock, 1u) != 0u) {
         return RIN_GPU_DEVICE_BUSY;
     }
     if (state->magic != RIN_GPU_DEVICE_RUNTIME_MAGIC) {
-        __atomic_store_n(&state->api_lock, 0u, __ATOMIC_RELEASE);
+        ringpu_device_lock_store(&state->api_lock, 0u);
         return RIN_GPU_DEVICE_STATE;
     }
     if (!ringpu_device_binding_valid(state)) {
         state->flags = RIN_GPU_DEVICE_STATUS_LOST;
-        __atomic_store_n(&state->api_lock, 0u, __ATOMIC_RELEASE);
+        ringpu_device_lock_store(&state->api_lock, 0u);
         return RIN_GPU_DEVICE_PROTOCOL;
     }
     *state_out = state;
@@ -123,7 +146,7 @@ static int ringpu_device_lock(RinGpuDeviceRuntime* runtime,
 }
 
 static void ringpu_device_unlock(RinGpuDeviceRuntimeState* state) {
-    __atomic_store_n(&state->api_lock, 0u, __ATOMIC_RELEASE);
+    ringpu_device_lock_store(&state->api_lock, 0u);
 }
 
 static void ringpu_device_mark_lost(RinGpuDeviceRuntimeState* state) {

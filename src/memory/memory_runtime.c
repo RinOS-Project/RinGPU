@@ -5,6 +5,29 @@
 #include <stdint.h>
 #include <string.h>
 
+#if defined(_MSC_VER)
+#include <intrin.h>
+static uint32_t ringpu_memory_lock_exchange(volatile uint32_t* value,
+                                            uint32_t replacement) {
+    return (uint32_t)_InterlockedExchange((volatile long*)(void*)value,
+                                          (long)replacement);
+}
+static void ringpu_memory_lock_store(volatile uint32_t* value,
+                                     uint32_t replacement) {
+    (void)_InterlockedExchange((volatile long*)(void*)value,
+                               (long)replacement);
+}
+#else
+static uint32_t ringpu_memory_lock_exchange(volatile uint32_t* value,
+                                            uint32_t replacement) {
+    return __atomic_exchange_n(value, replacement, __ATOMIC_ACQUIRE);
+}
+static void ringpu_memory_lock_store(volatile uint32_t* value,
+                                     uint32_t replacement) {
+    __atomic_store_n(value, replacement, __ATOMIC_RELEASE);
+}
+#endif
+
 #define RIN_GPU_MEMORY_RUNTIME_MAGIC UINT64_C(0x52474d454d563031)
 #define RIN_GPU_MEMORY_ALLOCATION_TAG UINT32_C(0x4d41)
 #define RIN_GPU_MEMORY_LEASE_TAG UINT32_C(0x4d4c)
@@ -214,16 +237,16 @@ static int ringpu_memory_lock(RinGpuMemoryRuntime* runtime,
     if (state->magic != RIN_GPU_MEMORY_RUNTIME_MAGIC) {
         return RIN_GPU_MEMORY_STATE;
     }
-    if (__atomic_exchange_n(&state->api_lock, 1u, __ATOMIC_ACQUIRE) != 0u) {
+    if (ringpu_memory_lock_exchange(&state->api_lock, 1u) != 0u) {
         return RIN_GPU_MEMORY_BUSY;
     }
     if (state->magic != RIN_GPU_MEMORY_RUNTIME_MAGIC) {
-        __atomic_store_n(&state->api_lock, 0u, __ATOMIC_RELEASE);
+        ringpu_memory_lock_store(&state->api_lock, 0u);
         return RIN_GPU_MEMORY_STATE;
     }
     if (!ringpu_memory_binding_valid(state)) {
         state->flags = RIN_GPU_MEMORY_STATUS_LOST;
-        __atomic_store_n(&state->api_lock, 0u, __ATOMIC_RELEASE);
+        ringpu_memory_lock_store(&state->api_lock, 0u);
         return RIN_GPU_MEMORY_PROTOCOL;
     }
     *state_out = state;
@@ -231,7 +254,7 @@ static int ringpu_memory_lock(RinGpuMemoryRuntime* runtime,
 }
 
 static void ringpu_memory_unlock(RinGpuMemoryRuntimeState* state) {
-    __atomic_store_n(&state->api_lock, 0u, __ATOMIC_RELEASE);
+    ringpu_memory_lock_store(&state->api_lock, 0u);
 }
 
 static int ringpu_memory_backend_valid(

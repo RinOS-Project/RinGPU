@@ -240,6 +240,8 @@ int ringpu_runtime_command_present(RinGpuRuntime* runtime,
                                    const RinGpuPresentV1* present);
 int ringpu_runtime_wait_fence(RinGpuRuntime* runtime, RinGpuHandle fence,
                               uint64_t value, uint64_t timeout_ns);
+int ringpu_runtime_get_fence_value(const RinGpuRuntime* runtime,
+                                   RinGpuHandle fence, uint64_t* value_out);
 int ringpu_runtime_get_query_result(RinGpuRuntime* runtime,
                                     RinGpuHandle query, uint32_t flags,
                                     RinGpuQueryResultV1* result);

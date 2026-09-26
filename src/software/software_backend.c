@@ -9,6 +9,12 @@
 #include <stdlib.h>
 #include <string.h>
 
+#if defined(_MSC_VER)
+#define RIN_GPU_UNUSED_FUNCTION
+#else
+#define RIN_GPU_UNUSED_FUNCTION __attribute__((unused))
+#endif
+
 #include <ringpu/rin_shader.h>
 
 #define SW_MAX_SHADER_BYTES (1024u * 1024u)
@@ -2485,7 +2491,7 @@ static void sw_destroy_graphics_pipeline(void* opaque, uint64_t cookie)
 
 /* Kept for source-including legacy unit adapters. Production callbacks use
  * the typed destroy functions above so the metadata size is unambiguous. */
-static void __attribute__((unused)) sw_destroy_pipeline(void* opaque,
+static void RIN_GPU_UNUSED_FUNCTION sw_destroy_pipeline(void* opaque,
                                                         uint64_t cookie)
 {
     if (opaque != NULL)
@@ -9746,7 +9752,7 @@ static int sw_draw_indexed_v2_in_pass(const RinGpuBackendDrawIndexedV2* draw,
  * include this implementation translation unit. Production command submission
  * always supplies the active pass, so these test-only wrappers are deliberately
  * not referenced by the freestanding object. */
-static int __attribute__((unused))
+static int RIN_GPU_UNUSED_FUNCTION
 sw_draw_vertices(const RinGpuBackendDrawVerticesV1* draw)
 {
     return sw_draw_vertices_in_pass(draw, NULL);
@@ -9784,19 +9790,19 @@ static int sw_draw_constant_vertices_in_pass(const RinGpuBackendDrawV1* draw,
     return sw_draw_vertices_in_pass(&vertices, active_pass);
 }
 
-static int __attribute__((unused))
+static int RIN_GPU_UNUSED_FUNCTION
 sw_draw_vertices_v2(const RinGpuBackendDrawVerticesV2* draw)
 {
     return sw_draw_vertices_v2_in_pass(draw, NULL);
 }
 
-static int __attribute__((unused))
+static int RIN_GPU_UNUSED_FUNCTION
 sw_draw_indexed(const RinGpuBackendDrawIndexedV1* draw)
 {
     return sw_draw_indexed_in_pass(draw, NULL);
 }
 
-static int __attribute__((unused))
+static int RIN_GPU_UNUSED_FUNCTION
 sw_draw_indexed_v2(const RinGpuBackendDrawIndexedV2* draw)
 {
     return sw_draw_indexed_v2_in_pass(draw, 0, NULL);
