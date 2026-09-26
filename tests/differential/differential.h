@@ -9,7 +9,8 @@
 typedef enum RinGpuDifferentialResult {
     RIN_GPU_DIFFERENTIAL_MATCH = 0,
     RIN_GPU_DIFFERENTIAL_MISMATCH = 1,
-    RIN_GPU_DIFFERENTIAL_INVALID_ARGUMENT = -1
+    RIN_GPU_DIFFERENTIAL_INVALID_ARGUMENT = -1,
+    RIN_GPU_DIFFERENTIAL_BACKEND_ERROR = -2
 } RinGpuDifferentialResult;
 
 typedef enum RinGpuDifferentialCategory {
@@ -21,7 +22,10 @@ typedef enum RinGpuDifferentialCategory {
     RIN_GPU_DIFFERENTIAL_RESOURCE_STATE = 6,
     RIN_GPU_DIFFERENTIAL_DERIVATIVE = 7,
     RIN_GPU_DIFFERENTIAL_TEXTURE_FILTER = 8,
-    RIN_GPU_DIFFERENTIAL_CATEGORY_COUNT = 8
+    RIN_GPU_DIFFERENTIAL_SHADER_RESULT = 9,
+    RIN_GPU_DIFFERENTIAL_CAPABILITY = 10,
+    RIN_GPU_DIFFERENTIAL_FAULT = 11,
+    RIN_GPU_DIFFERENTIAL_CATEGORY_COUNT = 11
 } RinGpuDifferentialCategory;
 
 #define RIN_GPU_DIFFERENTIAL_FLAG_COLOR UINT32_C(1u << 0)
@@ -32,6 +36,9 @@ typedef enum RinGpuDifferentialCategory {
 #define RIN_GPU_DIFFERENTIAL_FLAG_RESOURCE_STATE UINT32_C(1u << 5)
 #define RIN_GPU_DIFFERENTIAL_FLAG_DERIVATIVE UINT32_C(1u << 6)
 #define RIN_GPU_DIFFERENTIAL_FLAG_TEXTURE_FILTER UINT32_C(1u << 7)
+#define RIN_GPU_DIFFERENTIAL_FLAG_SHADER_RESULT UINT32_C(1u << 8)
+#define RIN_GPU_DIFFERENTIAL_FLAG_CAPABILITY UINT32_C(1u << 9)
+#define RIN_GPU_DIFFERENTIAL_FLAG_FAULT UINT32_C(1u << 10)
 
 #define RIN_GPU_DIFFERENTIAL_BACKEND_STATS_VERSION 1u
 #define RIN_GPU_DIFFERENTIAL_BACKEND_FIELD_COMMAND_COUNTERS UINT32_C(1u << 0)
@@ -86,6 +93,71 @@ typedef struct RinGpuDifferentialBackendStatsV1 {
     uint64_t reserved[2];
 } RinGpuDifferentialBackendStatsV1;
 
+#define RIN_GPU_DIFFERENTIAL_WORKLOAD_VERSION 1u
+#define RIN_GPU_DIFFERENTIAL_WORKLOAD_ID_MAX 64u
+#define RIN_GPU_DIFFERENTIAL_COMMAND_STREAM_MAX 8192u
+
+#define RIN_GPU_DIFFERENTIAL_SNAPSHOT_FIELD_COLOR UINT32_C(1u << 0)
+#define RIN_GPU_DIFFERENTIAL_SNAPSHOT_FIELD_DEPTH UINT32_C(1u << 1)
+#define RIN_GPU_DIFFERENTIAL_SNAPSHOT_FIELD_STENCIL UINT32_C(1u << 2)
+#define RIN_GPU_DIFFERENTIAL_SNAPSHOT_FIELD_SHADER UINT32_C(1u << 3)
+#define RIN_GPU_DIFFERENTIAL_SNAPSHOT_FIELD_FENCE_ORDER UINT32_C(1u << 4)
+#define RIN_GPU_DIFFERENTIAL_SNAPSHOT_FIELD_RESOURCE_STATE UINT32_C(1u << 5)
+#define RIN_GPU_DIFFERENTIAL_SNAPSHOT_FIELD_CAPABILITY UINT32_C(1u << 6)
+#define RIN_GPU_DIFFERENTIAL_SNAPSHOT_FIELD_FAULT UINT32_C(1u << 7)
+#define RIN_GPU_DIFFERENTIAL_SNAPSHOT_FIELDS_KNOWN UINT32_C(0xff)
+
+typedef struct RinGpuDifferentialWorkloadV1 {
+    uint32_t struct_size;
+    uint32_t version;
+    char id[RIN_GPU_DIFFERENTIAL_WORKLOAD_ID_MAX];
+    const uint8_t* command_stream;
+    uint64_t command_stream_bytes;
+    uint32_t expected_fields;
+    uint32_t reserved0;
+    uint64_t required_capabilities;
+    uint64_t deterministic_seed;
+    uint64_t reserved[2];
+} RinGpuDifferentialWorkloadV1;
+
+typedef struct RinGpuDifferentialSnapshotV1 {
+    uint32_t struct_size;
+    uint32_t version;
+    uint32_t valid_fields;
+    uint32_t reserved0;
+    RinGpuDifferentialBackendStatsV1 backend;
+    const uint8_t* color;
+    uint64_t color_bytes;
+    const float* depth;
+    uint64_t depth_values;
+    const uint8_t* stencil;
+    uint64_t stencil_bytes;
+    const uint8_t* shader_result;
+    uint64_t shader_result_bytes;
+    const uint64_t* fence_order;
+    uint64_t fence_values;
+    const uint64_t* resource_state;
+    uint64_t resource_values;
+    uint64_t capability_mask;
+    uint64_t unsupported_capability_mask;
+    uint32_t device_lost;
+    uint32_t fault_code;
+    uint64_t fault_sequence;
+    uint64_t reserved[2];
+} RinGpuDifferentialSnapshotV1;
+
+typedef int (*RinGpuDifferentialRunBackendFn)(
+    void* context, const RinGpuDifferentialWorkloadV1* workload,
+    RinGpuDifferentialSnapshotV1* snapshot_out);
+
+typedef struct RinGpuDifferentialBackendAdapterV1 {
+    uint32_t struct_size;
+    uint32_t version;
+    RinGpuDifferentialRunBackendFn run;
+    void* context;
+    uint64_t reserved[2];
+} RinGpuDifferentialBackendAdapterV1;
+
 #include <ringpu/software.h>
 
 /* Initializes a policy with exact integer/normalized comparisons and an
@@ -123,6 +195,18 @@ int rin_gpu_differential_compare_backend_snapshot(
 int rin_gpu_differential_compare_backend_stats(
     const struct RinGpuSoftwareBackendStatsV1* expected,
     const struct RinGpuSoftwareBackendStatsV1* actual,
+    RinGpuDifferentialReportV1* report);
+
+/* Execute one immutable, validated workload through two real backend
+ * adapters and compare every observation the workload requested.  The
+ * adapters own their returned storage until this function returns; a missing
+ * physical provider is an explicit backend error and can never become a
+ * software/physical match. */
+int rin_gpu_differential_run_pair(
+    const RinGpuDifferentialWorkloadV1* workload,
+    const RinGpuDifferentialBackendAdapterV1* expected,
+    const RinGpuDifferentialBackendAdapterV1* actual,
+    const RinGpuDifferentialPolicyV1* policy,
     RinGpuDifferentialReportV1* report);
 
 #if defined(__cplusplus)
