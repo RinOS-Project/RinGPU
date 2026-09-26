@@ -15,7 +15,7 @@ struct RinGpuRuntime {
     uint32_t initialized;
 };
 
-static int runtime_desc_valid(const RinGpuRuntimeSoftwareSurfaceDescV1* desc)
+static int runtime_desc_valid(const RinGpuRuntimeDescV1* desc)
 {
     if (desc == NULL || desc->struct_size != sizeof(*desc) ||
         desc->version != RIN_GPU_RUNTIME_VERSION ||
@@ -30,21 +30,34 @@ static int runtime_desc_valid(const RinGpuRuntimeSoftwareSurfaceDescV1* desc)
         desc->display.abi_version != RIN_GPU_ABI_VERSION ||
         desc->display.width == 0u || desc->display.height == 0u ||
         desc->flags != 0u || desc->reserved0 != 0u ||
-        desc->reserved[0] != 0u || desc->reserved[1] != 0u)
+        desc->reserved[0] != 0u || desc->reserved[1] != 0u ||
+        desc->reserved1 != 0u)
         return 0;
-    if (desc->present_callback == NULL || desc->acquire_image == NULL)
-        return 0;
+    if (desc->backend_ops == NULL) {
+        if (desc->backend_family != RIN_GPU_RUNTIME_BACKEND_FAMILY_UNKNOWN &&
+            desc->backend_family != RIN_GPU_RUNTIME_BACKEND_FAMILY_SOFTWARE)
+            return 0;
+        if (desc->present_callback == NULL || desc->acquire_image == NULL)
+            return 0;
+    } else {
+        if (desc->backend_context == NULL ||
+            desc->backend_family < RIN_GPU_RUNTIME_BACKEND_FAMILY_INTEL ||
+            desc->backend_family > RIN_GPU_RUNTIME_BACKEND_FAMILY_VIRTIO ||
+            desc->present_callback != NULL || desc->present_context != NULL ||
+            desc->acquire_image != NULL || desc->image_context != NULL)
+            return 0;
+    }
     return 1;
 }
 
-int ringpu_runtime_software_surface_create(
-    const RinGpuRuntimeSoftwareSurfaceDescV1* desc,
+int ringpu_runtime_create(const RinGpuRuntimeDescV1* desc,
     RinGpuRuntime** runtime_out)
 {
     RinGpuRuntime* runtime;
     RinGpuSoftwareBackendDescV3 software_desc;
     RinGpuCoreConfigV1 config;
     const RinGpuBackendOpsV1* backend_ops;
+    const RinGpuBackendOpsV1* external_ops;
     int result;
 
     if (runtime_out == NULL) return RIN_GPU_ERROR_INVALID_ARGUMENT;
@@ -53,18 +66,23 @@ int ringpu_runtime_software_surface_create(
     runtime = calloc(1u, sizeof(*runtime));
     if (runtime == NULL) return RIN_GPU_ERROR_NO_MEMORY;
 
-    memset(&software_desc, 0, sizeof(software_desc));
-    software_desc.base.base.struct_size = sizeof(software_desc);
-    software_desc.base.base.version = RIN_GPU_SOFTWARE_BACKEND_VERSION_3;
-    software_desc.base.base.max_total_bytes = desc->max_total_allocation_size;
-    software_desc.base.present_callback = desc->present_callback;
-    software_desc.base.present_context = desc->present_context;
-    software_desc.acquire_image = desc->acquire_image;
-    software_desc.image_context = desc->image_context;
-    result = ringpu_software_backend_create(&software_desc.base.base,
-                                            &runtime->software_backend);
-    if (result != RIN_GPU_OK) goto fail;
-    backend_ops = ringpu_software_backend_ops();
+    external_ops = (const RinGpuBackendOpsV1*)desc->backend_ops;
+    if (external_ops != NULL) {
+        backend_ops = external_ops;
+    } else {
+        memset(&software_desc, 0, sizeof(software_desc));
+        software_desc.base.base.struct_size = sizeof(software_desc);
+        software_desc.base.base.version = RIN_GPU_SOFTWARE_BACKEND_VERSION_3;
+        software_desc.base.base.max_total_bytes = desc->max_total_allocation_size;
+        software_desc.base.present_callback = desc->present_callback;
+        software_desc.base.present_context = desc->present_context;
+        software_desc.acquire_image = desc->acquire_image;
+        software_desc.image_context = desc->image_context;
+        result = ringpu_software_backend_create(&software_desc.base.base,
+                                                &runtime->software_backend);
+        if (result != RIN_GPU_OK) goto fail;
+        backend_ops = ringpu_software_backend_ops();
+    }
     if (backend_ops == NULL) {
         result = RIN_GPU_ERROR_BACKEND;
         goto fail;
@@ -83,7 +101,11 @@ int ringpu_runtime_software_surface_create(
     config.max_image_sample_count = desc->max_image_sample_count;
     config.adapter = desc->adapter;
     config.backend = *backend_ops;
-    config.backend_context = runtime->software_backend;
+    config.backend_context = external_ops != NULL ? desc->backend_context
+                                                  : runtime->software_backend;
+    config.backend_family = external_ops != NULL
+                                ? desc->backend_family
+                                : RIN_GPU_RUNTIME_BACKEND_FAMILY_SOFTWARE;
     if (rin_gpu_diagnostics_init(&runtime->diagnostics,
                                  desc->device_generation) != 0) {
         result = RIN_GPU_ERROR_BACKEND;
@@ -101,9 +123,17 @@ int ringpu_runtime_software_surface_create(
 fail:
     if (runtime->initialized == RIN_GPU_RUNTIME_VERSION)
         ringpu_core_shutdown(&runtime->core);
-    ringpu_software_backend_destroy(runtime->software_backend);
+    if (runtime->software_backend != NULL)
+        ringpu_software_backend_destroy(runtime->software_backend);
     free(runtime);
     return result;
+}
+
+int ringpu_runtime_software_surface_create(
+    const RinGpuRuntimeSoftwareSurfaceDescV1* desc,
+    RinGpuRuntime** runtime_out)
+{
+    return ringpu_runtime_create(desc, runtime_out);
 }
 
 void ringpu_runtime_destroy(RinGpuRuntime* runtime)
@@ -111,7 +141,8 @@ void ringpu_runtime_destroy(RinGpuRuntime* runtime)
     if (runtime == NULL) return;
     if (runtime->initialized == RIN_GPU_RUNTIME_VERSION)
         ringpu_core_shutdown(&runtime->core);
-    ringpu_software_backend_destroy(runtime->software_backend);
+    if (runtime->software_backend != NULL)
+        ringpu_software_backend_destroy(runtime->software_backend);
     memset(runtime, 0, sizeof(*runtime));
     free(runtime);
 }

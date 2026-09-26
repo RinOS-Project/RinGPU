@@ -15,10 +15,24 @@ extern "C" {
 
 typedef struct RinGpuRuntime RinGpuRuntime;
 
-/* Public host/runtime seam for a caller-owned software surface.  The
- * implementation owns the logical device, command recorder, and software
- * backend; the caller owns only callback storage and the final surface. */
-typedef struct RinGpuRuntimeSoftwareSurfaceDescV1 {
+/* Backend families admitted by the public runtime seam.  SOFTWARE is kept
+ * for explicit host/reference construction; physical families must provide
+ * their own backend operations and context. */
+#define RIN_GPU_RUNTIME_BACKEND_FAMILY_UNKNOWN 0u
+#define RIN_GPU_RUNTIME_BACKEND_FAMILY_SOFTWARE 1u
+#define RIN_GPU_RUNTIME_BACKEND_FAMILY_INTEL 2u
+#define RIN_GPU_RUNTIME_BACKEND_FAMILY_AMD 3u
+#define RIN_GPU_RUNTIME_BACKEND_FAMILY_NVIDIA 4u
+#define RIN_GPU_RUNTIME_BACKEND_FAMILY_VIRTIO 5u
+
+/* Public runtime construction descriptor.  The common limits, adapter, and
+ * display fields describe the admitted backend.  When backend_ops is NULL,
+ * the descriptor explicitly requests the reference software backend and the
+ * present/acquire callbacks are required.  When backend_ops is non-NULL, it
+ * is an opaque pointer supplied by the OS-core physical backend owner.  The
+ * runtime copies and validates that operation table and never substitutes a
+ * software backend for it. */
+typedef struct RinGpuRuntimeDescV1 {
     uint32_t struct_size;
     uint32_t version;
     uint64_t device_generation;
@@ -39,7 +53,17 @@ typedef struct RinGpuRuntimeSoftwareSurfaceDescV1 {
     uint32_t flags;
     uint32_t reserved0;
     uint64_t reserved[2];
-} RinGpuRuntimeSoftwareSurfaceDescV1;
+    const void* backend_ops;
+    void* backend_context;
+    uint32_t backend_family;
+    uint32_t reserved1;
+} RinGpuRuntimeDescV1;
+
+/* Source compatibility name for the explicit software/reference path. */
+typedef RinGpuRuntimeDescV1 RinGpuRuntimeSoftwareSurfaceDescV1;
+
+int ringpu_runtime_create(const RinGpuRuntimeDescV1* desc,
+                          RinGpuRuntime** runtime_out);
 
 int ringpu_runtime_software_surface_create(
     const RinGpuRuntimeSoftwareSurfaceDescV1* desc,
