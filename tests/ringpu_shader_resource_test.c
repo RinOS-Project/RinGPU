@@ -10,6 +10,7 @@ typedef struct PathSource {
     const uint8_t* bytes;
     uint64_t size;
     uint32_t calls;
+    uint64_t observed_capacity;
 } PathSource;
 
 static RinResourceCatalogStatus read_path(
@@ -19,6 +20,7 @@ static RinResourceCatalogStatus read_path(
     assert(source != NULL && path != NULL && output_size != NULL);
     assert(path_size == 18u && memcmp(path, "/shaders/basic.rsh", path_size) == 0);
     ++source->calls;
+    source->observed_capacity = output_capacity;
     if (source->size > output_capacity) return RIN_RESOURCE_CATALOG_BUFFER_TOO_SMALL;
     memcpy(output, source->bytes, (size_t)source->size);
     *output_size = source->size;
@@ -48,6 +50,7 @@ static void make_shader(uint8_t* bytes, uint32_t size) {
 int main(void) {
     uint8_t shader[sizeof(RinShaderHeaderV1) + sizeof(RinShaderInstructionV1)];
     uint8_t storage[sizeof(shader)];
+    static uint8_t oversized_storage[RIN_SHADER_MAX_SOURCE_BYTES + 1u];
     uint8_t small[sizeof(shader) - 1u];
     RinResourceCatalogEntryV1 entries[2];
     RinResourceCatalogV1 catalog;
@@ -90,11 +93,20 @@ int main(void) {
     source.bytes = shader;
     source.size = sizeof(shader);
     source.calls = 0u;
+    source.observed_capacity = 0u;
     storage_size = UINT64_MAX;
     assert(ringpu_shader_validate_resource(
                &catalog, 12u, read_path, &source, storage, sizeof(storage),
                &storage_size, &info) == RIN_SHADER_OK);
     assert(storage_size == sizeof(shader) && source.calls == 1u);
+
+    storage_size = UINT64_MAX;
+    assert(ringpu_shader_validate_resource(
+               &catalog, 12u, read_path, &source, oversized_storage,
+               sizeof(oversized_storage), &storage_size, &info) ==
+           RIN_SHADER_OK);
+    assert(storage_size == sizeof(shader) && source.calls == 2u &&
+           source.observed_capacity == RIN_SHADER_MAX_SOURCE_BYTES);
 
     storage_size = UINT64_MAX;
     memset(&info, 0xa5, sizeof(info));

@@ -1207,6 +1207,7 @@ int ringpu_shader_validate_resource(
     RinShaderInfoV1* info) {
     RinResourceCatalogStatus status;
     int result;
+    uint64_t load_capacity = storage_capacity;
 
     if (storage_size == NULL || info == NULL) {
         if (storage_size != NULL) *storage_size = 0u;
@@ -1218,10 +1219,12 @@ int ringpu_shader_validate_resource(
     if (storage_capacity > SIZE_MAX ||
         (storage_capacity != 0u && storage == NULL))
         return RIN_SHADER_ERROR_INVALID_ARGUMENT;
+    if (load_capacity > (uint64_t)RIN_SHADER_MAX_SOURCE_BYTES)
+        load_capacity = (uint64_t)RIN_SHADER_MAX_SOURCE_BYTES;
 
     status = rin_resource_catalog_load(
         catalog, RIN_RESOURCE_CATALOG_TYPE_SHADER, resource_id, read_path,
-        context, storage, storage_capacity, storage_size);
+        context, storage, load_capacity, storage_size);
     if (status != RIN_RESOURCE_CATALOG_OK || *storage_size > SIZE_MAX ||
         *storage_size == 0u) {
         *storage_size = 0u;

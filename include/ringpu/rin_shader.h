@@ -307,6 +307,13 @@ typedef struct RIN_SHADER_PACKED RinShaderInstructionV1 {
 #endif
 #undef RIN_SHADER_PACKED
 
+/* The validator admits at most RIN_SHADER_MAX_INSTRUCTIONS instructions, so
+ * resource-backed reads never need to expose a larger source arena to the
+ * path owner. */
+#define RIN_SHADER_MAX_SOURCE_BYTES \
+    (sizeof(RinShaderHeaderV1) + \
+     ((size_t)RIN_SHADER_MAX_INSTRUCTIONS * sizeof(RinShaderInstructionV1)))
+
 typedef struct RinShaderInfoV1 {
     uint32_t abi_version;
     uint32_t struct_size;
