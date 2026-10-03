@@ -7,6 +7,15 @@
 
 #define CHECK(condition) do { if (!(condition)) return 1; } while (0)
 
+static int g_completion_result = RIN_GPU_OK;
+
+static int wait_for_completion(void* context, uint64_t timeout_ns)
+{
+    (void)context;
+    (void)timeout_ns;
+    return g_completion_result;
+}
+
 static int make_core(RinGpuCore* core, RinGpuSoftwareBackend** backend_out)
 {
     RinGpuSoftwareBackendDescV1 backend_desc = {0};
@@ -44,6 +53,7 @@ static int make_core(RinGpuCore* core, RinGpuSoftwareBackend** backend_out)
     config.adapter.queue_capabilities = RIN_GPU_QUEUE_COPY;
     memcpy(config.adapter.name, "ownership", 9u);
     config.backend = *ringpu_software_backend_ops();
+    config.backend.wait_for_completion = wait_for_completion;
     config.backend_context = backend;
     config.displays = &display;
     config.display_count = 1u;
@@ -57,12 +67,15 @@ static int make_core(RinGpuCore* core, RinGpuSoftwareBackend** backend_out)
 }
 
 static int submit(RinGpuCore* core, RinGpuHandle queue,
-                  RinGpuHandle list)
+                  RinGpuHandle list, RinGpuHandle signal_fence,
+                  uint64_t signal_value)
 {
     RinGpuSubmitInfoV1 info = {0};
     info.abi_version = RIN_GPU_ABI_VERSION;
     info.struct_size = sizeof(info);
     info.command_list = list;
+    info.signal_fence = signal_fence;
+    info.signal_value = signal_value;
     return ringpu_queue_submit(core, queue, &info);
 }
 
@@ -76,13 +89,18 @@ int main(void)
     RinGpuImageDescV1 image_desc = {0};
     RinGpuImageOwnershipTransferV1 transfer = {0};
     RinGpuImageTransitionV1 transition = {0};
+    RinGpuHandle fence = 0u;
     RinGpuHandle queue0 = 0u;
     RinGpuHandle queue12 = 0u;
     RinGpuHandle list = 0u;
+    RinGpuHandle unsubmitted_list = 0u;
     RinGpuHandle image = 0u;
     RinGpuHandle image_alias = 0u;
+    RinGpuHandle unsubmitted_image = 0u;
+    uint32_t image_state = UINT32_MAX;
 
     CHECK(make_core(&core, &backend));
+    CHECK(ringpu_create_fence(&core, 0u, &fence) == RIN_GPU_OK);
     queue_v1.abi_version = RIN_GPU_ABI_VERSION;
     queue_v1.struct_size = sizeof(queue_v1);
     queue_v1.capabilities = RIN_GPU_QUEUE_COPY;
@@ -97,6 +115,8 @@ int main(void)
     list_desc.struct_size = sizeof(list_desc);
     list_desc.capabilities = RIN_GPU_QUEUE_COPY;
     CHECK(ringpu_create_command_list(&core, &list_desc, &list) == RIN_GPU_OK);
+    CHECK(ringpu_create_command_list(&core, &list_desc,
+                                     &unsubmitted_list) == RIN_GPU_OK);
     image_desc.abi_version = RIN_GPU_ABI_VERSION;
     image_desc.struct_size = sizeof(image_desc);
     image_desc.dimension = RIN_GPU_IMAGE_DIMENSION_2D;
@@ -110,6 +130,20 @@ int main(void)
     image_desc.usage = RIN_GPU_IMAGE_COPY_SOURCE | RIN_GPU_IMAGE_COPY_DESTINATION;
     CHECK(ringpu_create_image(&core, &image_desc, &image) == RIN_GPU_OK);
     image_alias = image;
+    CHECK(ringpu_create_image(&core, &image_desc, &unsubmitted_image) ==
+          RIN_GPU_OK);
+
+    transition.abi_version = RIN_GPU_ABI_VERSION;
+    transition.struct_size = sizeof(transition);
+    transition.mip_level_count = 1u;
+    transition.array_layer_count = 1u;
+    transition.before_state = RIN_GPU_IMAGE_STATE_UNDEFINED;
+    transition.after_state = RIN_GPU_IMAGE_STATE_COPY_DESTINATION;
+    CHECK(ringpu_command_transition_image(&core, unsubmitted_list,
+                                          unsubmitted_image, &transition) ==
+          RIN_GPU_OK);
+    CHECK(ringpu_command_list_close(&core, unsubmitted_list) == RIN_GPU_OK);
+    CHECK(ringpu_destroy(&core, unsubmitted_image) == RIN_GPU_ERROR_BUSY);
 
     transfer.abi_version = RIN_GPU_ABI_VERSION;
     transfer.struct_size = sizeof(transfer);
@@ -124,9 +158,13 @@ int main(void)
     CHECK(ringpu_command_transfer_image_ownership(&core, list, image,
                                                   &transfer) == RIN_GPU_OK);
     CHECK(ringpu_command_list_close(&core, list) == RIN_GPU_OK);
-    CHECK(submit(&core, queue12, list) == RIN_GPU_OK);
+    CHECK(ringpu_destroy(&core, image) == RIN_GPU_ERROR_BUSY);
+    CHECK(submit(&core, queue12, list, 0u, 0u) == RIN_GPU_OK);
 
     CHECK(ringpu_command_list_reset(&core, list) == RIN_GPU_OK);
+    CHECK(ringpu_destroy(&core, unsubmitted_image) == RIN_GPU_ERROR_BUSY);
+    CHECK(ringpu_command_list_reset(&core, unsubmitted_list) == RIN_GPU_OK);
+    CHECK(ringpu_destroy(&core, unsubmitted_image) == RIN_GPU_OK);
     transition.abi_version = RIN_GPU_ABI_VERSION;
     transition.struct_size = sizeof(transition);
     transition.mip_level_count = 1u;
@@ -136,12 +174,22 @@ int main(void)
     CHECK(ringpu_command_transition_image(&core, list, image, &transition) ==
           RIN_GPU_OK);
     CHECK(ringpu_command_list_close(&core, list) == RIN_GPU_OK);
-    CHECK(submit(&core, queue0, list) == RIN_GPU_ERROR_STATE);
-    CHECK(submit(&core, queue12, list) == RIN_GPU_OK);
+    CHECK(submit(&core, queue0, list, 0u, 0u) == RIN_GPU_ERROR_STATE);
+    CHECK(submit(&core, queue12, list, fence, 1u) == RIN_GPU_OK);
 
-    CHECK(ringpu_destroy(&core, image) == RIN_GPU_ERROR_BUSY);
+    CHECK(ringpu_destroy(&core, image) == RIN_GPU_OK);
+    CHECK(ringpu_get_image_state(&core, image, 0u, 0u, &image_state) ==
+          RIN_GPU_ERROR_INVALID_HANDLE);
+    CHECK(core.allocated_bytes != 0u);
     CHECK(ringpu_command_list_reset(&core, list) == RIN_GPU_OK);
-    CHECK(ringpu_destroy(&core, image_alias) == RIN_GPU_OK);
+    CHECK(core.allocated_bytes != 0u);
+    g_completion_result = RIN_GPU_ERROR_BUSY;
+    CHECK(ringpu_wait_fence(&core, fence, 1u, 0u) == RIN_GPU_ERROR_BUSY);
+    CHECK(core.allocated_bytes != 0u);
+    g_completion_result = RIN_GPU_OK;
+    CHECK(ringpu_wait_fence(&core, fence, 1u, UINT64_MAX) == RIN_GPU_OK);
+    CHECK(core.allocated_bytes == 0u);
+    CHECK(ringpu_destroy(&core, image_alias) == RIN_GPU_ERROR_INVALID_HANDLE);
     CHECK(ringpu_destroy(&core, image) == RIN_GPU_ERROR_INVALID_HANDLE);
 
     ringpu_core_shutdown(&core);

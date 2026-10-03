@@ -1761,6 +1761,9 @@ int ringpu_wait_fence(RinGpuCore* core, RinGpuHandle fence,
 int ringpu_readback_image(RinGpuCore* core, RinGpuHandle image,
                           const RinGpuImageReadbackV1* readback,
                           void* destination, uint64_t destination_size);
+/* Success invalidates the handle immediately. If an accepted submission still
+ * references the object, native destruction is deferred until a successful
+ * ringpu_wait_fence() and release of any retained command/dependency refs. */
 int ringpu_destroy(RinGpuCore* core, RinGpuHandle object);
 
 #if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L

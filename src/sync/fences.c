@@ -49,6 +49,10 @@ int ringpu_wait_fence(RinGpuCore* core, RinGpuHandle fence,
         return RIN_GPU_ERROR_UNSUPPORTED;
     result = core->backend.wait_for_completion(core->backend_context,
                                                timeout_ns);
+    if (result == RIN_GPU_OK) {
+        core->completed_serial = core->submitted_serial;
+        result = ringpu_collect_deferred(core);
+    }
     ringpu_core_diagnostic(core, RIN_GPU_DIAGNOSTIC_QUEUE_WAIT, fence, 0u,
                            value, timeout_ns, result);
     return result;

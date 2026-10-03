@@ -10,10 +10,19 @@ Backend-specific creation is delegated through the versioned
 The factory boundary is one-way: common buffer, image, sampler, shader,
 pipeline, and bind-group factories validate and normalize their inputs, then
 call the corresponding backend create callback and store its returned cookie
-in the common object slot. `ringpu_destroy` releases the matching backend
-object through its destroy callback. Recorded commands use the common
+in the common object slot. `ringpu_destroy` invalidates the common handle
+immediately; its matching backend destroy callback may be deferred until the
+last-use serial is complete and recorded/dependent references are released.
+Recorded commands use the common
 `RinGpuBackendCommandV1` representation and reach the device only through
 `submit_commands`; native API handles do not escape into common descriptors.
+
+Each successful submission advances a core serial for the exact command-list
+reference graph. A successful `wait_for_completion` callback confirms all
+prior submissions are complete and allows deferred objects to retire. If that
+callback is absent, `submit_commands` must not return until its work is
+complete. A failed or timed-out completion wait never releases deferred
+objects.
 
 `ringpu_core_init` checks backend ABI version/size and the required creation,
 destruction, and submission callbacks before accepting a backend. The runtime

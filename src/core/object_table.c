@@ -11,9 +11,10 @@ static RinGpuHandle ringpu_encode(const RinGpuCore* core, uint32_t index,
     return raw ^ core->handle_secret;
 }
 
-int ringpu_slot_const(const RinGpuCore* core, RinGpuHandle handle,
-                      uint16_t expected_type, uint32_t* index_out,
-                      const RinGpuObjectSlot** slot_out)
+static int ringpu_slot_resolve(const RinGpuCore* core, RinGpuHandle handle,
+                               uint16_t expected_type, uint32_t* index_out,
+                               const RinGpuObjectSlot** slot_out,
+                               int allow_destroy_pending)
 {
     uint64_t raw;
     uint32_t encoded_index;
@@ -32,7 +33,8 @@ int ringpu_slot_const(const RinGpuCore* core, RinGpuHandle handle,
     }
     slot = &core->objects[encoded_index - 1u];
     if (!slot->occupied || slot->generation != generation ||
-        slot->type != encoded_type) {
+        slot->type != encoded_type ||
+        (!allow_destroy_pending && slot->destroy_pending != 0u)) {
         return RIN_GPU_ERROR_INVALID_HANDLE;
     }
     if (expected_type != RIN_GPU_OBJECT_NONE && encoded_type != expected_type)
@@ -42,11 +44,33 @@ int ringpu_slot_const(const RinGpuCore* core, RinGpuHandle handle,
     return RIN_GPU_OK;
 }
 
+int ringpu_slot_const(const RinGpuCore* core, RinGpuHandle handle,
+                      uint16_t expected_type, uint32_t* index_out,
+                      const RinGpuObjectSlot** slot_out)
+{
+    return ringpu_slot_resolve(core, handle, expected_type, index_out,
+                               slot_out, 0);
+}
+
 int ringpu_slot(RinGpuCore* core, RinGpuHandle handle, uint16_t expected_type,
                 uint32_t* index_out, RinGpuObjectSlot** slot_out)
 {
     uint32_t index;
     int result = ringpu_slot_const(core, handle, expected_type, &index, NULL);
+    if (result != RIN_GPU_OK) return result;
+    if (index_out) *index_out = index;
+    if (slot_out) *slot_out = &core->objects[index];
+    return RIN_GPU_OK;
+}
+
+int ringpu_slot_retained(RinGpuCore* core, RinGpuHandle handle,
+                         uint16_t expected_type, uint32_t* index_out,
+                         RinGpuObjectSlot** slot_out)
+{
+    uint32_t index;
+    const RinGpuObjectSlot* slot;
+    int result = ringpu_slot_resolve(core, handle, expected_type, &index,
+                                     &slot, 1);
     if (result != RIN_GPU_OK) return result;
     if (index_out) *index_out = index;
     if (slot_out) *slot_out = &core->objects[index];
@@ -63,6 +87,8 @@ int ringpu_allocate(RinGpuCore* core, uint16_t type, RinGpuHandle* handle,
         if (slot->generation == 0u) slot->generation = 1u;
         slot->type = type;
         slot->occupied = 1u;
+        slot->destroy_pending = 0u;
+        slot->last_use_serial = 0u;
         memset(&slot->value, 0, sizeof(slot->value));
         *handle = ringpu_encode(core, index, type, slot->generation);
         if (*handle == 0u) {
@@ -81,6 +107,8 @@ void ringpu_release_slot(RinGpuObjectSlot* slot)
     if (!slot) return;
     slot->occupied = 0u;
     slot->type = RIN_GPU_OBJECT_NONE;
+    slot->destroy_pending = 0u;
+    slot->last_use_serial = 0u;
     slot->generation++;
     if (slot->generation == 0u) slot->generation = 1u;
     memset(&slot->value, 0, sizeof(slot->value));

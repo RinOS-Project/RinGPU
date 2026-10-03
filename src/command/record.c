@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 #include "record.h"
 #include "../core/object_table.h"
+#include "../pipeline/pipelines.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -39,10 +40,16 @@ static void release_reference(RinGpuCore* core, RinGpuHandle handle,
     RinGpuObjectSlot* slot;
     uint32_t* references = NULL;
 
-    if (!core || handle == 0u ||
-        ringpu_slot(core, handle, type, NULL, &slot) != RIN_GPU_OK) {
+    if (!core || handle == 0u) {
         return;
     }
+    if (core->marking_command_references != 0u) {
+        if (ringpu_slot(core, handle, type, NULL, &slot) == RIN_GPU_OK)
+            slot->last_use_serial = core->command_reference_serial;
+        return;
+    }
+    if (ringpu_slot_retained(core, handle, type, NULL, &slot) != RIN_GPU_OK)
+        return;
     switch (type) {
     case RIN_GPU_OBJECT_BUFFER:
         references = &slot->value.buffer.reference_count;
@@ -61,6 +68,9 @@ static void release_reference(RinGpuCore* core, RinGpuHandle handle,
         break;
     case RIN_GPU_OBJECT_GRAPHICS_BIND_GROUP:
         references = &slot->value.graphics_bind_group.reference_count;
+        break;
+    case RIN_GPU_OBJECT_QUERY:
+        references = &slot->value.query.reference_count;
         break;
     default:
         break;
@@ -242,12 +252,19 @@ void ringpu_release_command_references(RinGpuCore* core,
         case RIN_GPU_BACKEND_COMMAND_TRANSFER_IMAGE_OWNERSHIP:
             release_reference(core, command->destination, RIN_GPU_OBJECT_IMAGE);
             break;
+        case RIN_GPU_BACKEND_COMMAND_BEGIN_QUERY:
+        case RIN_GPU_BACKEND_COMMAND_END_QUERY:
+        case RIN_GPU_BACKEND_COMMAND_RESET_QUERY:
+            release_reference(core, command->destination,
+                              RIN_GPU_OBJECT_QUERY);
+            break;
         default:
             break;
         }
     }
     release_graphics_bind_group_reference(
         core, list->value.command_list.graphics_bind_group);
+    if (core->marking_command_references != 0u) return;
     list->value.command_list.count = 0u;
     list->value.command_list.render_target = 0u;
     memset(list->value.command_list.render_color_targets, 0,
@@ -267,4 +284,118 @@ void ringpu_release_command_references(RinGpuCore* core,
     list->value.command_list.render_stencil_array_layer = 0u;
     list->value.command_list.render_pass_active = 0u;
     list->value.command_list.graphics_bind_group = 0u;
+}
+
+static int mark_reference(RinGpuCore* core, RinGpuHandle handle,
+                          uint16_t type, uint64_t serial)
+{
+    RinGpuObjectSlot* slot;
+
+    if (handle == 0u ||
+        ringpu_slot(core, handle, type, NULL, &slot) != RIN_GPU_OK ||
+        slot->last_use_serial == serial) {
+        return 0;
+    }
+    slot->last_use_serial = serial;
+    return 1;
+}
+
+static int mark_graphics_binding(RinGpuCore* core,
+                                 const RinGpuGraphicsBindingV1* binding,
+                                 uint64_t serial)
+{
+    uint16_t type;
+
+    if (!binding) return 0;
+    if (binding->kind == RIN_SHADER_RESOURCE_STORAGE_BUFFER) {
+        type = RIN_GPU_OBJECT_BUFFER;
+    } else if (ringpu_graphics_image_kind(binding->kind)) {
+        type = RIN_GPU_OBJECT_IMAGE;
+    } else if (ringpu_graphics_sampler_kind(binding->kind)) {
+        type = RIN_GPU_OBJECT_SAMPLER;
+    } else {
+        return 0;
+    }
+    return mark_reference(core, binding->resource, type, serial);
+}
+
+static int mark_dependent_references(RinGpuCore* core, uint64_t serial)
+{
+    int changed;
+
+    do {
+        changed = 0;
+        for (uint32_t index = 0u; index < RIN_GPU_CORE_MAX_OBJECTS; ++index) {
+            RinGpuObjectSlot* slot = &core->objects[index];
+
+            if (!slot->occupied || slot->last_use_serial != serial) continue;
+            switch (slot->type) {
+            case RIN_GPU_OBJECT_BUFFER:
+                changed |= mark_reference(core,
+                    slot->value.buffer.memory_handle,
+                    RIN_GPU_OBJECT_MEMORY, serial);
+                break;
+            case RIN_GPU_OBJECT_IMAGE:
+                changed |= mark_reference(core,
+                    slot->value.image.memory_handle,
+                    RIN_GPU_OBJECT_MEMORY, serial);
+                break;
+            case RIN_GPU_OBJECT_COMPUTE_PIPELINE:
+                changed |= mark_reference(core,
+                    slot->value.compute_pipeline.shader_module,
+                    RIN_GPU_OBJECT_SHADER_MODULE, serial);
+                break;
+            case RIN_GPU_OBJECT_GRAPHICS_PIPELINE:
+                changed |= mark_reference(core,
+                    slot->value.graphics_pipeline.vertex_shader,
+                    RIN_GPU_OBJECT_SHADER_MODULE, serial);
+                changed |= mark_reference(core,
+                    slot->value.graphics_pipeline.fragment_shader,
+                    RIN_GPU_OBJECT_SHADER_MODULE, serial);
+                break;
+            case RIN_GPU_OBJECT_COMPUTE_BIND_GROUP:
+                changed |= mark_reference(core,
+                    slot->value.compute_bind_group.pipeline,
+                    RIN_GPU_OBJECT_COMPUTE_PIPELINE, serial);
+                for (uint32_t binding = 0u;
+                     slot->value.compute_bind_group.bindings != NULL &&
+                     binding < slot->value.compute_bind_group.binding_count;
+                     ++binding) {
+                    changed |= mark_reference(core,
+                        slot->value.compute_bind_group.bindings[binding].buffer,
+                        RIN_GPU_OBJECT_BUFFER, serial);
+                }
+                break;
+            case RIN_GPU_OBJECT_GRAPHICS_BIND_GROUP:
+                changed |= mark_reference(core,
+                    slot->value.graphics_bind_group.pipeline,
+                    RIN_GPU_OBJECT_GRAPHICS_PIPELINE, serial);
+                for (uint32_t binding = 0u;
+                     slot->value.graphics_bind_group.bindings != NULL &&
+                     binding < slot->value.graphics_bind_group.binding_count;
+                     ++binding) {
+                    changed |= mark_graphics_binding(
+                        core, &slot->value.graphics_bind_group.bindings[binding],
+                        serial);
+                }
+                break;
+            default:
+                break;
+            }
+        }
+    } while (changed != 0);
+    return 1;
+}
+
+void ringpu_mark_command_references(RinGpuCore* core,
+                                     RinGpuObjectSlot* list,
+                                     uint64_t serial)
+{
+    if (!core || !list || serial == 0u) return;
+    core->command_reference_serial = serial;
+    core->marking_command_references = 1u;
+    ringpu_release_command_references(core, list);
+    core->marking_command_references = 0u;
+    core->command_reference_serial = 0u;
+    (void)mark_dependent_references(core, serial);
 }

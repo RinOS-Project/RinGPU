@@ -19,6 +19,9 @@ uint32_t ringpu_graphics_binding_mip_count(
 int ringpu_graphics_binding_slot(
     RinGpuCore* core, const RinGpuGraphicsBindingV1* binding,
     RinGpuObjectSlot** slot);
+int ringpu_graphics_binding_slot_retained(
+    RinGpuCore* core, const RinGpuGraphicsBindingV1* binding,
+    RinGpuObjectSlot** slot);
 int ringpu_graphics_binding_reference(
     RinGpuCore* core, const RinGpuGraphicsBindingV1* binding, int acquire);
 int ringpu_validate_graphics_bind_group(

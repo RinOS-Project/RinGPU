@@ -56,6 +56,8 @@ static int ringpu_record_query_command(RinGpuCore* core,
          type != RIN_GPU_BACKEND_COMMAND_RESET_QUERY)) {
         return RIN_GPU_ERROR_STATE;
     }
+    if (query_slot->value.query.reference_count == UINT32_MAX)
+        return RIN_GPU_ERROR_LIMIT;
     result = ringpu_record_command(list, &command);
     if (result != RIN_GPU_OK) return result;
     command->type = type;
@@ -63,6 +65,7 @@ static int ringpu_record_query_command(RinGpuCore* core,
     command->value.query.query_type = query_slot->value.query.query_type;
     command->value.query.reserved = 0u;
     list->value.command_list.count++;
+    query_slot->value.query.reference_count++;
     return RIN_GPU_OK;
 }
 

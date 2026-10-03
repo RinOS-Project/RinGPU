@@ -16,20 +16,18 @@ static int ringpu_release_bound_memory(RinGpuCore* core,
     int result;
 
     if (memory == 0u) return RIN_GPU_OK;
-    result = ringpu_slot(core, memory, RIN_GPU_OBJECT_MEMORY, NULL,
-                         &memory_slot);
+    result = ringpu_slot_retained(core, memory, RIN_GPU_OBJECT_MEMORY, NULL,
+                                  &memory_slot);
     if (result != RIN_GPU_OK || memory_slot->value.memory.reference_count == 0u)
         return RIN_GPU_ERROR_STATE;
     memory_slot->value.memory.reference_count--;
     return RIN_GPU_OK;
 }
 
-int ringpu_destroy(RinGpuCore* core, RinGpuHandle object) {
-    RinGpuObjectSlot* slot;
-    int result = ringpu_core_ready(core);
-    if (result != RIN_GPU_OK) return result;
-    result = ringpu_slot(core, object, RIN_GPU_OBJECT_NONE, NULL, &slot);
-    if (result != RIN_GPU_OK) return result;
+static int ringpu_destroy_slot(RinGpuCore* core, RinGpuHandle object,
+                               RinGpuObjectSlot* slot) {
+    int result;
+    if (!core || !slot || !slot->occupied) return RIN_GPU_ERROR_STATE;
     if (slot->type == RIN_GPU_OBJECT_BUFFER) {
         if (slot->value.buffer.reference_count != 0u) return RIN_GPU_ERROR_BUSY;
         if (slot->value.buffer.memory_handle != 0u) {
@@ -86,8 +84,9 @@ int ringpu_destroy(RinGpuCore* core, RinGpuHandle object) {
         if (slot->value.compute_pipeline.reference_count != 0u) {
             return RIN_GPU_ERROR_BUSY;
         }
-        result = ringpu_slot(core, slot->value.compute_pipeline.shader_module,
-                             RIN_GPU_OBJECT_SHADER_MODULE, NULL, &shader);
+        result = ringpu_slot_retained(
+            core, slot->value.compute_pipeline.shader_module,
+            RIN_GPU_OBJECT_SHADER_MODULE, NULL, &shader);
         if (result != RIN_GPU_OK ||
             shader->value.shader_module.reference_count == 0u) {
             return RIN_GPU_ERROR_STATE;
@@ -102,18 +101,16 @@ int ringpu_destroy(RinGpuCore* core, RinGpuHandle object) {
         if (slot->value.graphics_pipeline.reference_count != 0u) {
             return RIN_GPU_ERROR_BUSY;
         }
-        result = ringpu_slot(core,
-                             slot->value.graphics_pipeline.vertex_shader,
-                             RIN_GPU_OBJECT_SHADER_MODULE, NULL,
-                             &vertex_shader);
+        result = ringpu_slot_retained(
+            core, slot->value.graphics_pipeline.vertex_shader,
+            RIN_GPU_OBJECT_SHADER_MODULE, NULL, &vertex_shader);
         if (result != RIN_GPU_OK ||
             vertex_shader->value.shader_module.reference_count == 0u) {
             return RIN_GPU_ERROR_STATE;
         }
-        result = ringpu_slot(core,
-                             slot->value.graphics_pipeline.fragment_shader,
-                             RIN_GPU_OBJECT_SHADER_MODULE, NULL,
-                             &fragment_shader);
+        result = ringpu_slot_retained(
+            core, slot->value.graphics_pipeline.fragment_shader,
+            RIN_GPU_OBJECT_SHADER_MODULE, NULL, &fragment_shader);
         if (result != RIN_GPU_OK ||
             fragment_shader->value.shader_module.reference_count == 0u) {
             return RIN_GPU_ERROR_STATE;
@@ -139,16 +136,18 @@ int ringpu_destroy(RinGpuCore* core, RinGpuHandle object) {
             (binding_count != 0u && !bindings)) {
             return RIN_GPU_ERROR_STATE;
         }
-        result = ringpu_slot(core, slot->value.compute_bind_group.pipeline,
-                             RIN_GPU_OBJECT_COMPUTE_PIPELINE, NULL, &pipeline);
+        result = ringpu_slot_retained(
+            core, slot->value.compute_bind_group.pipeline,
+            RIN_GPU_OBJECT_COMPUTE_PIPELINE, NULL, &pipeline);
         if (result != RIN_GPU_OK ||
             pipeline->value.compute_pipeline.reference_count == 0u) {
             return RIN_GPU_ERROR_STATE;
         }
         for (uint32_t binding = 0u; binding < binding_count; binding++) {
             RinGpuObjectSlot* buffer;
-            result = ringpu_slot(core, bindings[binding].buffer,
-                                 RIN_GPU_OBJECT_BUFFER, NULL, &buffer);
+            result = ringpu_slot_retained(core, bindings[binding].buffer,
+                                          RIN_GPU_OBJECT_BUFFER, NULL,
+                                          &buffer);
             if (result != RIN_GPU_OK ||
                 buffer->value.buffer.reference_count == 0u) {
                 return RIN_GPU_ERROR_STATE;
@@ -179,9 +178,9 @@ int ringpu_destroy(RinGpuCore* core, RinGpuHandle object) {
             (binding_count != 0u && !bindings)) {
             return RIN_GPU_ERROR_STATE;
         }
-        result = ringpu_slot(core, slot->value.graphics_bind_group.pipeline,
-                             RIN_GPU_OBJECT_GRAPHICS_PIPELINE, NULL,
-                             &pipeline);
+        result = ringpu_slot_retained(
+            core, slot->value.graphics_bind_group.pipeline,
+            RIN_GPU_OBJECT_GRAPHICS_PIPELINE, NULL, &pipeline);
         if (result != RIN_GPU_OK ||
             pipeline->value.graphics_pipeline.reference_count == 0u) {
             return RIN_GPU_ERROR_STATE;
@@ -191,8 +190,8 @@ int ringpu_destroy(RinGpuCore* core, RinGpuHandle object) {
                 &bindings[binding];
             RinGpuObjectSlot* resource;
             uint32_t references;
-            result = ringpu_graphics_binding_slot(core, resource_binding,
-                                                  &resource);
+            result = ringpu_graphics_binding_slot_retained(
+                core, resource_binding, &resource);
             if (result != RIN_GPU_OK) return RIN_GPU_ERROR_STATE;
             if (resource_binding->kind ==
                 RIN_SHADER_RESOURCE_STORAGE_BUFFER) {
@@ -232,4 +231,83 @@ int ringpu_destroy(RinGpuCore* core, RinGpuHandle object) {
     }
     ringpu_release_slot(slot);
     return RIN_GPU_OK;
+}
+
+static uint32_t ringpu_slot_reference_count(const RinGpuObjectSlot* slot)
+{
+    if (!slot || !slot->occupied) return 0u;
+    switch (slot->type) {
+    case RIN_GPU_OBJECT_BUFFER: return slot->value.buffer.reference_count;
+    case RIN_GPU_OBJECT_IMAGE: return slot->value.image.reference_count;
+    case RIN_GPU_OBJECT_MEMORY: return slot->value.memory.reference_count;
+    case RIN_GPU_OBJECT_SAMPLER: return slot->value.sampler.reference_count;
+    case RIN_GPU_OBJECT_SHADER_MODULE:
+        return slot->value.shader_module.reference_count;
+    case RIN_GPU_OBJECT_COMPUTE_PIPELINE:
+        return slot->value.compute_pipeline.reference_count;
+    case RIN_GPU_OBJECT_GRAPHICS_PIPELINE:
+        return slot->value.graphics_pipeline.reference_count;
+    case RIN_GPU_OBJECT_COMPUTE_BIND_GROUP:
+        return slot->value.compute_bind_group.reference_count;
+    case RIN_GPU_OBJECT_GRAPHICS_BIND_GROUP:
+        return slot->value.graphics_bind_group.reference_count;
+    case RIN_GPU_OBJECT_QUERY: return slot->value.query.reference_count;
+    default: return 0u;
+    }
+}
+
+static RinGpuHandle ringpu_handle_for_slot(const RinGpuCore* core,
+                                           uint32_t index,
+                                           const RinGpuObjectSlot* slot)
+{
+    uint64_t raw = ((uint64_t)slot->generation << 32u) |
+                   ((uint64_t)slot->type << 16u) |
+                   (uint64_t)(index + 1u);
+    return raw ^ core->handle_secret;
+}
+
+int ringpu_collect_deferred(RinGpuCore* core)
+{
+    int result = ringpu_core_ready(core);
+    int made_progress;
+
+    if (result != RIN_GPU_OK) return result;
+    do {
+        made_progress = 0;
+        for (uint32_t index = 0u; index < RIN_GPU_CORE_MAX_OBJECTS; index++) {
+            RinGpuObjectSlot* slot = &core->objects[index];
+            RinGpuHandle handle;
+
+            if (!slot->occupied || slot->destroy_pending == 0u ||
+                slot->last_use_serial > core->completed_serial ||
+                ringpu_slot_reference_count(slot) != 0u) {
+                continue;
+            }
+            handle = ringpu_handle_for_slot(core, index, slot);
+            result = ringpu_destroy_slot(core, handle, slot);
+            if (result == RIN_GPU_ERROR_BUSY) continue;
+            if (result != RIN_GPU_OK) return result;
+            made_progress = 1;
+        }
+    } while (made_progress);
+    return RIN_GPU_OK;
+}
+
+int ringpu_destroy(RinGpuCore* core, RinGpuHandle object)
+{
+    RinGpuObjectSlot* slot;
+    int result = ringpu_core_ready(core);
+
+    if (result != RIN_GPU_OK) return result;
+    result = ringpu_slot(core, object, RIN_GPU_OBJECT_NONE, NULL, &slot);
+    if (result != RIN_GPU_OK) return result;
+    if (slot->last_use_serial > core->completed_serial) {
+        slot->destroy_pending = 1u;
+        return RIN_GPU_OK;
+    }
+    if (ringpu_slot_reference_count(slot) != 0u)
+        return RIN_GPU_ERROR_BUSY;
+    result = ringpu_destroy_slot(core, object, slot);
+    if (result != RIN_GPU_OK) return result;
+    return ringpu_collect_deferred(core);
 }

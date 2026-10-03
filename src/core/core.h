@@ -666,7 +666,8 @@ typedef struct RinGpuBackendOpsV1 {
                             uint32_t* available);
     int (*get_timestamp_period)(void* context, uint64_t* period_nanoseconds);
     void (*destroy_query)(void* context, uint64_t query_cookie);
-    /* Optional. Waits for all commands submitted before the call to finish. */
+    /* Optional. Success waits for all prior submissions to finish. If absent,
+     * submit_commands must complete the submitted work before returning. */
     int (*wait_for_completion)(void* context, uint64_t timeout_ns);
     /* Optional. Reads a canonical CPU-readable COPY_SOURCE image region. */
     int (*readback_image)(void* context, uint64_t cookie,
@@ -764,7 +765,8 @@ typedef struct RinGpuObjectSlot {
     uint32_t generation;
     uint16_t type;
     uint8_t occupied;
-    uint8_t reserved;
+    uint8_t destroy_pending;
+    uint64_t last_use_serial;
     union {
         struct {
             uint64_t size_bytes;
@@ -924,7 +926,7 @@ typedef struct RinGpuObjectSlot {
             uint32_t query_type;
             uint32_t active;
             uint32_t available;
-            uint32_t reserved;
+            uint32_t reference_count;
             uint64_t values[RIN_GPU_QUERY_RESULT_VALUE_COUNT];
         } query;
     } value;
@@ -948,11 +950,15 @@ struct RinGpuCore {
     RinGpuDiagnosticsRuntime* diagnostics;
     uint64_t device_generation;
     uint32_t backend_family;
+    uint64_t submitted_serial;
+    uint64_t completed_serial;
+    uint64_t command_reference_serial;
     RinGpuObjectSlot objects[RIN_GPU_CORE_MAX_OBJECTS];
     RinGpuShaderModuleCacheEntry
         shader_module_cache[RIN_GPU_CORE_MAX_SHADER_MODULE_CACHE];
     uint8_t initialized;
     uint8_t device_lost;
+    uint8_t marking_command_references;
 };
 
 #if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
@@ -1047,6 +1053,7 @@ int ringpu_core_ready(const RinGpuCore* core);
 void ringpu_core_diagnostic(RinGpuCore* core, uint32_t type,
                             uint64_t resource_cookie, uint64_t queue_cookie,
                             uint64_t value0, uint64_t value1, int status);
+int ringpu_collect_deferred(RinGpuCore* core);
 /* Returns the generation currently owned by the core's diagnostics/runtime
  * source.  This remains readable while a core is lost so an embedding can
  * label the replacement transaction without treating the old core as usable.

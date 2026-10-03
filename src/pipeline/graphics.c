@@ -887,9 +887,9 @@ int ringpu_graphics_sampler_kind(uint32_t kind) {
 uint32_t ringpu_graphics_binding_mip_count(
     const RinGpuGraphicsBindingV1* binding, const RinGpuImageDescV1* desc);
 
-int ringpu_graphics_binding_slot(
+static int ringpu_graphics_binding_slot_resolve(
     RinGpuCore* core, const RinGpuGraphicsBindingV1* binding,
-    RinGpuObjectSlot** slot) {
+    RinGpuObjectSlot** slot, int allow_destroy_pending) {
     uint16_t type;
     if (!core || !binding || !slot) return RIN_GPU_ERROR_INVALID_ARGUMENT;
     if (binding->kind == RIN_SHADER_RESOURCE_STORAGE_BUFFER) {
@@ -901,14 +901,30 @@ int ringpu_graphics_binding_slot(
     } else {
         return RIN_GPU_ERROR_INVALID_ARGUMENT;
     }
+    if (allow_destroy_pending)
+        return ringpu_slot_retained(core, binding->resource, type, NULL, slot);
     return ringpu_slot(core, binding->resource, type, NULL, slot);
+}
+
+int ringpu_graphics_binding_slot(
+    RinGpuCore* core, const RinGpuGraphicsBindingV1* binding,
+    RinGpuObjectSlot** slot) {
+    return ringpu_graphics_binding_slot_resolve(core, binding, slot, 0);
+}
+
+int ringpu_graphics_binding_slot_retained(
+    RinGpuCore* core, const RinGpuGraphicsBindingV1* binding,
+    RinGpuObjectSlot** slot) {
+    return ringpu_graphics_binding_slot_resolve(core, binding, slot, 1);
 }
 
 int ringpu_graphics_binding_reference(
     RinGpuCore* core, const RinGpuGraphicsBindingV1* binding, int acquire) {
     RinGpuObjectSlot* slot;
     uint32_t* references;
-    int result = ringpu_graphics_binding_slot(core, binding, &slot);
+    int result = acquire
+        ? ringpu_graphics_binding_slot(core, binding, &slot)
+        : ringpu_graphics_binding_slot_retained(core, binding, &slot);
     if (result != RIN_GPU_OK) return result;
     if (binding->kind == RIN_SHADER_RESOURCE_STORAGE_BUFFER) {
         references = &slot->value.buffer.reference_count;

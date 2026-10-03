@@ -8,29 +8,37 @@ one logical owner should assign the value to the recipient and clear its own
 variable. This is a caller convention only: any un-cleared copies remain
 aliases, not additional owners.
 
-Call `ringpu_destroy` once for the logical owner. On success the object slot is
-released and its generation advances, so all copied aliases become stale and
-subsequent use or destruction returns `RIN_GPU_ERROR_INVALID_HANDLE`. If the
-object is still referenced by a dependent object or a recorded command list,
-`ringpu_destroy` returns `RIN_GPU_ERROR_BUSY` without releasing the slot; the
-handle remains valid and the caller may retry after releasing those
-references. `BUSY` is not deferred destruction, and callers must not discard
-the only live handle after receiving it.
+Call `ringpu_destroy` once for the logical owner. On success the handle becomes
+invalid immediately, so all copied aliases return
+`RIN_GPU_ERROR_INVALID_HANDLE`. If the object is referenced only by dependent
+objects or command lists that have not been successfully submitted,
+`ringpu_destroy` returns `RIN_GPU_ERROR_BUSY` and the caller may retry after
+releasing those references. If an accepted submission references the object,
+destroy succeeds logically but retains its native allocation in a deferred
+retirement state. Retained command-list and dependency references must also be
+released before the native object is destroyed.
 
 Created pipelines retain their shader modules; bind groups retain their
 pipeline and bound resources; recorded commands retain the objects they
 reference. Destroy dependents before dependencies. Resetting or destroying a
-command list releases the references recorded by that list. Core shutdown
-releases remaining core-owned objects and invalidates their handles.
+command list releases the references recorded by that list. The core stamps
+the submitted command-list references and their dependency graph with an
+internal submission serial. A successful `ringpu_wait_fence` means the
+backend's completion callback has completed all work submitted before the
+wait; only then can the core retire objects whose final-use serial is covered.
+A timeout or backend error does not advance completion or release deferred
+objects. Backends without a completion callback must complete submissions
+synchronously before `submit_commands` returns. Core shutdown makes a final
+best-effort completion wait before destroying backend objects.
 
-These CPU-side reference counts do not establish GPU completion. This
-contract does not promise that a submitted object's storage may be destroyed
-or a command list reset before the relevant completion fence; asynchronous
-in-flight lifetime remains a separate backend requirement (see `RG-014`).
+CPU-side reference counts and GPU completion serials are separate protections:
+recorded/dependent references prevent premature handle destruction, while the
+serial prevents native storage from being freed before GPU completion.
 
 ## Verified behavior
 
-`ringpu-ownership` exercises a copied image handle, rejection of destruction
-while a recorded command references the image, release on command-list reset,
-successful destruction through one alias, and rejection of the stale alias.
-This is host/software-backend coverage, not physical-GPU lifetime validation.
+`ringpu-ownership` exercises a copied image handle, `BUSY` for an unsubmitted
+recorded reference, deferred handle invalidation after submit, timeout without
+retirement, completion-triggered retirement after reset, and rejection of the
+stale alias. This is host/software-backend coverage, not physical-GPU lifetime
+validation.

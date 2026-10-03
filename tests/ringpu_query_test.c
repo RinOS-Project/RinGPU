@@ -121,6 +121,7 @@ int main(void)
     CHECK(ringpu_command_begin_query(&core, list, pipeline) == RIN_GPU_OK);
     CHECK(ringpu_command_end_query(&core, list, pipeline) == RIN_GPU_OK);
     CHECK(ringpu_command_list_close(&core, list) == RIN_GPU_OK);
+    CHECK(ringpu_destroy(&core, timestamp) == RIN_GPU_ERROR_BUSY);
     CHECK(record_submit(&core, queue, list) == RIN_GPU_OK);
 
     memset(&query_result, 0, sizeof(query_result));

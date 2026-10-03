@@ -2,6 +2,7 @@
 #include "../core/core.h"
 
 #include "../command/draw.h"
+#include "../command/record.h"
 #include "../core/object_table.h"
 #include "../pipeline/pipelines.h"
 #include "../presentation/present.h"
@@ -199,6 +200,7 @@ static int ringpu_queue_submit_internal(
     RinGpuObjectSlot* queue_slot;
     RinGpuObjectSlot* list;
     RinGpuObjectSlot* fence = NULL;
+    uint32_t list_index;
     RinGpuBackendCommandV1* commands = NULL;
     uint32_t* staged_states[RIN_GPU_CORE_MAX_OBJECTS] = {0};
     uint8_t staged_owner_valid[RIN_GPU_CORE_MAX_OBJECTS] = {0};
@@ -224,6 +226,7 @@ static int ringpu_queue_submit_internal(
     uint8_t query_timestamp_required = 0u;
     int result = ringpu_core_ready(core);
     if (result != RIN_GPU_OK) return result;
+    if (core->submitted_serial == UINT64_MAX) return RIN_GPU_ERROR_LIMIT;
     if (!submit ||
         !ringpu_versioned(submit->abi_version, submit->struct_size,
                           sizeof(*submit))) {
@@ -232,7 +235,7 @@ static int ringpu_queue_submit_internal(
     result = ringpu_slot(core, queue, RIN_GPU_OBJECT_QUEUE, NULL, &queue_slot);
     if (result != RIN_GPU_OK) return result;
     result = ringpu_slot(core, submit->command_list,
-                         RIN_GPU_OBJECT_COMMAND_LIST, NULL, &list);
+                         RIN_GPU_OBJECT_COMMAND_LIST, &list_index, &list);
     if (result != RIN_GPU_OK) return result;
     if (list->value.command_list.state != RIN_GPU_COMMAND_EXECUTABLE ||
         (list->value.command_list.capabilities &
@@ -2402,6 +2405,14 @@ static int ringpu_queue_submit_internal(
             core->backend_context, commands,
             list->value.command_list.count);
     }
+    if (result == RIN_GPU_OK) {
+        uint64_t serial = ++core->submitted_serial;
+        list->last_use_serial = serial;
+        ringpu_mark_command_references(core, list, serial);
+        if (fence) fence->value.fence.value = submit->signal_value;
+        if (!core->backend.wait_for_completion)
+            core->completed_serial = serial;
+    }
     if (result == RIN_GPU_OK && query_backend_required != 0u) {
         for (uint32_t index = 0u; index < RIN_GPU_CORE_MAX_OBJECTS; ++index) {
             RinGpuObjectSlot* query;
@@ -2463,7 +2474,6 @@ static int ringpu_queue_submit_internal(
     }
     free(commands);
     if (result != RIN_GPU_OK) return result;
-    if (fence) fence->value.fence.value = submit->signal_value;
     return RIN_GPU_OK;
 }
 

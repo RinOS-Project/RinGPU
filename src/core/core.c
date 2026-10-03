@@ -230,6 +230,12 @@ int ringpu_core_init(RinGpuCore* core, const RinGpuCoreConfigV1* config) {
 
 void ringpu_core_shutdown(RinGpuCore* core) {
     if (!core || !core->initialized) return;
+    if (core->submitted_serial > core->completed_serial &&
+        core->backend.wait_for_completion != NULL &&
+        core->backend.wait_for_completion(core->backend_context, UINT64_MAX) ==
+            RIN_GPU_OK) {
+        core->completed_serial = core->submitted_serial;
+    }
     for (uint32_t index = 0; index < RIN_GPU_CORE_MAX_OBJECTS; index++) {
         RinGpuObjectSlot* slot = &core->objects[index];
         if (!slot->occupied || slot->type != RIN_GPU_OBJECT_COMMAND_LIST) continue;
@@ -245,7 +251,8 @@ void ringpu_core_shutdown(RinGpuCore* core) {
         core->backend.destroy_compute_bind_group(
             core->backend_context,
             slot->value.compute_bind_group.backend_cookie);
-        if (ringpu_slot(core, slot->value.compute_bind_group.pipeline,
+        if (ringpu_slot_retained(core,
+                        slot->value.compute_bind_group.pipeline,
                         RIN_GPU_OBJECT_COMPUTE_PIPELINE, NULL, &pipeline) ==
                 RIN_GPU_OK &&
             pipeline->value.compute_pipeline.reference_count != 0u) {
@@ -276,7 +283,8 @@ void ringpu_core_shutdown(RinGpuCore* core) {
         core->backend.destroy_graphics_bind_group(
             core->backend_context,
             slot->value.graphics_bind_group.backend_cookie);
-        if (ringpu_slot(core, slot->value.graphics_bind_group.pipeline,
+        if (ringpu_slot_retained(core,
+                        slot->value.graphics_bind_group.pipeline,
                         RIN_GPU_OBJECT_GRAPHICS_PIPELINE, NULL, &pipeline) ==
                 RIN_GPU_OK &&
             pipeline->value.graphics_pipeline.reference_count != 0u) {
@@ -302,13 +310,15 @@ void ringpu_core_shutdown(RinGpuCore* core) {
         core->backend.destroy_graphics_pipeline(
             core->backend_context,
             slot->value.graphics_pipeline.backend_cookie);
-        if (ringpu_slot(core, slot->value.graphics_pipeline.vertex_shader,
+        if (ringpu_slot_retained(core,
+                        slot->value.graphics_pipeline.vertex_shader,
                         RIN_GPU_OBJECT_SHADER_MODULE, NULL, &vertex_shader) ==
                 RIN_GPU_OK &&
             vertex_shader->value.shader_module.reference_count != 0u) {
             vertex_shader->value.shader_module.reference_count--;
         }
-        if (ringpu_slot(core, slot->value.graphics_pipeline.fragment_shader,
+        if (ringpu_slot_retained(core,
+                        slot->value.graphics_pipeline.fragment_shader,
                         RIN_GPU_OBJECT_SHADER_MODULE, NULL,
                         &fragment_shader) == RIN_GPU_OK &&
             fragment_shader->value.shader_module.reference_count != 0u) {
@@ -326,7 +336,8 @@ void ringpu_core_shutdown(RinGpuCore* core) {
         core->backend.destroy_compute_pipeline(
             core->backend_context,
             slot->value.compute_pipeline.backend_cookie);
-        if (ringpu_slot(core, slot->value.compute_pipeline.shader_module,
+        if (ringpu_slot_retained(core,
+                        slot->value.compute_pipeline.shader_module,
                         RIN_GPU_OBJECT_SHADER_MODULE, NULL, &shader) ==
                 RIN_GPU_OK &&
             shader->value.shader_module.reference_count != 0u) {
@@ -549,7 +560,7 @@ int ringpu_command_list_reset(RinGpuCore* core, RinGpuHandle command_list) {
     if (result != RIN_GPU_OK) return result;
     ringpu_release_command_references(core, list);
     list->value.command_list.state = RIN_GPU_COMMAND_RECORDING;
-    return RIN_GPU_OK;
+    return ringpu_collect_deferred(core);
 }
 
 

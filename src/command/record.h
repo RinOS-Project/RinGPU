@@ -8,5 +8,8 @@ int ringpu_record_command(RinGpuObjectSlot* list,
                           RinGpuRecordedCommand** command_out);
 void ringpu_release_command_references(RinGpuCore* core,
                                         RinGpuObjectSlot* list);
+void ringpu_mark_command_references(RinGpuCore* core,
+                                     RinGpuObjectSlot* list,
+                                     uint64_t serial);
 
 #endif /* RIN_GPU_COMMAND_RECORD_H */
