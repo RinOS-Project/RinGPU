@@ -4,6 +4,7 @@ project(RinGPU VERSION 1.0.0 LANGUAGES C)
 option(RINGPU_BUILD_SHARED "Build RinGPU as a shared library" OFF)
 option(RINGPU_BUILD_TESTS "Build RinGPU host tests" ON)
 option(RINGPU_BUILD_DIFFERENTIAL_TESTS "Build RinGPU differential support tests" OFF)
+option(RINGPU_BUILD_BENCHMARKS "Build optional RinGPU host benchmarks" OFF)
 option(RINGPU_BUILD_SOFTWARE_BACKEND
        "Build the generic CPU software backend in the RinGPU archive" ON)
 
@@ -152,4 +153,18 @@ if(RINGPU_BUILD_DIFFERENTIAL_TESTS AND RINGPU_BUILD_SOFTWARE_BACKEND)
 elseif(RINGPU_BUILD_DIFFERENTIAL_TESTS)
     message(STATUS
         "Differential tests are omitted because they require the software backend")
+endif()
+
+if(RINGPU_BUILD_BENCHMARKS)
+    if(NOT RINGPU_BUILD_SOFTWARE_BACKEND)
+        message(FATAL_ERROR
+            "RINGPU_BUILD_BENCHMARKS requires RINGPU_BUILD_SOFTWARE_BACKEND")
+    endif()
+    add_executable(ringpu-host-benchmark
+                   benchmarks/host_runtime_benchmark.c)
+    target_link_libraries(ringpu-host-benchmark PRIVATE RinGPU::RinGPU)
+    if(RINGPU_BUILD_TESTS)
+        add_test(NAME ringpu-host-benchmark-smoke
+                 COMMAND ringpu-host-benchmark --iterations 5 --warmup 1)
+    endif()
 endif()
