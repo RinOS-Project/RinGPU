@@ -5,9 +5,10 @@
 
 static int present(void* context, const RinGpuSoftwarePresentedImageV1* image)
 {
-    (void)context;
-    return image != NULL && image->pixels != NULL ? RIN_GPU_OK
-                                                   : RIN_GPU_ERROR_INVALID_ARGUMENT;
+    if (image == NULL || image->pixels == NULL || context == NULL)
+        return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    (*(uint32_t*)context)++;
+    return RIN_GPU_OK;
 }
 
 static int acquire(void* context, const RinGpuImageDescV1* descriptor,
@@ -30,13 +31,18 @@ int main(void)
     RinGpuCommandListDescV1 command_desc = {0};
     RinGpuImageDescV1 image_desc = {0};
     RinGpuImageTransitionV1 transition = {0};
+    RinGpuImageOwnershipTransferV1 ownership_transfer = {0};
+    RinGpuPresentV1 present_desc = {0};
     RinGpuSubmitInfoV1 submit = {0};
     RinGpuAdapterCapabilitiesV1 capabilities = {0};
     RinGpuHandle queue = 0u;
     RinGpuHandle fence = 0u;
     RinGpuHandle command_list = 0u;
+    RinGpuHandle present_queue = 0u;
+    RinGpuHandle present_list = 0u;
     RinGpuHandle image = 0u;
     uint64_t generation = 0u;
+    uint32_t present_count = 0u;
 
     desc.struct_size = sizeof(desc);
     desc.version = RIN_GPU_RUNTIME_VERSION;
@@ -51,7 +57,8 @@ int main(void)
     desc.max_image_sample_count = 1u;
     desc.adapter.abi_version = RIN_GPU_ABI_VERSION;
     desc.adapter.struct_size = sizeof(desc.adapter);
-    desc.adapter.queue_capabilities = RIN_GPU_QUEUE_GRAPHICS;
+    desc.adapter.queue_capabilities = RIN_GPU_QUEUE_GRAPHICS |
+                                      RIN_GPU_QUEUE_PRESENT;
     memcpy(desc.adapter.name, "runtime-test", 12u);
     desc.display.abi_version = RIN_GPU_ABI_VERSION;
     desc.display.struct_size = sizeof(desc.display);
@@ -66,6 +73,7 @@ int main(void)
     desc.display.scale_milli = 1000u;
     memcpy(desc.display.name, "runtime-test", 12u);
     desc.present_callback = present;
+    desc.present_context = &present_count;
     desc.acquire_image = acquire;
     if (ringpu_runtime_software_surface_create(&desc, &runtime) != RIN_GPU_OK)
         return 1;
@@ -136,6 +144,49 @@ int main(void)
     submit.command_list = command_list;
     if (ringpu_runtime_queue_submit(runtime, queue, &submit) != RIN_GPU_OK)
         return 5;
+
+    if (ringpu_runtime_command_list_reset(runtime, command_list) != RIN_GPU_OK)
+        return 11;
+    transition.before_state = RIN_GPU_IMAGE_STATE_COLOR_TARGET;
+    transition.after_state = RIN_GPU_IMAGE_STATE_PRESENT;
+    if (ringpu_runtime_command_transition_image(runtime, command_list, image,
+                                                &transition) != RIN_GPU_OK ||
+        ringpu_runtime_command_list_close(runtime, command_list) != RIN_GPU_OK ||
+        ringpu_runtime_queue_submit(runtime, queue, &submit) != RIN_GPU_OK)
+        return 12;
+
+    queue_desc.capabilities = RIN_GPU_QUEUE_PRESENT;
+    command_desc.capabilities = RIN_GPU_QUEUE_PRESENT;
+    if (ringpu_runtime_create_queue(runtime, &queue_desc, &present_queue) !=
+            RIN_GPU_OK ||
+        ringpu_runtime_create_command_list(runtime, &command_desc,
+                                           &present_list) != RIN_GPU_OK)
+        return 13;
+    ownership_transfer.abi_version = RIN_GPU_ABI_VERSION;
+    ownership_transfer.struct_size = sizeof(ownership_transfer);
+    ownership_transfer.mip_level_count = 1u;
+    ownership_transfer.array_layer_count = 1u;
+    ownership_transfer.source_family_index = 0u;
+    ownership_transfer.destination_family_index = 1u;
+    ownership_transfer.before_state = RIN_GPU_IMAGE_STATE_PRESENT;
+    ownership_transfer.after_state = RIN_GPU_IMAGE_STATE_COLOR_TARGET;
+    if (ringpu_runtime_command_transfer_image_ownership(
+            runtime, present_list, image, &ownership_transfer) !=
+        RIN_GPU_ERROR_STATE)
+        return 15;
+    present_desc.abi_version = RIN_GPU_ABI_VERSION;
+    present_desc.struct_size = sizeof(present_desc);
+    present_desc.image = image;
+    present_desc.display_id = RIN_GPU_PRIMARY_DISPLAY;
+    submit.command_list = present_list;
+    if (ringpu_runtime_command_present(runtime, present_list, &present_desc) !=
+            RIN_GPU_OK ||
+        ringpu_runtime_command_list_close(runtime, present_list) != RIN_GPU_OK ||
+        ringpu_runtime_queue_submit(runtime, present_queue, &submit) !=
+            RIN_GPU_OK ||
+        present_count != 1u)
+        return 14;
+
     ringpu_runtime_mark_device_lost(runtime);
     if (!ringpu_runtime_device_lost(runtime))
         return 7;

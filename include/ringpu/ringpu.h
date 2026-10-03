@@ -160,10 +160,13 @@ typedef enum RinGpuImageState {
 #define RIN_GPU_IMAGE_CPU_READABLE        0x00000002u
 #define RIN_GPU_IMAGE_KNOWN_FLAGS        0x00000003u
 
-#define RIN_GPU_QUEUE_COPY    0x00000001u
-#define RIN_GPU_QUEUE_COMPUTE 0x00000002u
+/* Queue capabilities are independent bits. A presentation-only queue does
+ * not imply graphics, compute, or copy support. */
+#define RIN_GPU_QUEUE_COPY     0x00000001u
+#define RIN_GPU_QUEUE_COMPUTE  0x00000002u
 #define RIN_GPU_QUEUE_GRAPHICS 0x00000004u
-#define RIN_GPU_QUEUE_KNOWN_CAPABILITIES 0x00000007u
+#define RIN_GPU_QUEUE_PRESENT  0x00000008u
+#define RIN_GPU_QUEUE_KNOWN_CAPABILITIES 0x0000000fu
 #define RIN_GPU_MAX_DISPATCH_GROUPS 65535u
 #define RIN_GPU_MAX_DRAW_VERTICES 16777216u
 #define RIN_GPU_MAX_DRAW_INDICES 16777216u

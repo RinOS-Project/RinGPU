@@ -19,6 +19,9 @@ backend features. Timestamp-query support requires both query-result and
 timestamp-period callbacks; image-readback and completion-wait bits reflect
 their corresponding optional callbacks. These bits describe the installed
 backend operation table and do not claim physical-device support beyond it.
+Queue capability bits are independent: COPY, COMPUTE, GRAPHICS, and PRESENT
+are distinct. In particular, PRESENT alone does not grant graphics, compute,
+copy, or image-transition commands.
 
 The common object factory and backend-operation boundary is described in
 [`backend-interface-contract.md`](backend-interface-contract.md). It is a

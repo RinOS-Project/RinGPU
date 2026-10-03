@@ -42,7 +42,7 @@ int ringpu_command_present(RinGpuCore* core, RinGpuHandle command_list,
     if (result != RIN_GPU_OK) return result;
     if (list->value.command_list.state != RIN_GPU_COMMAND_RECORDING ||
         list->value.command_list.render_pass_active != 0u ||
-        (list->value.command_list.capabilities & RIN_GPU_QUEUE_GRAPHICS) ==
+        (list->value.command_list.capabilities & RIN_GPU_QUEUE_PRESENT) ==
             0u) {
         return RIN_GPU_ERROR_STATE;
     }
