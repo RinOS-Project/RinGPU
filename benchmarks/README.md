@@ -1,15 +1,22 @@
 # RinGPU host runtime benchmark
 
-`ringpu-host-benchmark` is an optional host-only benchmark for the real
-headless RinGPU software runtime. It reports three workloads:
+`ringpu-host-benchmark` is an optional host-only benchmark for real RinGPU
+software runtimes. It reports six workloads:
 
 - `command_roundtrip`: command-list create, 4 KiB buffer clear recording,
   close, queue submit, fence wait, 4 KiB readback, byte-for-byte validation,
   and command-list destruction;
+- `command_record_only`: command-list create, clear recording, close, and
+  destruction without queue submission;
+- `queue_submit_wait`: queue submit through completion-fence wait, timed
+  separately from list creation/recording and readback;
 - `memory_buffer_bind_roundtrip`: dedicated memory create, buffer create and
   bind, 4 KiB upload/readback with byte-for-byte validation, then destruction;
 - `compute_bind_group_churn`: create and destroy a validated typed buffer bind
-  group against a real compute pipeline and storage buffer.
+  group against a real compute pipeline and storage buffer;
+- `software_frame_roundtrip`: clear a 32×32 BGRA target, transition/present it,
+  submit and wait; the owner supplies a real external 4 KiB image backing and
+  the present callback validates every pixel and hashes the captured image.
 
 Every measured and warmup iteration executes the same API path; a failed
 operation or mismatched readback exits with an error.
@@ -20,7 +27,9 @@ a short benchmark smoke test. The executable accepts `--iterations N` for the
 number of measured samples and `--warmup N` for unmeasured setup iterations;
 defaults are 1000 and 100. It emits one CSV header and one row per workload with
 minimum, median, p95, mean latency, operations per second, compiler family, and
-a workload checksum. Windows uses QueryPerformanceCounter; POSIX hosts use
+a workload checksum. `queue_submit_wait` reports only the measured submit/wait
+phase; the other rows report their complete workload callback. Windows uses
+QueryPerformanceCounter; POSIX hosts use
 `CLOCK_MONOTONIC`.
 
 The numbers characterize the host software backend only. They are suitable for
