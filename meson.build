@@ -53,6 +53,9 @@ if get_option('buildtype') != 'plain'
                   'tests/ringpu_shader_resource_test.c', dependencies: ringpu_dep))
   test('ringpu-runtime', executable('ringpu-runtime-test', 'tests/ringpu_runtime_test.c',
                                    dependencies: ringpu_dep))
+  test('ringpu-result-mapping',
+       executable('ringpu-result-mapping-test',
+                  'tests/ringpu_result_mapping_test.c', dependencies: ringpu_dep))
   test('ringpu-cross-process-ipc', executable('ringpu-cross-process-ipc-test',
                                               'tests/ringpu_cross_process_ipc_test.c',
                                               dependencies: ringpu_dep))

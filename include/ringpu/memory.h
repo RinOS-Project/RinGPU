@@ -5,6 +5,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "result.h"
+
 /* Public memory ABI.  The implementation is in src/memory, but every
  * consumer uses this header so the ABI cannot be accidentally private to
  * OS-Core.  Records are versioned and size-prefixed; reserved fields are
@@ -67,6 +69,11 @@ typedef enum RinGpuMemoryRuntimeResult {
     RIN_GPU_MEMORY_STALE = -8,
     RIN_GPU_MEMORY_LIMIT = -9
 } RinGpuMemoryRuntimeResult;
+
+/* Preserve the detailed memory result for callers that need it while
+ * exposing a canonical RinGpuResult for shared error handling. */
+RinGpuResult rin_gpu_memory_result_to_gpu(
+    RinGpuMemoryRuntimeResult result);
 
 typedef struct RinGpuMemoryAllocationDescV1 {
     uint32_t struct_size;

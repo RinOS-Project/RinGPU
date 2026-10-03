@@ -895,3 +895,24 @@ int rin_gpu_presentation_get_status(
     }
     return RIN_GPU_PRESENTATION_OK;
 }
+
+RinGpuResult rin_gpu_presentation_result_to_gpu(
+    RinGpuPresentationResult result) {
+    switch (result) {
+        case RIN_GPU_PRESENTATION_OK: return RIN_GPU_OK;
+        case RIN_GPU_PRESENTATION_INVALID_ARGUMENT:
+            return RIN_GPU_ERROR_INVALID_ARGUMENT;
+        case RIN_GPU_PRESENTATION_STATE: return RIN_GPU_ERROR_STATE;
+        case RIN_GPU_PRESENTATION_BUSY: return RIN_GPU_ERROR_BUSY;
+        case RIN_GPU_PRESENTATION_BACKEND: return RIN_GPU_ERROR_BACKEND;
+        case RIN_GPU_PRESENTATION_DEVICE_LOST:
+            return RIN_GPU_ERROR_DEVICE_LOST;
+        case RIN_GPU_PRESENTATION_STALE:
+            return RIN_GPU_ERROR_INVALID_HANDLE;
+        case RIN_GPU_PRESENTATION_LIMIT: return RIN_GPU_ERROR_LIMIT;
+        case RIN_GPU_PRESENTATION_UNSUPPORTED:
+            return RIN_GPU_ERROR_UNSUPPORTED;
+        case RIN_GPU_PRESENTATION_TIMEOUT: return RIN_GPU_ERROR_TIMEOUT;
+        default: return RIN_GPU_ERROR_BACKEND;
+    }
+}

@@ -5,6 +5,7 @@
 #include <stdint.h>
 
 #include "memory.h"
+#include "result.h"
 
 #include "version.h"
 #include "rin_shader.h"
@@ -17,23 +18,6 @@
 #define RIN_GPU_MAX_DISPLAYS 16u
 
 typedef uint64_t RinGpuHandle;
-
-typedef enum RinGpuResult {
-    RIN_GPU_OK = 0,
-    RIN_GPU_ERROR_INVALID_ARGUMENT = -1,
-    RIN_GPU_ERROR_UNSUPPORTED = -2,
-    RIN_GPU_ERROR_NO_MEMORY = -3,
-    RIN_GPU_ERROR_LIMIT = -4,
-    RIN_GPU_ERROR_INVALID_HANDLE = -5,
-    RIN_GPU_ERROR_WRONG_TYPE = -6,
-    RIN_GPU_ERROR_STATE = -7,
-    RIN_GPU_ERROR_BOUNDS = -8,
-    RIN_GPU_ERROR_BUSY = -9,
-    RIN_GPU_ERROR_DEVICE_LOST = -10,
-    RIN_GPU_ERROR_BACKEND = -11,
-    RIN_GPU_ERROR_SHADER_INVALID = -12,
-    RIN_GPU_ERROR_TIMEOUT = -13
-} RinGpuResult;
 
 typedef enum RinGpuObjectType {
     RIN_GPU_OBJECT_NONE = 0,

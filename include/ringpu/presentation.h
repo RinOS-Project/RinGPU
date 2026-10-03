@@ -4,6 +4,8 @@
 
 #include <stdint.h>
 
+#include "result.h"
+
 #define RIN_GPU_PRESENTATION_VERSION 1u
 #define RIN_GPU_PRESENTATION_RUNTIME_STATE_QWORDS 4096u
 #define RIN_GPU_PRESENTATION_MAX_OUTPUTS 16u
@@ -46,6 +48,11 @@ typedef enum RinGpuPresentationResult {
     RIN_GPU_PRESENTATION_UNSUPPORTED = -8,
     RIN_GPU_PRESENTATION_TIMEOUT = -9
 } RinGpuPresentationResult;
+
+/* Preserve presentation-specific statuses while exposing the shared GPU
+ * result vocabulary to callers that combine subsystem operations. */
+RinGpuResult rin_gpu_presentation_result_to_gpu(
+    RinGpuPresentationResult result);
 
 typedef enum RinGpuPresentationMode {
     RIN_GPU_PRESENTATION_MODE_FIFO = 1,

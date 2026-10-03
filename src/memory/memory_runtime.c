@@ -1637,3 +1637,21 @@ int rin_gpu_memory_runtime_destroy(RinGpuMemoryRuntime* runtime) {
     memset(runtime, 0, sizeof(*runtime));
     return RIN_GPU_MEMORY_OK;
 }
+
+RinGpuResult rin_gpu_memory_result_to_gpu(
+    RinGpuMemoryRuntimeResult result) {
+    switch (result) {
+        case RIN_GPU_MEMORY_OK: return RIN_GPU_OK;
+        case RIN_GPU_MEMORY_INVALID_ARGUMENT:
+            return RIN_GPU_ERROR_INVALID_ARGUMENT;
+        case RIN_GPU_MEMORY_STATE: return RIN_GPU_ERROR_STATE;
+        case RIN_GPU_MEMORY_BUSY: return RIN_GPU_ERROR_BUSY;
+        case RIN_GPU_MEMORY_NO_SPACE: return RIN_GPU_ERROR_NO_MEMORY;
+        case RIN_GPU_MEMORY_BACKEND_FAILED: return RIN_GPU_ERROR_BACKEND;
+        case RIN_GPU_MEMORY_PROTOCOL: return RIN_GPU_ERROR_PROTOCOL;
+        case RIN_GPU_MEMORY_LOST: return RIN_GPU_ERROR_DEVICE_LOST;
+        case RIN_GPU_MEMORY_STALE: return RIN_GPU_ERROR_INVALID_HANDLE;
+        case RIN_GPU_MEMORY_LIMIT: return RIN_GPU_ERROR_LIMIT;
+        default: return RIN_GPU_ERROR_BACKEND;
+    }
+}

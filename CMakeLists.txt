@@ -97,6 +97,10 @@ if(RINGPU_BUILD_TESTS)
     add_executable(ringpu-runtime-test tests/ringpu_runtime_test.c)
     target_link_libraries(ringpu-runtime-test PRIVATE RinGPU::RinGPU)
     add_test(NAME ringpu-runtime COMMAND ringpu-runtime-test)
+    add_executable(ringpu-result-mapping-test
+                   tests/ringpu_result_mapping_test.c)
+    target_link_libraries(ringpu-result-mapping-test PRIVATE RinGPU::RinGPU)
+    add_test(NAME ringpu-result-mapping COMMAND ringpu-result-mapping-test)
     add_executable(ringpu-resource-requirements-test
                    tests/ringpu_resource_requirements_test.c)
     target_link_libraries(ringpu-resource-requirements-test PRIVATE
