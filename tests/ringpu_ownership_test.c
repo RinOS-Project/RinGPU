@@ -80,6 +80,7 @@ int main(void)
     RinGpuHandle queue12 = 0u;
     RinGpuHandle list = 0u;
     RinGpuHandle image = 0u;
+    RinGpuHandle image_alias = 0u;
 
     CHECK(make_core(&core, &backend));
     queue_v1.abi_version = RIN_GPU_ABI_VERSION;
@@ -108,6 +109,7 @@ int main(void)
     image_desc.sample_count = 1u;
     image_desc.usage = RIN_GPU_IMAGE_COPY_SOURCE | RIN_GPU_IMAGE_COPY_DESTINATION;
     CHECK(ringpu_create_image(&core, &image_desc, &image) == RIN_GPU_OK);
+    image_alias = image;
 
     transfer.abi_version = RIN_GPU_ABI_VERSION;
     transfer.struct_size = sizeof(transfer);
@@ -136,6 +138,11 @@ int main(void)
     CHECK(ringpu_command_list_close(&core, list) == RIN_GPU_OK);
     CHECK(submit(&core, queue0, list) == RIN_GPU_ERROR_STATE);
     CHECK(submit(&core, queue12, list) == RIN_GPU_OK);
+
+    CHECK(ringpu_destroy(&core, image) == RIN_GPU_ERROR_BUSY);
+    CHECK(ringpu_command_list_reset(&core, list) == RIN_GPU_OK);
+    CHECK(ringpu_destroy(&core, image_alias) == RIN_GPU_OK);
+    CHECK(ringpu_destroy(&core, image) == RIN_GPU_ERROR_INVALID_HANDLE);
 
     ringpu_core_shutdown(&core);
     ringpu_software_backend_destroy(backend);

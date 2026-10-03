@@ -9,6 +9,9 @@ errors; callers must not infer a successful operation from a zeroed output.
 physical addresses, PCI identifiers, or vendor register values. The public
 ABI contains no kernel object layout.
 
+Copy, transfer, and destruction semantics for handles are defined in
+[`object-ownership.md`](object-ownership.md).
+
 The software backend and the RSH1 validator are portable host components.
 Physical discovery, MMIO, DMA, IRQ, firmware, and reset ownership stay in the
 OS-Core backend and are connected through the versioned backend operation table.
