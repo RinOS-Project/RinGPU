@@ -102,6 +102,13 @@ int main(void)
     buffer_desc.size_bytes = 4097u;
     buffer_desc.usage = RIN_GPU_BUFFER_COPY_SOURCE |
                         RIN_GPU_BUFFER_COPY_DESTINATION;
+    buffer_desc.size_bytes = 0u;
+    if (ringpu_get_buffer_memory_requirements(
+            &core, &buffer_desc, &requirements) !=
+        RIN_GPU_ERROR_INVALID_ARGUMENT) {
+        goto done;
+    }
+    buffer_desc.size_bytes = 4097u;
     if (ringpu_get_buffer_memory_requirements(
             &core, &buffer_desc, &requirements) != RIN_GPU_OK ||
         requirements.resource_type != RIN_GPU_RESOURCE_MEMORY_BUFFER ||
@@ -141,6 +148,13 @@ int main(void)
         requirements.alignment != RIN_GPU_MEMORY_MIN_PAGE_SIZE) {
         goto done;
     }
+    image_desc.format = UINT32_MAX;
+    if (ringpu_get_image_memory_requirements(
+            &core, &image_desc, &requirements) !=
+        RIN_GPU_ERROR_INVALID_ARGUMENT) {
+        goto done;
+    }
+    image_desc.format = RIN_GPU_FORMAT_BGRA8_UNORM;
     memset(&queue_desc, 0, sizeof(queue_desc));
     queue_desc.abi_version = RIN_GPU_ABI_VERSION;
     queue_desc.struct_size = sizeof(queue_desc);
