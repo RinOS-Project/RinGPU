@@ -400,7 +400,9 @@ int ringpu_create_buffer(RinGpuCore* core, const RinGpuBufferDescV1* desc,
     int result = ringpu_core_ready(core);
 
     if (result != RIN_GPU_OK) return result;
-    if (!desc || !buffer ||
+    if (!buffer) return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    *buffer = 0u;
+    if (!desc ||
         !ringpu_versioned(desc->abi_version, desc->struct_size, sizeof(*desc)) ||
         desc->size_bytes == 0u || desc->size_bytes > core->max_buffer_size ||
         desc->usage == 0u || (desc->usage & ~RIN_GPU_BUFFER_KNOWN_USAGE) != 0u ||
