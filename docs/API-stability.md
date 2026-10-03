@@ -31,6 +31,10 @@ GPU-domain memory mapping and CPU cache synchronization semantics are defined
 in [`memory-sync-contract.md`](memory-sync-contract.md); the current public
 API does not expose a CPU pointer map/unmap pair.
 
+The current image state values, per-subresource transition rules, and
+non-implemented native mapping guidance are defined in
+[`resource-state-contract.md`](resource-state-contract.md).
+
 The software backend and the RSH1 validator are portable host components.
 Physical discovery, MMIO, DMA, IRQ, firmware, and reset ownership stay in the
 OS-Core backend and are connected through the versioned backend operation table.
