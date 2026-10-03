@@ -2,7 +2,12 @@
 #include <ringpu/runtime.h>
 
 #include "core/core.h"
+#ifndef RINGPU_BUILD_SOFTWARE_BACKEND
+#define RINGPU_BUILD_SOFTWARE_BACKEND 1
+#endif
+#if RINGPU_BUILD_SOFTWARE_BACKEND
 #include "software/software_backend.h"
+#endif
 #include "validation/diagnostics.h"
 
 #include <stdlib.h>
@@ -11,7 +16,9 @@
 struct RinGpuRuntime {
     RinGpuCore core;
     RinGpuDiagnosticsRuntime diagnostics;
+#if RINGPU_BUILD_SOFTWARE_BACKEND
     RinGpuSoftwareBackend* software_backend;
+#endif
     uint32_t initialized;
 };
 
@@ -77,8 +84,10 @@ int ringpu_runtime_create(const RinGpuRuntimeDescV1* desc,
     RinGpuRuntime** runtime_out)
 {
     RinGpuRuntime* runtime;
+#if RINGPU_BUILD_SOFTWARE_BACKEND
     RinGpuSoftwareBackendDescV3 software_desc;
     RinGpuSoftwareBackendDescV4 headless_software_desc;
+#endif
     RinGpuCoreConfigV1 config;
     const RinGpuBackendOpsV1* backend_ops;
     const RinGpuBackendOpsV1* external_ops;
@@ -93,34 +102,44 @@ int ringpu_runtime_create(const RinGpuRuntimeDescV1* desc,
     external_ops = (const RinGpuBackendOpsV1*)desc->backend_ops;
     if (external_ops != NULL) {
         backend_ops = external_ops;
-    } else if ((desc->flags & RIN_GPU_RUNTIME_FLAG_HEADLESS) != 0u) {
-        memset(&headless_software_desc, 0, sizeof(headless_software_desc));
-        headless_software_desc.base.base.base.struct_size =
-            sizeof(headless_software_desc);
-        headless_software_desc.base.base.base.version =
-            RIN_GPU_SOFTWARE_BACKEND_VERSION_4;
-        headless_software_desc.base.base.base.max_total_bytes =
-            desc->max_total_allocation_size;
-        headless_software_desc.base.base.base.flags =
-            RIN_GPU_SOFTWARE_BACKEND_FLAG_HEADLESS;
-        result = ringpu_software_backend_create(
-            &headless_software_desc.base.base.base,
-            &runtime->software_backend);
-        if (result != RIN_GPU_OK) goto fail;
-        backend_ops = ringpu_software_backend_ops();
     } else {
-        memset(&software_desc, 0, sizeof(software_desc));
-        software_desc.base.base.struct_size = sizeof(software_desc);
-        software_desc.base.base.version = RIN_GPU_SOFTWARE_BACKEND_VERSION_3;
-        software_desc.base.base.max_total_bytes = desc->max_total_allocation_size;
-        software_desc.base.present_callback = desc->present_callback;
-        software_desc.base.present_context = desc->present_context;
-        software_desc.acquire_image = desc->acquire_image;
-        software_desc.image_context = desc->image_context;
-        result = ringpu_software_backend_create(&software_desc.base.base,
-                                                &runtime->software_backend);
-        if (result != RIN_GPU_OK) goto fail;
-        backend_ops = ringpu_software_backend_ops();
+#if RINGPU_BUILD_SOFTWARE_BACKEND
+        if ((desc->flags & RIN_GPU_RUNTIME_FLAG_HEADLESS) != 0u) {
+            memset(&headless_software_desc, 0,
+                   sizeof(headless_software_desc));
+            headless_software_desc.base.base.base.struct_size =
+                sizeof(headless_software_desc);
+            headless_software_desc.base.base.base.version =
+                RIN_GPU_SOFTWARE_BACKEND_VERSION_4;
+            headless_software_desc.base.base.base.max_total_bytes =
+                desc->max_total_allocation_size;
+            headless_software_desc.base.base.base.flags =
+                RIN_GPU_SOFTWARE_BACKEND_FLAG_HEADLESS;
+            result = ringpu_software_backend_create(
+                &headless_software_desc.base.base.base,
+                &runtime->software_backend);
+            if (result != RIN_GPU_OK) goto fail;
+            backend_ops = ringpu_software_backend_ops();
+        } else {
+            memset(&software_desc, 0, sizeof(software_desc));
+            software_desc.base.base.struct_size = sizeof(software_desc);
+            software_desc.base.base.version =
+                RIN_GPU_SOFTWARE_BACKEND_VERSION_3;
+            software_desc.base.base.max_total_bytes =
+                desc->max_total_allocation_size;
+            software_desc.base.present_callback = desc->present_callback;
+            software_desc.base.present_context = desc->present_context;
+            software_desc.acquire_image = desc->acquire_image;
+            software_desc.image_context = desc->image_context;
+            result = ringpu_software_backend_create(
+                &software_desc.base.base, &runtime->software_backend);
+            if (result != RIN_GPU_OK) goto fail;
+            backend_ops = ringpu_software_backend_ops();
+        }
+#else
+        result = RIN_GPU_ERROR_UNSUPPORTED;
+        goto fail;
+#endif
     }
     if (backend_ops == NULL) {
         result = RIN_GPU_ERROR_BACKEND;
@@ -141,10 +160,18 @@ int ringpu_runtime_create(const RinGpuRuntimeDescV1* desc,
     config.adapter = desc->adapter;
     config.backend = *backend_ops;
     config.backend_context = external_ops != NULL ? desc->backend_context
+#if RINGPU_BUILD_SOFTWARE_BACKEND
                                                   : runtime->software_backend;
+#else
+                                                  : NULL;
+#endif
     config.backend_family = external_ops != NULL
                                 ? desc->backend_family
+#if RINGPU_BUILD_SOFTWARE_BACKEND
                                 : RIN_GPU_RUNTIME_BACKEND_FAMILY_SOFTWARE;
+#else
+                                : RIN_GPU_RUNTIME_BACKEND_FAMILY_UNKNOWN;
+#endif
     if (rin_gpu_diagnostics_init(&runtime->diagnostics,
                                  desc->device_generation) != 0) {
         result = RIN_GPU_ERROR_BACKEND;
@@ -166,8 +193,10 @@ int ringpu_runtime_create(const RinGpuRuntimeDescV1* desc,
 fail:
     if (runtime->initialized == RIN_GPU_RUNTIME_VERSION)
         ringpu_core_shutdown(&runtime->core);
+#if RINGPU_BUILD_SOFTWARE_BACKEND
     if (runtime->software_backend != NULL)
         ringpu_software_backend_destroy(runtime->software_backend);
+#endif
     free(runtime);
     return result;
 }
@@ -184,8 +213,10 @@ void ringpu_runtime_destroy(RinGpuRuntime* runtime)
     if (runtime == NULL) return;
     if (runtime->initialized == RIN_GPU_RUNTIME_VERSION)
         ringpu_core_shutdown(&runtime->core);
+#if RINGPU_BUILD_SOFTWARE_BACKEND
     if (runtime->software_backend != NULL)
         ringpu_software_backend_destroy(runtime->software_backend);
+#endif
     memset(runtime, 0, sizeof(*runtime));
     free(runtime);
 }

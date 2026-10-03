@@ -11,7 +11,6 @@
 #include "../presentation/present.h"
 #include "../presentation/render_pass.h"
 #include "../resource/resources.h"
-#include "../software/software_backend.h"
 #include "../shader/modules.h"
 #include "../pipeline/pipelines.h"
 #include "../command/commands.h"
@@ -140,6 +139,23 @@ static int ringpu_display_info_valid(
     return (display->flags & RIN_GPU_DISPLAY_PRIMARY) == 0u;
 }
 
+static int ringpu_backend_memory_ops_valid(const RinGpuBackendOpsV1* backend)
+{
+    int any_memory_op;
+    int all_memory_ops;
+
+    if (backend == NULL) return 0;
+    any_memory_op = backend->create_memory != NULL ||
+        backend->destroy_memory != NULL ||
+        backend->bind_buffer_memory != NULL ||
+        backend->bind_image_memory != NULL;
+    all_memory_ops = backend->create_memory != NULL &&
+        backend->destroy_memory != NULL &&
+        backend->bind_buffer_memory != NULL &&
+        backend->bind_image_memory != NULL;
+    return !any_memory_op || all_memory_ops;
+}
+
 
 
 int ringpu_core_init(RinGpuCore* core, const RinGpuCoreConfigV1* config) {
@@ -178,6 +194,7 @@ int ringpu_core_init(RinGpuCore* core, const RinGpuCoreConfigV1* config) {
         !config->backend.create_graphics_bind_group ||
         !config->backend.destroy_graphics_bind_group ||
         !config->backend.submit_commands ||
+        !ringpu_backend_memory_ops_valid(&config->backend) ||
         (config->display_count == 0u && config->displays != NULL) ||
         (config->display_count != 0u && config->displays == NULL) ||
         config->display_count > RIN_GPU_MAX_DISPLAYS ||
@@ -385,17 +402,18 @@ void ringpu_core_shutdown(RinGpuCore* core) {
                 core->backend_context, raw ^ core->handle_secret);
         }
     }
-    /* Resource cookies are released before memory objects so a bound
-     * resource can still refer to its backing while its software wrapper is
-     * being destroyed. Core shutdown is unconditional, so reference counts
-     * do not need to be decremented in this final pass. */
+    /* Resource cookies are released before memory allocations so a bound
+     * resource can still refer to its backing during backend destruction.
+     * Core shutdown is unconditional, so reference counts do not need to be
+     * decremented in this final pass. */
     for (uint32_t index = 0; index < RIN_GPU_CORE_MAX_OBJECTS; index++) {
         RinGpuObjectSlot* slot = &core->objects[index];
         if (!slot->occupied || slot->type != RIN_GPU_OBJECT_MEMORY)
             continue;
-        ringpu_software_backend_destroy_memory(
-            core->backend_context, slot->value.memory.bytes,
-            slot->value.memory.size_bytes);
+        if (core->backend.destroy_memory != NULL)
+            core->backend.destroy_memory(core->backend_context,
+                                         slot->value.memory.allocation,
+                                         slot->value.memory.size_bytes);
     }
     memset(core, 0, sizeof(*core));
 }

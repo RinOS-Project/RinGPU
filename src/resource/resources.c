@@ -2,25 +2,18 @@
 #include "resources.h"
 
 #include "../core/object_table.h"
-#include "../software/software_backend.h"
 #include "../validation/pipeline.h"
 #include "../validation/resource.h"
 
 #include <stdlib.h>
 #include <string.h>
 
-static int ringpu_software_memory_binding_supported(const RinGpuCore* core)
+static int ringpu_backend_memory_binding_supported(const RinGpuCore* core)
 {
-    const RinGpuBackendOpsV1* software_ops;
-
-    if (!core || core->backend_family != RIN_GPU_BACKEND_FAMILY_SOFTWARE)
-        return 0;
-    software_ops = ringpu_software_backend_ops();
-    return software_ops != NULL &&
-        core->backend.create_buffer == software_ops->create_buffer &&
-        core->backend.destroy_buffer == software_ops->destroy_buffer &&
-        core->backend.create_image == software_ops->create_image &&
-        core->backend.destroy_image == software_ops->destroy_image;
+    return core != NULL && core->backend.create_memory != NULL &&
+        core->backend.destroy_memory != NULL &&
+        core->backend.bind_buffer_memory != NULL &&
+        core->backend.bind_image_memory != NULL;
 }
 
 static int ringpu_memory_desc_valid(const RinGpuMemoryDescV1* desc)
@@ -255,39 +248,40 @@ int ringpu_create_memory(RinGpuCore* core, const RinGpuMemoryDescV1* desc,
                          RinGpuHandle* memory)
 {
     RinGpuObjectSlot* slot;
-    uint8_t* bytes = NULL;
+    void* allocation = NULL;
     uint64_t alignment;
     int result = ringpu_core_ready(core);
 
     if (result != RIN_GPU_OK) return result;
     if (!memory) return RIN_GPU_ERROR_INVALID_ARGUMENT;
     *memory = 0u;
-    if (!ringpu_software_memory_binding_supported(core))
-        return RIN_GPU_ERROR_UNSUPPORTED;
     if (!ringpu_memory_desc_valid(desc))
         return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    if (!ringpu_backend_memory_binding_supported(core))
+        return RIN_GPU_ERROR_UNSUPPORTED;
     if (desc->size_bytes > core->max_total_allocation_size -
             core->allocated_bytes) {
         return RIN_GPU_ERROR_LIMIT;
     }
-    result = ringpu_software_backend_create_memory(
-        core->backend_context, desc->size_bytes, &bytes);
+    result = core->backend.create_memory(core->backend_context, desc,
+                                         &allocation);
     if (result != RIN_GPU_OK) return result;
+    if (allocation == NULL) return RIN_GPU_ERROR_BACKEND;
     result = ringpu_allocate(core, RIN_GPU_OBJECT_MEMORY, memory, &slot);
     if (result != RIN_GPU_OK) {
-        ringpu_software_backend_destroy_memory(core->backend_context, bytes,
-                                                desc->size_bytes);
+        core->backend.destroy_memory(core->backend_context, allocation,
+                                     desc->size_bytes);
         *memory = 0u;
         return result;
     }
     alignment = desc->alignment == 0u ? 1u : desc->alignment;
-    slot->value.memory.bytes = bytes;
+    slot->value.memory.allocation = allocation;
     slot->value.memory.size_bytes = desc->size_bytes;
     slot->value.memory.alignment = alignment;
     slot->value.memory.flags = desc->flags;
     core->allocated_bytes += desc->size_bytes;
     ringpu_core_diagnostic(core, RIN_GPU_DIAGNOSTIC_RESOURCE_CREATE,
-                           (uint64_t)(uintptr_t)bytes, 0u,
+                           (uint64_t)(uintptr_t)allocation, 0u,
                            RIN_GPU_OBJECT_MEMORY, desc->size_bytes,
                            RIN_GPU_OK);
     return RIN_GPU_OK;
@@ -305,7 +299,7 @@ int ringpu_bind_buffer_memory(
     int result = ringpu_core_ready(core);
 
     if (result != RIN_GPU_OK) return result;
-    if (!ringpu_software_memory_binding_supported(core))
+    if (!ringpu_backend_memory_binding_supported(core))
         return RIN_GPU_ERROR_UNSUPPORTED;
     result = ringpu_slot(core, buffer, RIN_GPU_OBJECT_BUFFER, NULL,
                          &resource_slot);
@@ -324,16 +318,18 @@ int ringpu_bind_buffer_memory(
     result = ringpu_memory_binding_common(core, binding, &requirements,
                                           &memory_slot);
     if (result != RIN_GPU_OK) return result;
-    result = ringpu_software_backend_bind_buffer(
-        core->backend_context,
+    result = core->backend.bind_buffer_memory(
+        core->backend_context, resource_slot->value.buffer.backend_cookie,
         &(RinGpuBufferDescV1){
             RIN_GPU_ABI_VERSION, sizeof(RinGpuBufferDescV1),
             resource_slot->value.buffer.size_bytes,
             resource_slot->value.buffer.usage,
             resource_slot->value.buffer.flags},
-        memory_slot->value.memory.bytes, memory_slot->value.memory.size_bytes,
-        binding->offset_bytes, &new_cookie);
+        memory_slot->value.memory.allocation,
+        memory_slot->value.memory.size_bytes, binding->offset_bytes,
+        &new_cookie);
     if (result != RIN_GPU_OK) return result;
+    if (new_cookie == 0u) return RIN_GPU_ERROR_BACKEND;
     if (core->allocated_bytes < resource_slot->value.buffer.size_bytes) {
         core->backend.destroy_buffer(core->backend_context, new_cookie);
         return RIN_GPU_ERROR_STATE;
@@ -359,7 +355,7 @@ int ringpu_bind_image_memory(
     int result = ringpu_core_ready(core);
 
     if (result != RIN_GPU_OK) return result;
-    if (!ringpu_software_memory_binding_supported(core))
+    if (!ringpu_backend_memory_binding_supported(core))
         return RIN_GPU_ERROR_UNSUPPORTED;
     result = ringpu_slot(core, image, RIN_GPU_OBJECT_IMAGE, NULL,
                          &resource_slot);
@@ -374,12 +370,15 @@ int ringpu_bind_image_memory(
     result = ringpu_memory_binding_common(core, binding, &requirements,
                                           &memory_slot);
     if (result != RIN_GPU_OK) return result;
-    result = ringpu_software_backend_bind_image(
-        core->backend_context, &resource_slot->value.image.descriptor,
+    result = core->backend.bind_image_memory(
+        core->backend_context, resource_slot->value.image.backend_cookie,
+        &resource_slot->value.image.descriptor,
         resource_slot->value.image.allocation_bytes,
-        memory_slot->value.memory.bytes, memory_slot->value.memory.size_bytes,
-        binding->offset_bytes, &new_cookie);
+        memory_slot->value.memory.allocation,
+        memory_slot->value.memory.size_bytes, binding->offset_bytes,
+        &new_cookie);
     if (result != RIN_GPU_OK) return result;
+    if (new_cookie == 0u) return RIN_GPU_ERROR_BACKEND;
     if (core->allocated_bytes < resource_slot->value.image.allocation_bytes) {
         core->backend.destroy_image(core->backend_context, new_cookie);
         return RIN_GPU_ERROR_STATE;

@@ -50,6 +50,8 @@ endif()
 add_library(RinGPU::RinGPU ALIAS RinGPU)
 
 target_compile_features(RinGPU PUBLIC c_std_11)
+target_compile_definitions(RinGPU PRIVATE
+    RINGPU_BUILD_SOFTWARE_BACKEND=$<BOOL:${RINGPU_BUILD_SOFTWARE_BACKEND}>)
 target_include_directories(RinGPU
     PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../rinresource/include>
@@ -84,71 +86,55 @@ install(FILES ${CMAKE_CURRENT_BINARY_DIR}/ringpu.pc
 
 if(RINGPU_BUILD_TESTS)
     enable_testing()
-    add_executable(ringpu-abi-test tests/ringpu_abi_test.c)
-    target_link_libraries(ringpu-abi-test PRIVATE RinGPU::RinGPU)
-    add_test(NAME ringpu-abi COMMAND ringpu-abi-test)
-    add_executable(ringpu-shader-test tests/ringpu_shader_test.c)
-    target_link_libraries(ringpu-shader-test PRIVATE RinGPU::RinGPU)
-    add_test(NAME ringpu-shader COMMAND ringpu-shader-test)
-    add_executable(ringpu-shader-resource-test
-                   tests/ringpu_shader_resource_test.c)
-    target_link_libraries(ringpu-shader-resource-test PRIVATE RinGPU::RinGPU)
-    add_test(NAME ringpu-shader-resource COMMAND ringpu-shader-resource-test)
-    add_executable(ringpu-runtime-test tests/ringpu_runtime_test.c)
-    target_link_libraries(ringpu-runtime-test PRIVATE RinGPU::RinGPU)
-    add_test(NAME ringpu-runtime COMMAND ringpu-runtime-test)
-    add_executable(ringpu-result-mapping-test
-                   tests/ringpu_result_mapping_test.c)
-    target_link_libraries(ringpu-result-mapping-test PRIVATE RinGPU::RinGPU)
-    add_test(NAME ringpu-result-mapping COMMAND ringpu-result-mapping-test)
-    add_executable(ringpu-resource-requirements-test
-                   tests/ringpu_resource_requirements_test.c)
-    target_link_libraries(ringpu-resource-requirements-test PRIVATE
-                          RinGPU::RinGPU)
-    add_test(NAME ringpu-resource-requirements
-             COMMAND ringpu-resource-requirements-test)
-    add_executable(ringpu-cross-process-ipc-test
-                   tests/ringpu_cross_process_ipc_test.c)
-    target_link_libraries(ringpu-cross-process-ipc-test PRIVATE RinGPU::RinGPU)
-    add_test(NAME ringpu-cross-process-ipc COMMAND ringpu-cross-process-ipc-test)
-    add_executable(ringpu-primitive-restart-test
-                   tests/ringpu_primitive_restart_test.c)
-    target_link_libraries(ringpu-primitive-restart-test PRIVATE RinGPU::RinGPU)
-    add_test(NAME ringpu-primitive-restart
-             COMMAND ringpu-primitive-restart-test)
-    add_executable(ringpu-srgb-test tests/ringpu_srgb_test.c)
-    target_link_libraries(ringpu-srgb-test PRIVATE RinGPU::RinGPU)
-    add_test(NAME ringpu-srgb COMMAND ringpu-srgb-test)
-    add_executable(ringpu-query-test tests/ringpu_query_test.c)
-    target_link_libraries(ringpu-query-test PRIVATE RinGPU::RinGPU)
-    add_test(NAME ringpu-query COMMAND ringpu-query-test)
-    add_executable(ringpu-ownership-test tests/ringpu_ownership_test.c)
-    target_link_libraries(ringpu-ownership-test PRIVATE RinGPU::RinGPU)
-    add_test(NAME ringpu-ownership COMMAND ringpu-ownership-test)
-    add_executable(ringpu-resolve-test tests/ringpu_resolve_test.c)
-    target_link_libraries(ringpu-resolve-test PRIVATE RinGPU::RinGPU)
-    add_test(NAME ringpu-resolve COMMAND ringpu-resolve-test)
-    add_executable(ringpu-shared-test tests/ringpu_shared_test.c)
-    target_link_libraries(ringpu-shared-test PRIVATE RinGPU::RinGPU)
-    add_test(NAME ringpu-shared COMMAND ringpu-shared-test)
-    add_executable(ringpu-storage-image-test tests/ringpu_storage_image_test.c)
-    target_link_libraries(ringpu-storage-image-test PRIVATE RinGPU::RinGPU)
-    add_test(NAME ringpu-storage-image COMMAND ringpu-storage-image-test)
-    add_executable(ringpu-compressed-test tests/ringpu_compressed_test.c)
-    target_link_libraries(ringpu-compressed-test PRIVATE RinGPU::RinGPU)
-    add_test(NAME ringpu-compressed COMMAND ringpu-compressed-test)
-    add_executable(ringpu-memory-binding-test
-                   tests/ringpu_memory_binding_test.c)
-    target_link_libraries(ringpu-memory-binding-test PRIVATE RinGPU::RinGPU)
-    add_test(NAME ringpu-memory-binding COMMAND ringpu-memory-binding-test)
-    add_executable(ringpu-subresource-range-test
-                   tests/ringpu_subresource_range_test.c)
-    target_link_libraries(ringpu-subresource-range-test PRIVATE RinGPU::RinGPU)
-    add_test(NAME ringpu-subresource-range
-             COMMAND ringpu-subresource-range-test)
+    function(ringpu_add_test target test_name source)
+        add_executable(${target} ${source})
+        target_link_libraries(${target} PRIVATE RinGPU::RinGPU)
+        add_test(NAME ${test_name} COMMAND ${target})
+    endfunction()
+
+    ringpu_add_test(ringpu-abi-test ringpu-abi tests/ringpu_abi_test.c)
+    ringpu_add_test(ringpu-shader-test ringpu-shader
+                    tests/ringpu_shader_test.c)
+    ringpu_add_test(ringpu-shader-resource-test ringpu-shader-resource
+                    tests/ringpu_shader_resource_test.c)
+    ringpu_add_test(ringpu-result-mapping-test ringpu-result-mapping
+                    tests/ringpu_result_mapping_test.c)
+    ringpu_add_test(ringpu-cross-process-ipc-test ringpu-cross-process-ipc
+                    tests/ringpu_cross_process_ipc_test.c)
+
+    if(RINGPU_BUILD_SOFTWARE_BACKEND)
+        ringpu_add_test(ringpu-runtime-test ringpu-runtime
+                        tests/ringpu_runtime_test.c)
+        ringpu_add_test(ringpu-resource-requirements-test
+                        ringpu-resource-requirements
+                        tests/ringpu_resource_requirements_test.c)
+        ringpu_add_test(ringpu-primitive-restart-test ringpu-primitive-restart
+                        tests/ringpu_primitive_restart_test.c)
+        ringpu_add_test(ringpu-srgb-test ringpu-srgb
+                        tests/ringpu_srgb_test.c)
+        ringpu_add_test(ringpu-query-test ringpu-query
+                        tests/ringpu_query_test.c)
+        ringpu_add_test(ringpu-ownership-test ringpu-ownership
+                        tests/ringpu_ownership_test.c)
+        ringpu_add_test(ringpu-resolve-test ringpu-resolve
+                        tests/ringpu_resolve_test.c)
+        ringpu_add_test(ringpu-shared-test ringpu-shared
+                        tests/ringpu_shared_test.c)
+        ringpu_add_test(ringpu-storage-image-test ringpu-storage-image
+                        tests/ringpu_storage_image_test.c)
+        ringpu_add_test(ringpu-compressed-test ringpu-compressed
+                        tests/ringpu_compressed_test.c)
+        ringpu_add_test(ringpu-memory-binding-test ringpu-memory-binding
+                        tests/ringpu_memory_binding_test.c)
+        ringpu_add_test(ringpu-subresource-range-test ringpu-subresource-range
+                        tests/ringpu_subresource_range_test.c)
+    else()
+        message(STATUS
+            "Software-backend conformance tests are omitted because RINGPU_BUILD_SOFTWARE_BACKEND is OFF")
+    endif()
 endif()
 
-if(RINGPU_BUILD_DIFFERENTIAL_TESTS)
+if(RINGPU_BUILD_DIFFERENTIAL_TESTS AND RINGPU_BUILD_SOFTWARE_BACKEND)
     add_executable(ringpu-differential-test
                    tests/differential/differential_test.c
                    tests/differential/differential.c)
@@ -163,4 +149,7 @@ if(RINGPU_BUILD_DIFFERENTIAL_TESTS)
                                PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests/differential)
     target_link_libraries(ringpu-determinism-test PRIVATE RinGPU::RinGPU)
     add_test(NAME ringpu-determinism COMMAND ringpu-determinism-test)
+elseif(RINGPU_BUILD_DIFFERENTIAL_TESTS)
+    message(STATUS
+        "Differential tests are omitted because they require the software backend")
 endif()

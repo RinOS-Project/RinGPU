@@ -1108,6 +1108,50 @@ int ringpu_software_backend_bind_image(
     return RIN_GPU_OK;
 }
 
+static int sw_ops_create_memory(void* opaque,
+                                const RinGpuMemoryDescV1* desc,
+                                void** allocation_out)
+{
+    uint8_t* bytes = NULL;
+    int result;
+
+    if (desc == NULL || allocation_out == NULL)
+        return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    *allocation_out = NULL;
+    result = ringpu_software_backend_create_memory(
+        opaque, desc->size_bytes, &bytes);
+    if (result == RIN_GPU_OK) *allocation_out = bytes;
+    return result;
+}
+
+static void sw_ops_destroy_memory(void* opaque, void* allocation,
+                                  uint64_t size_bytes)
+{
+    ringpu_software_backend_destroy_memory(opaque, allocation, size_bytes);
+}
+
+static int sw_ops_bind_buffer_memory(
+    void* opaque, uint64_t buffer_cookie, const RinGpuBufferDescV1* desc,
+    void* allocation, uint64_t allocation_size, uint64_t offset_bytes,
+    uint64_t* bound_cookie_out)
+{
+    (void)buffer_cookie;
+    return ringpu_software_backend_bind_buffer(
+        opaque, desc, allocation, allocation_size, offset_bytes,
+        bound_cookie_out);
+}
+
+static int sw_ops_bind_image_memory(
+    void* opaque, uint64_t image_cookie, const RinGpuImageDescV1* desc,
+    uint64_t resource_size, void* allocation, uint64_t allocation_size,
+    uint64_t offset_bytes, uint64_t* bound_cookie_out)
+{
+    (void)image_cookie;
+    return ringpu_software_backend_bind_image(
+        opaque, desc, resource_size, allocation, allocation_size,
+        offset_bytes, bound_cookie_out);
+}
+
 static int sw_readback_buffer(void* opaque, uint64_t cookie,
                               uint64_t source_offset, void* destination,
                               uint64_t size_bytes)
@@ -10796,6 +10840,10 @@ static const RinGpuBackendOpsV1 g_sw_ops = {
     .destroy_query = sw_query_destroy,
     .wait_for_completion = sw_wait_for_completion,
     .readback_image = sw_readback_image,
+    .create_memory = sw_ops_create_memory,
+    .destroy_memory = sw_ops_destroy_memory,
+    .bind_buffer_memory = sw_ops_bind_buffer_memory,
+    .bind_image_memory = sw_ops_bind_image_memory,
 };
 
 int ringpu_software_backend_create(

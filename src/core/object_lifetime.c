@@ -3,7 +3,6 @@
 
 #include "../command/record.h"
 #include "../pipeline/pipelines.h"
-#include "../software/software_backend.h"
 #include "../shader/modules.h"
 #include "object_table.h"
 
@@ -55,9 +54,11 @@ static int ringpu_destroy_slot(RinGpuCore* core, RinGpuHandle object,
     } else if (slot->type == RIN_GPU_OBJECT_MEMORY) {
         if (slot->value.memory.reference_count != 0u)
             return RIN_GPU_ERROR_BUSY;
-        ringpu_software_backend_destroy_memory(
-            core->backend_context, slot->value.memory.bytes,
-            slot->value.memory.size_bytes);
+        if (core->backend.destroy_memory == NULL)
+            return RIN_GPU_ERROR_STATE;
+        core->backend.destroy_memory(core->backend_context,
+                                     slot->value.memory.allocation,
+                                     slot->value.memory.size_bytes);
         core->allocated_bytes -= slot->value.memory.size_bytes;
     } else if (slot->type == RIN_GPU_OBJECT_SAMPLER) {
         if (slot->value.sampler.reference_count != 0u) {

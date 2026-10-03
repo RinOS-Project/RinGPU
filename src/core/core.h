@@ -673,6 +673,24 @@ typedef struct RinGpuBackendOpsV1 {
     int (*readback_image)(void* context, uint64_t cookie,
                           const RinGpuImageReadbackV1* readback,
                           void* destination, uint64_t destination_size);
+    /* Optional explicit memory ownership/binding profile. Supply all four
+     * callbacks or none. create_memory returns an owned token on success;
+     * bind callbacks return a non-zero replacement cookie without consuming
+     * the old cookie, which the core retires after the bind succeeds. */
+    int (*create_memory)(void* context, const RinGpuMemoryDescV1* desc,
+                         void** allocation_out);
+    void (*destroy_memory)(void* context, void* allocation,
+                           uint64_t size_bytes);
+    int (*bind_buffer_memory)(void* context, uint64_t buffer_cookie,
+                              const RinGpuBufferDescV1* desc,
+                              void* allocation, uint64_t allocation_size,
+                              uint64_t offset_bytes,
+                              uint64_t* bound_cookie_out);
+    int (*bind_image_memory)(void* context, uint64_t image_cookie,
+                             const RinGpuImageDescV1* desc,
+                             uint64_t resource_size, void* allocation,
+                             uint64_t allocation_size, uint64_t offset_bytes,
+                             uint64_t* bound_cookie_out);
 } RinGpuBackendOpsV1;
 
 typedef struct RinGpuCoreConfigV1 {
@@ -797,7 +815,7 @@ typedef struct RinGpuObjectSlot {
             uint64_t memory_size;
         } image;
         struct {
-            uint8_t* bytes;
+            void* allocation;
             uint64_t size_bytes;
             uint64_t alignment;
             uint32_t flags;

@@ -53,6 +53,16 @@ static int make_core(RinGpuCore* core, RinGpuSoftwareBackend** backend_out)
     config.displays = &display;
     config.display_count = 1u;
     config.backend_family = RIN_GPU_BACKEND_FAMILY_SOFTWARE;
+    {
+        RinGpuCore partial_core;
+        RinGpuCoreConfigV1 partial_config = config;
+        partial_config.backend.bind_buffer_memory = NULL;
+        if (ringpu_core_init(&partial_core, &partial_config) !=
+            RIN_GPU_ERROR_INVALID_ARGUMENT) {
+            ringpu_software_backend_destroy(backend);
+            return 0;
+        }
+    }
     if (ringpu_core_init(core, &config) != RIN_GPU_OK) {
         ringpu_software_backend_destroy(backend);
         return 0;
@@ -245,7 +255,8 @@ int main(void)
                         &buffer_slot) != RIN_GPU_OK ||
             ringpu_slot(&core, buffer_memory, RIN_GPU_OBJECT_MEMORY, NULL,
                         &buffer_memory_slot) != RIN_GPU_OK ||
-            memcmp(buffer_memory_slot->value.memory.bytes +
+            memcmp((const uint8_t*)
+                       buffer_memory_slot->value.memory.allocation +
                        buffer_slot->value.buffer.memory_offset,
                    source, sizeof(source)) != 0) {
             goto done;

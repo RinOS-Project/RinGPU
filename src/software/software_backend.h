@@ -7,9 +7,9 @@
  * header is intentionally not an alternate public contract. */
 #include <ringpu/software.h>
 
-/* Internal core/resource bridge for the bounded software memory-binding
- * profile. These functions are intentionally absent from RinGpuBackendOpsV1:
- * native/external backends must opt into their own binding implementation. */
+/* Internal implementation details used by the software backend's optional
+ * memory ownership/binding operations. Other backends provide their own
+ * RinGpuBackendOpsV1 callbacks. */
 int ringpu_software_backend_create_memory(void* opaque, uint64_t size_bytes,
                                           uint8_t** bytes_out);
 void ringpu_software_backend_destroy_memory(void* opaque, uint8_t* bytes,
