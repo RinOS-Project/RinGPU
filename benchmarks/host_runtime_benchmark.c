@@ -4,6 +4,7 @@
 #endif
 
 #include <ringpu/runtime.h>
+#include <ringpu/rin_shader.h>
 
 #include <inttypes.h>
 #include <stdio.h>
@@ -30,6 +31,9 @@ typedef struct BenchmarkRuntime {
     RinGpuHandle queue;
     RinGpuHandle fence;
     RinGpuHandle buffer;
+    RinGpuHandle descriptor_buffer;
+    RinGpuHandle descriptor_shader;
+    RinGpuHandle descriptor_pipeline;
 } BenchmarkRuntime;
 
 static int parse_count(const char* text, uint32_t* count_out)
@@ -112,6 +116,82 @@ static const char* compiler_name(void)
 #endif
 }
 
+static void set_shader_instruction(RinShaderInstructionV1* instruction,
+                                   uint16_t opcode, uint16_t destination,
+                                   uint16_t source0, uint16_t source1,
+                                   uint16_t resource, uint32_t immediate)
+{
+    memset(instruction, 0, sizeof(*instruction));
+    instruction->opcode = opcode;
+    instruction->destination = destination;
+    instruction->source0 = source0;
+    instruction->source1 = source1;
+    instruction->resource = resource;
+    instruction->immediate = immediate;
+}
+
+static int create_descriptor_resources(BenchmarkRuntime* state)
+{
+    struct DescriptorShader {
+        RinShaderHeaderV1 header;
+        RinShaderInstructionV1 instructions[4];
+    } shader;
+    RinGpuComputePipelineDescV1 pipeline_desc;
+    RinGpuBufferDescV1 buffer_desc;
+    const uint32_t initial_value = 0u;
+    int result;
+
+    memset(&shader, 0, sizeof(shader));
+    shader.header.magic = RIN_SHADER_MAGIC;
+    shader.header.version = RIN_SHADER_IR_VERSION;
+    shader.header.header_size = sizeof(shader.header);
+    shader.header.total_size = sizeof(shader);
+    shader.header.stage = RIN_SHADER_STAGE_COMPUTE;
+    shader.header.instruction_count = 4u;
+    shader.header.register_count = 2u;
+    shader.header.resource_count = 1u;
+    shader.header.workgroup_x = 1u;
+    shader.header.workgroup_y = 1u;
+    shader.header.workgroup_z = 1u;
+    set_shader_instruction(&shader.instructions[0], RIN_SHADER_OP_CONST_I32,
+                           0u, RIN_SHADER_UNUSED, RIN_SHADER_UNUSED,
+                           RIN_SHADER_UNUSED, 0u);
+    set_shader_instruction(&shader.instructions[1], RIN_SHADER_OP_CONST_I32,
+                           1u, RIN_SHADER_UNUSED, RIN_SHADER_UNUSED,
+                           RIN_SHADER_UNUSED, 1u);
+    set_shader_instruction(&shader.instructions[2],
+                           RIN_SHADER_OP_STORE_RESOURCE_I32,
+                           RIN_SHADER_UNUSED, 0u, 1u, 0u, 0u);
+    set_shader_instruction(&shader.instructions[3], RIN_SHADER_OP_RETURN,
+                           RIN_SHADER_UNUSED, RIN_SHADER_UNUSED,
+                           RIN_SHADER_UNUSED, RIN_SHADER_UNUSED, 0u);
+    result = ringpu_runtime_create_shader_module(
+        state->runtime, &shader, sizeof(shader), &state->descriptor_shader);
+    if (result != RIN_GPU_OK) return result;
+
+    memset(&pipeline_desc, 0, sizeof(pipeline_desc));
+    pipeline_desc.abi_version = RIN_GPU_ABI_VERSION;
+    pipeline_desc.struct_size = sizeof(pipeline_desc);
+    pipeline_desc.shader_module = state->descriptor_shader;
+    result = ringpu_runtime_create_compute_pipeline(
+        state->runtime, &pipeline_desc, &state->descriptor_pipeline);
+    if (result != RIN_GPU_OK) return result;
+
+    memset(&buffer_desc, 0, sizeof(buffer_desc));
+    buffer_desc.abi_version = RIN_GPU_ABI_VERSION;
+    buffer_desc.struct_size = sizeof(buffer_desc);
+    buffer_desc.size_bytes = sizeof(initial_value);
+    buffer_desc.usage = RIN_GPU_BUFFER_STORAGE |
+                        RIN_GPU_BUFFER_COPY_DESTINATION;
+    buffer_desc.flags = RIN_GPU_BUFFER_CPU_VISIBLE;
+    result = ringpu_runtime_create_buffer(state->runtime, &buffer_desc,
+                                          &state->descriptor_buffer);
+    if (result != RIN_GPU_OK) return result;
+    return ringpu_runtime_upload_buffer(
+        state->runtime, state->descriptor_buffer, 0u, &initial_value,
+        sizeof(initial_value));
+}
+
 static int create_benchmark_runtime(BenchmarkRuntime* state)
 {
     RinGpuRuntimeDescV1 runtime_desc;
@@ -135,7 +215,8 @@ static int create_benchmark_runtime(BenchmarkRuntime* state)
     runtime_desc.max_image_sample_count = 1u;
     runtime_desc.adapter.abi_version = RIN_GPU_ABI_VERSION;
     runtime_desc.adapter.struct_size = sizeof(runtime_desc.adapter);
-    runtime_desc.adapter.queue_capabilities = RIN_GPU_QUEUE_COPY;
+    runtime_desc.adapter.queue_capabilities = RIN_GPU_QUEUE_COPY |
+                                              RIN_GPU_QUEUE_COMPUTE;
     memcpy(runtime_desc.adapter.name, "host-software-benchmark",
            sizeof("host-software-benchmark"));
     runtime_desc.flags = RIN_GPU_RUNTIME_FLAG_HEADLESS;
@@ -170,6 +251,24 @@ static int destroy_benchmark_runtime(BenchmarkRuntime* state)
 {
     int first_error = RIN_GPU_OK;
     int result;
+    if (state->runtime != NULL && state->descriptor_buffer != 0u) {
+        result = ringpu_runtime_destroy_object(state->runtime,
+                                              state->descriptor_buffer);
+        if (first_error == RIN_GPU_OK && result != RIN_GPU_OK)
+            first_error = result;
+    }
+    if (state->runtime != NULL && state->descriptor_pipeline != 0u) {
+        result = ringpu_runtime_destroy_object(state->runtime,
+                                              state->descriptor_pipeline);
+        if (first_error == RIN_GPU_OK && result != RIN_GPU_OK)
+            first_error = result;
+    }
+    if (state->runtime != NULL && state->descriptor_shader != 0u) {
+        result = ringpu_runtime_destroy_object(state->runtime,
+                                              state->descriptor_shader);
+        if (first_error == RIN_GPU_OK && result != RIN_GPU_OK)
+            first_error = result;
+    }
     if (state->runtime != NULL && state->buffer != 0u) {
         result = ringpu_runtime_destroy_object(state->runtime, state->buffer);
         if (first_error == RIN_GPU_OK && result != RIN_GPU_OK)
@@ -259,6 +358,105 @@ static int run_iteration(BenchmarkRuntime* state, uint64_t iteration,
     return result;
 }
 
+static int run_memory_iteration(BenchmarkRuntime* state, uint64_t iteration,
+                               uint64_t* checksum_out)
+{
+    RinGpuMemoryDescV1 memory_desc;
+    RinGpuBufferDescV1 buffer_desc;
+    RinGpuResourceMemoryBindingV1 binding;
+    RinGpuHandle memory = 0u;
+    RinGpuHandle buffer = 0u;
+    uint8_t source[BENCHMARK_BUFFER_BYTES];
+    uint8_t readback[BENCHMARK_BUFFER_BYTES];
+    uint8_t pattern_bytes[sizeof(uint32_t)];
+    const uint32_t pattern = UINT32_C(0x1f2e3d4c) ^
+                             (uint32_t)iteration * UINT32_C(0x9e3779b9);
+    uint64_t index;
+    int result;
+    int cleanup_result;
+
+    memcpy(pattern_bytes, &pattern, sizeof(pattern_bytes));
+    for (index = 0u; index < sizeof(source); ++index)
+        source[index] = pattern_bytes[index % sizeof(pattern_bytes)];
+
+    memset(&memory_desc, 0, sizeof(memory_desc));
+    memory_desc.abi_version = RIN_GPU_ABI_VERSION;
+    memory_desc.struct_size = sizeof(memory_desc);
+    memory_desc.size_bytes = BENCHMARK_BUFFER_BYTES;
+    memory_desc.alignment = 256u;
+    memory_desc.flags = RIN_GPU_MEMORY_BINDING_DEDICATED;
+    result = ringpu_runtime_create_memory(state->runtime, &memory_desc,
+                                          &memory);
+    if (result != RIN_GPU_OK) goto cleanup;
+
+    memset(&buffer_desc, 0, sizeof(buffer_desc));
+    buffer_desc.abi_version = RIN_GPU_ABI_VERSION;
+    buffer_desc.struct_size = sizeof(buffer_desc);
+    buffer_desc.size_bytes = BENCHMARK_BUFFER_BYTES;
+    buffer_desc.usage = RIN_GPU_BUFFER_COPY_SOURCE |
+                        RIN_GPU_BUFFER_COPY_DESTINATION;
+    buffer_desc.flags = RIN_GPU_BUFFER_CPU_VISIBLE;
+    result = ringpu_runtime_create_buffer(state->runtime, &buffer_desc,
+                                          &buffer);
+    if (result != RIN_GPU_OK) goto cleanup;
+
+    memset(&binding, 0, sizeof(binding));
+    binding.abi_version = RIN_GPU_ABI_VERSION;
+    binding.struct_size = sizeof(binding);
+    binding.memory = memory;
+    binding.size_bytes = BENCHMARK_BUFFER_BYTES;
+    result = ringpu_runtime_bind_buffer_memory(state->runtime, buffer,
+                                               &binding);
+    if (result == RIN_GPU_OK)
+        result = ringpu_runtime_upload_buffer(state->runtime, buffer, 0u,
+                                              source, sizeof(source));
+    if (result == RIN_GPU_OK)
+        result = ringpu_runtime_readback_buffer(state->runtime, buffer, 0u,
+                                                readback, sizeof(readback));
+    if (result == RIN_GPU_OK && memcmp(source, readback, sizeof(source)) != 0)
+        result = RIN_GPU_ERROR_STATE;
+    if (result == RIN_GPU_OK)
+        *checksum_out = (*checksum_out * UINT64_C(1099511628211)) ^ pattern;
+
+cleanup:
+    if (buffer != 0u) {
+        cleanup_result = ringpu_runtime_destroy_object(state->runtime, buffer);
+        if (result == RIN_GPU_OK && cleanup_result != RIN_GPU_OK)
+            result = cleanup_result;
+    }
+    if (memory != 0u) {
+        cleanup_result = ringpu_runtime_destroy_object(state->runtime, memory);
+        if (result == RIN_GPU_OK && cleanup_result != RIN_GPU_OK)
+            result = cleanup_result;
+    }
+    return result;
+}
+
+static int run_descriptor_iteration(BenchmarkRuntime* state,
+                                    uint64_t iteration,
+                                    uint64_t* checksum_out)
+{
+    RinGpuBufferBindingV1 binding;
+    RinGpuHandle bind_group = 0u;
+    int result;
+    int cleanup_result;
+
+    memset(&binding, 0, sizeof(binding));
+    binding.abi_version = RIN_GPU_ABI_VERSION;
+    binding.struct_size = sizeof(binding);
+    binding.binding = 0u;
+    binding.access = RIN_GPU_RESOURCE_WRITE;
+    binding.buffer = state->descriptor_buffer;
+    binding.size_bytes = sizeof(uint32_t);
+    result = ringpu_runtime_create_compute_bind_group(
+        state->runtime, state->descriptor_pipeline, &binding, 1u, &bind_group);
+    if (result != RIN_GPU_OK) return result;
+    *checksum_out = (*checksum_out * UINT64_C(1099511628211)) ^
+                    (iteration + binding.size_bytes);
+    cleanup_result = ringpu_runtime_destroy_object(state->runtime, bind_group);
+    return cleanup_result;
+}
+
 static int compare_u64(const void* left, const void* right)
 {
     const uint64_t a = *(const uint64_t*)left;
@@ -266,10 +464,13 @@ static int compare_u64(const void* left, const void* right)
     return a < b ? -1 : (a > b ? 1 : 0);
 }
 
-static int run_benchmark(uint32_t iterations, uint32_t warmup)
+typedef int (*BenchmarkIterationFn)(BenchmarkRuntime*, uint64_t, uint64_t*);
+
+static int measure_metric(BenchmarkRuntime* state, const char* metric,
+                          BenchmarkIterationFn run_iteration_fn,
+                          uint32_t iterations, uint32_t warmup,
+                          uint64_t* samples)
 {
-    BenchmarkRuntime state;
-    uint64_t* samples;
     uint64_t checksum = UINT64_C(1469598103934665603);
     uint64_t start_ns;
     uint64_t end_ns;
@@ -278,33 +479,26 @@ static int run_benchmark(uint32_t iterations, uint32_t warmup)
     uint64_t p95_ns;
     uint32_t index;
     int result;
-    int cleanup_result;
-
-    samples = (uint64_t*)malloc((size_t)iterations * sizeof(*samples));
-    if (samples == NULL) return RIN_GPU_ERROR_NO_MEMORY;
-    result = create_benchmark_runtime(&state);
-    if (result != RIN_GPU_OK) {
-        cleanup_result = destroy_benchmark_runtime(&state);
-        free(samples);
-        return result != RIN_GPU_OK ? result : cleanup_result;
-    }
 
     for (index = 0u; index < warmup; ++index) {
-        result = run_iteration(&state, (uint64_t)index + 1u, &checksum);
-        if (result != RIN_GPU_OK) goto cleanup;
+        result = run_iteration_fn(state, (uint64_t)index + 1u, &checksum);
+        if (result != RIN_GPU_OK) {
+            fprintf(stderr, "%s warmup failed at %" PRIu32
+                    ": RinGPU status %d\n", metric, index, result);
+            return result;
+        }
     }
     for (index = 0u; index < iterations; ++index) {
         const uint64_t sequence = (uint64_t)warmup + index + 1u;
-        if (!timer_now_ns(&start_ns)) {
-            result = RIN_GPU_ERROR_STATE;
-            goto cleanup;
+        if (!timer_now_ns(&start_ns)) return RIN_GPU_ERROR_STATE;
+        result = run_iteration_fn(state, sequence, &checksum);
+        if (result != RIN_GPU_OK) {
+            fprintf(stderr, "%s sample failed at %" PRIu32
+                    ": RinGPU status %d\n", metric, index, result);
+            return result;
         }
-        result = run_iteration(&state, sequence, &checksum);
-        if (result != RIN_GPU_OK) goto cleanup;
-        if (!timer_now_ns(&end_ns) || end_ns < start_ns) {
-            result = RIN_GPU_ERROR_STATE;
-            goto cleanup;
-        }
+        if (!timer_now_ns(&end_ns) || end_ns < start_ns)
+            return RIN_GPU_ERROR_STATE;
         samples[index] = end_ns - start_ns;
     }
 
@@ -321,16 +515,44 @@ static int run_benchmark(uint32_t iterations, uint32_t warmup)
     p95_ns = samples[((uint64_t)iterations * 95u + 99u) / 100u - 1u];
     {
         const double mean_ns = (double)(elapsed_sum / (long double)iterations);
-        const double operations_per_second = 1000000000.0 / mean_ns;
-        printf("benchmark,backend,compiler,iterations,warmup,min_ns,"
-               "median_ns,p95_ns,mean_ns,ops_per_second,checksum\n");
-        printf("command_roundtrip,software-host,%s,%" PRIu32 ",%" PRIu32
+        if (mean_ns <= 0.0) return RIN_GPU_ERROR_STATE;
+        printf("%s,software-host,%s,%" PRIu32 ",%" PRIu32
                ",%" PRIu64 ",%" PRIu64 ",%" PRIu64 ",%.2f,%.2f,%" PRIu64
                "\n",
-               compiler_name(), iterations, warmup, samples[0], median_ns,
-               p95_ns, mean_ns, operations_per_second, checksum);
+               metric, compiler_name(), iterations, warmup, samples[0],
+               median_ns, p95_ns, mean_ns, 1000000000.0 / mean_ns, checksum);
     }
-    result = RIN_GPU_OK;
+    return RIN_GPU_OK;
+}
+
+static int run_benchmark(uint32_t iterations, uint32_t warmup)
+{
+    BenchmarkRuntime state;
+    uint64_t* samples;
+    int result;
+    int cleanup_result;
+
+    samples = (uint64_t*)malloc((size_t)iterations * sizeof(*samples));
+    if (samples == NULL) return RIN_GPU_ERROR_NO_MEMORY;
+    result = create_benchmark_runtime(&state);
+    if (result != RIN_GPU_OK) {
+        cleanup_result = destroy_benchmark_runtime(&state);
+        free(samples);
+        return result != RIN_GPU_OK ? result : cleanup_result;
+    }
+    result = create_descriptor_resources(&state);
+    if (result != RIN_GPU_OK) goto cleanup;
+    printf("benchmark,backend,compiler,iterations,warmup,min_ns,"
+           "median_ns,p95_ns,mean_ns,ops_per_second,checksum\n");
+    result = measure_metric(&state, "command_roundtrip", run_iteration,
+                            iterations, warmup, samples);
+    if (result != RIN_GPU_OK) goto cleanup;
+    result = measure_metric(&state, "memory_buffer_bind_roundtrip",
+                            run_memory_iteration, iterations, warmup, samples);
+    if (result != RIN_GPU_OK) goto cleanup;
+    result = measure_metric(&state, "compute_bind_group_churn",
+                            run_descriptor_iteration,
+                            iterations, warmup, samples);
 
 cleanup:
     cleanup_result = destroy_benchmark_runtime(&state);
