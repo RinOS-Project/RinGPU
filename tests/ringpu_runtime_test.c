@@ -115,6 +115,7 @@ int main(void)
     RinGpuHandle headless_fence = 0u;
     RinGpuHandle external_buffer = 0u;
     RinGpuHandle failed_external_buffer = UINT64_C(1);
+    RinGpuHandle recovered_external_buffer = 0u;
     RinGpuHandle external_image = 0u;
     RinGpuHandle failed_external_image = UINT64_C(1);
     uint64_t generation = 0u;
@@ -398,6 +399,12 @@ int main(void)
             RIN_GPU_ERROR_BACKEND ||
         failed_external_buffer != 0u || external_create_buffer_calls != 2u)
         return 26;
+    if (ringpu_runtime_create_buffer(external_runtime, &buffer_desc,
+                                     &recovered_external_buffer) !=
+            RIN_GPU_OK ||
+        recovered_external_buffer == 0u ||
+        external_create_buffer_calls != 3u)
+        return 33;
 
     external_image_desc = image_desc;
     external_image_desc.usage = RIN_GPU_IMAGE_COPY_SOURCE |
@@ -418,11 +425,11 @@ int main(void)
     external_desc.backend_ops = &missing_ops;
     if (ringpu_runtime_create(&external_desc, &rejected_runtime) !=
             RIN_GPU_ERROR_INVALID_ARGUMENT ||
-        rejected_runtime != NULL || external_create_buffer_calls != 2u)
+        rejected_runtime != NULL || external_create_buffer_calls != 3u)
         return 31;
 
     ringpu_runtime_destroy(external_runtime);
-    if (external_destroy_buffer_calls != 1u ||
+    if (external_destroy_buffer_calls != 2u ||
         external_destroy_image_calls != 1u) {
         ringpu_software_backend_destroy(external_backend);
         return 32;
