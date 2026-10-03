@@ -1,7 +1,27 @@
 /* SPDX-License-Identifier: MIT */
 #include <ringpu/runtime.h>
 
+#include "../src/core/core.h"
+
 #include <string.h>
+
+static const RinGpuBackendOpsV1* external_backend_delegate;
+static uint32_t external_create_buffer_calls;
+static uint32_t external_destroy_buffer_calls;
+
+static int external_create_buffer(
+    void* context, const RinGpuBufferDescV1* desc, uint64_t* cookie_out)
+{
+    ++external_create_buffer_calls;
+    return external_backend_delegate->create_buffer(context, desc,
+                                                     cookie_out);
+}
+
+static void external_destroy_buffer(void* context, uint64_t cookie)
+{
+    ++external_destroy_buffer_calls;
+    external_backend_delegate->destroy_buffer(context, cookie);
+}
 
 static int present(void* context, const RinGpuSoftwarePresentedImageV1* image)
 {
@@ -36,7 +56,14 @@ int main(void)
     RinGpuSubmitInfoV1 submit = {0};
     RinGpuAdapterCapabilitiesV1 capabilities = {0};
     RinGpuRuntimeDescV1 headless_desc = {0};
+    RinGpuRuntimeDescV1 external_desc = {0};
     RinGpuBufferDescV1 buffer_desc = {0};
+    RinGpuSoftwareBackendDescV4 external_backend_desc = {0};
+    RinGpuSoftwareBackend* external_backend = NULL;
+    RinGpuBackendOpsV1 external_ops;
+    RinGpuBackendOpsV1 missing_ops;
+    RinGpuRuntime* external_runtime = NULL;
+    RinGpuRuntime* rejected_runtime = NULL;
     RinGpuMemoryDescV1 memory_desc = {0};
     RinGpuResourceMemoryBindingV1 memory_binding = {0};
     RinGpuQueueDescV1 headless_queue_desc = {0};
@@ -56,6 +83,7 @@ int main(void)
     RinGpuHandle headless_queue = 0u;
     RinGpuHandle headless_command_list = 0u;
     RinGpuHandle headless_fence = 0u;
+    RinGpuHandle external_buffer = 0u;
     uint64_t generation = 0u;
     uint32_t present_count = 0u;
     uint8_t upload_bytes[8] = {0x52u, 0x69u, 0x6eu, 0x47u,
@@ -301,5 +329,47 @@ int main(void)
         RIN_GPU_ERROR_UNSUPPORTED)
         return 18;
     ringpu_runtime_destroy(runtime);
+
+    external_backend_desc.base.base.base.struct_size =
+        sizeof(external_backend_desc);
+    external_backend_desc.base.base.base.version =
+        RIN_GPU_SOFTWARE_BACKEND_VERSION_4;
+    external_backend_desc.base.base.base.max_total_bytes =
+        headless_desc.max_total_allocation_size;
+    external_backend_desc.base.base.base.flags =
+        RIN_GPU_SOFTWARE_BACKEND_FLAG_HEADLESS;
+    if (ringpu_software_backend_create(
+            &external_backend_desc.base.base.base, &external_backend) !=
+        RIN_GPU_OK)
+        return 24;
+    external_backend_delegate = ringpu_software_backend_ops();
+    external_ops = *external_backend_delegate;
+    external_ops.create_buffer = external_create_buffer;
+    external_ops.destroy_buffer = external_destroy_buffer;
+    external_desc = headless_desc;
+    external_desc.backend_ops = &external_ops;
+    external_desc.backend_context = external_backend;
+    external_desc.backend_family = RIN_GPU_RUNTIME_BACKEND_FAMILY_VIRTIO;
+    if (ringpu_runtime_create(&external_desc, &external_runtime) !=
+            RIN_GPU_OK ||
+        ringpu_runtime_create_buffer(external_runtime, &buffer_desc,
+                                     &external_buffer) != RIN_GPU_OK ||
+        external_create_buffer_calls != 1u || external_buffer == 0u)
+        return 25;
+
+    missing_ops = external_ops;
+    missing_ops.create_buffer = NULL;
+    external_desc.backend_ops = &missing_ops;
+    if (ringpu_runtime_create(&external_desc, &rejected_runtime) !=
+            RIN_GPU_ERROR_INVALID_ARGUMENT ||
+        rejected_runtime != NULL || external_create_buffer_calls != 1u)
+        return 26;
+
+    ringpu_runtime_destroy(external_runtime);
+    if (external_destroy_buffer_calls != 1u) {
+        ringpu_software_backend_destroy(external_backend);
+        return 27;
+    }
+    ringpu_software_backend_destroy(external_backend);
     return 0;
 }
