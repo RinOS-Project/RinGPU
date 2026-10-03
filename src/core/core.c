@@ -19,10 +19,48 @@
 #include <stdlib.h>
 #include <string.h>
 
+#if defined(_MSC_VER)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#include <intrin.h>
+#elif defined(__GNUC__) || defined(__clang__)
+#include <sched.h>
+#else
+#error "RinGPU runtime resource locking requires MSVC, GCC, or Clang atomics"
+#endif
+
 int ringpu_core_ready(const RinGpuCore* core) {
     if (!core || !core->initialized) return RIN_GPU_ERROR_INVALID_ARGUMENT;
     if (core->device_lost) return RIN_GPU_ERROR_DEVICE_LOST;
     return RIN_GPU_OK;
+}
+
+void ringpu_core_resource_lock(RinGpuCore* core)
+{
+    if (!core) return;
+#if defined(_MSC_VER)
+    while (_InterlockedExchange(&core->resource_operation_lock, 1L) != 0L)
+        (void)SwitchToThread();
+#else
+    while (__atomic_exchange_n(&core->resource_operation_lock, 1L,
+                               __ATOMIC_ACQUIRE) != 0L)
+        (void)sched_yield();
+#endif
+}
+
+void ringpu_core_resource_unlock(RinGpuCore* core)
+{
+    if (!core) return;
+#if defined(_MSC_VER)
+    (void)_InterlockedExchange(&core->resource_operation_lock, 0L);
+#else
+    __atomic_store_n(&core->resource_operation_lock, 0L, __ATOMIC_RELEASE);
+#endif
 }
 
 void ringpu_core_diagnostic(RinGpuCore* core, uint32_t type,

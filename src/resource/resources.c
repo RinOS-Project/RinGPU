@@ -392,8 +392,9 @@ int ringpu_bind_image_memory(
     return RIN_GPU_OK;
 }
 
-int ringpu_create_buffer(RinGpuCore* core, const RinGpuBufferDescV1* desc,
-                         RinGpuHandle* buffer)
+static int ringpu_create_buffer_impl(RinGpuCore* core,
+                                    const RinGpuBufferDescV1* desc,
+                                    RinGpuHandle* buffer)
 {
     RinGpuObjectSlot* slot;
     uint64_t cookie = 0u;
@@ -437,6 +438,16 @@ int ringpu_create_buffer(RinGpuCore* core, const RinGpuBufferDescV1* desc,
                            0u, RIN_GPU_OBJECT_BUFFER, desc->size_bytes,
                            RIN_GPU_OK);
     return RIN_GPU_OK;
+}
+
+int ringpu_create_buffer(RinGpuCore* core, const RinGpuBufferDescV1* desc,
+                         RinGpuHandle* buffer)
+{
+    int result;
+    ringpu_core_resource_lock(core);
+    result = ringpu_create_buffer_impl(core, desc, buffer);
+    ringpu_core_resource_unlock(core);
+    return result;
 }
 
 int ringpu_upload_buffer(RinGpuCore* core, RinGpuHandle buffer,

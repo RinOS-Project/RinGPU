@@ -294,7 +294,7 @@ int ringpu_collect_deferred(RinGpuCore* core)
     return RIN_GPU_OK;
 }
 
-int ringpu_destroy(RinGpuCore* core, RinGpuHandle object)
+static int ringpu_destroy_impl(RinGpuCore* core, RinGpuHandle object)
 {
     RinGpuObjectSlot* slot;
     int result = ringpu_core_ready(core);
@@ -311,4 +311,13 @@ int ringpu_destroy(RinGpuCore* core, RinGpuHandle object)
     result = ringpu_destroy_slot(core, object, slot);
     if (result != RIN_GPU_OK) return result;
     return ringpu_collect_deferred(core);
+}
+
+int ringpu_destroy(RinGpuCore* core, RinGpuHandle object)
+{
+    int result;
+    ringpu_core_resource_lock(core);
+    result = ringpu_destroy_impl(core, object);
+    ringpu_core_resource_unlock(core);
+    return result;
 }

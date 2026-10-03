@@ -951,6 +951,10 @@ typedef struct RinGpuObjectSlot {
 } RinGpuObjectSlot;
 
 struct RinGpuCore {
+    /* Serializes buffer creation and object-retirement transactions for host
+     * runtimes. This is not a blanket lock for arbitrary concurrent command
+     * recording against the same command list. */
+    volatile long resource_operation_lock;
     uint64_t handle_secret;
     uint64_t max_buffer_size;
     uint64_t max_image_size;
@@ -1068,6 +1072,8 @@ void ringpu_core_mark_device_lost(RinGpuCore* core);
 uint64_t ringpu_core_device_generation(
     const RinGpuDiagnosticsRuntime* diagnostics);
 int ringpu_core_ready(const RinGpuCore* core);
+void ringpu_core_resource_lock(RinGpuCore* core);
+void ringpu_core_resource_unlock(RinGpuCore* core);
 void ringpu_core_diagnostic(RinGpuCore* core, uint32_t type,
                             uint64_t resource_cookie, uint64_t queue_cookie,
                             uint64_t value0, uint64_t value1, int status);
