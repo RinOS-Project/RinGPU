@@ -8,11 +8,17 @@
 static const RinGpuBackendOpsV1* external_backend_delegate;
 static uint32_t external_create_buffer_calls;
 static uint32_t external_destroy_buffer_calls;
+static uint32_t external_fail_next_create_buffer;
 
 static int external_create_buffer(
     void* context, const RinGpuBufferDescV1* desc, uint64_t* cookie_out)
 {
     ++external_create_buffer_calls;
+    if (external_fail_next_create_buffer != 0u) {
+        --external_fail_next_create_buffer;
+        if (cookie_out != NULL) *cookie_out = 0u;
+        return RIN_GPU_ERROR_BACKEND;
+    }
     return external_backend_delegate->create_buffer(context, desc,
                                                      cookie_out);
 }
@@ -84,6 +90,7 @@ int main(void)
     RinGpuHandle headless_command_list = 0u;
     RinGpuHandle headless_fence = 0u;
     RinGpuHandle external_buffer = 0u;
+    RinGpuHandle failed_external_buffer = UINT64_C(1);
     uint64_t generation = 0u;
     uint32_t present_count = 0u;
     uint8_t upload_bytes[8] = {0x52u, 0x69u, 0x6eu, 0x47u,
@@ -357,18 +364,25 @@ int main(void)
         external_create_buffer_calls != 1u || external_buffer == 0u)
         return 25;
 
+    external_fail_next_create_buffer = 1u;
+    if (ringpu_runtime_create_buffer(external_runtime, &buffer_desc,
+                                     &failed_external_buffer) !=
+            RIN_GPU_ERROR_BACKEND ||
+        failed_external_buffer != 0u || external_create_buffer_calls != 2u)
+        return 26;
+
     missing_ops = external_ops;
     missing_ops.create_buffer = NULL;
     external_desc.backend_ops = &missing_ops;
     if (ringpu_runtime_create(&external_desc, &rejected_runtime) !=
             RIN_GPU_ERROR_INVALID_ARGUMENT ||
-        rejected_runtime != NULL || external_create_buffer_calls != 1u)
-        return 26;
+        rejected_runtime != NULL || external_create_buffer_calls != 2u)
+        return 27;
 
     ringpu_runtime_destroy(external_runtime);
     if (external_destroy_buffer_calls != 1u) {
         ringpu_software_backend_destroy(external_backend);
-        return 27;
+        return 28;
     }
     ringpu_software_backend_destroy(external_backend);
     return 0;
