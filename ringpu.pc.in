@@ -7,4 +7,4 @@ Name: ringpu
 Description: RinOS portable GPU runtime and RSH1 validator
 Version: @PROJECT_VERSION@
 Libs: -L${libdir} -lRinGPU
-Cflags: -I${includedir}
+Cflags: -I${includedir} -DRINGPU_ENABLE_PRESENTATION=@RINGPU_ENABLE_PRESENTATION@

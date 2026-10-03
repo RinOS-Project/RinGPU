@@ -27,6 +27,7 @@ int main(void) {
     CHECK(rin_gpu_memory_result_to_gpu((RinGpuMemoryRuntimeResult)12345) ==
           RIN_GPU_ERROR_BACKEND);
 
+#if RINGPU_ENABLE_PRESENTATION
     CHECK(rin_gpu_presentation_result_to_gpu(RIN_GPU_PRESENTATION_OK) ==
           RIN_GPU_OK);
     CHECK(rin_gpu_presentation_result_to_gpu(
@@ -51,5 +52,6 @@ int main(void) {
               RIN_GPU_PRESENTATION_TIMEOUT) == RIN_GPU_ERROR_TIMEOUT);
     CHECK(rin_gpu_presentation_result_to_gpu(
               (RinGpuPresentationResult)12345) == RIN_GPU_ERROR_BACKEND);
+#endif
     return 0;
 }

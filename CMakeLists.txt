@@ -5,6 +5,7 @@ option(RINGPU_BUILD_SHARED "Build RinGPU as a shared library" OFF)
 option(RINGPU_BUILD_TESTS "Build RinGPU host tests" ON)
 option(RINGPU_BUILD_DIFFERENTIAL_TESTS "Build RinGPU differential support tests" OFF)
 option(RINGPU_BUILD_BENCHMARKS "Build optional RinGPU host benchmarks" OFF)
+option(RINGPU_BUILD_PRESENTATION "Build the RinGPU presentation runtime" ON)
 option(RINGPU_BUILD_SOFTWARE_BACKEND
        "Build the generic CPU software backend in the RinGPU archive" ON)
 
@@ -26,7 +27,6 @@ set(RINGPU_SOURCES
     src/device/device_runtime.c
     src/device/fault_policy.c
     src/memory/memory_runtime.c
-    src/presentation/presentation.c
     src/presentation/present.c
     src/presentation/render_pass.c
     src/pipeline/pipelines.c
@@ -39,8 +39,17 @@ set(RINGPU_SOURCES
     src/capability/cross_process_capability.c
     src/capability/cross_process_capability_ipc.c)
 
+if(RINGPU_BUILD_PRESENTATION)
+    list(APPEND RINGPU_SOURCES src/presentation/presentation.c)
+endif()
+
 if(RINGPU_BUILD_SOFTWARE_BACKEND)
     list(APPEND RINGPU_SOURCES src/software/software_backend.c)
+endif()
+
+set(RINGPU_ENABLE_PRESENTATION 0)
+if(RINGPU_BUILD_PRESENTATION)
+    set(RINGPU_ENABLE_PRESENTATION 1)
 endif()
 
 if(RINGPU_BUILD_SHARED)
@@ -51,6 +60,8 @@ endif()
 add_library(RinGPU::RinGPU ALIAS RinGPU)
 
 target_compile_features(RinGPU PUBLIC c_std_11)
+target_compile_definitions(RinGPU PUBLIC
+    RINGPU_ENABLE_PRESENTATION=$<BOOL:${RINGPU_BUILD_PRESENTATION}>)
 target_compile_definitions(RinGPU PRIVATE
     RINGPU_BUILD_SOFTWARE_BACKEND=$<BOOL:${RINGPU_BUILD_SOFTWARE_BACKEND}>)
 target_include_directories(RinGPU
