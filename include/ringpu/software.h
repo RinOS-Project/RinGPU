@@ -17,13 +17,18 @@ extern "C" {
 #define RIN_GPU_SOFTWARE_EXTERNAL_IMAGE_VERSION 1u
 
 /* V4 makes the reference backend observable without making execution
- * dependent on host addresses or wall-clock state.  The flags are deliberately
- * opt-in so older callers retain their exact V1--V3 admission contract. */
+ * dependent on host addresses or wall-clock state. The flags are deliberately
+ * opt-in so older callers retain their exact V1--V3 admission contract.
+ * HEADLESS requires all presentation/acquire callbacks and contexts to be
+ * NULL; resource and command execution remain available, while PRESENT has
+ * no target and returns UNSUPPORTED. */
 #define RIN_GPU_SOFTWARE_BACKEND_FLAG_DETERMINISTIC UINT32_C(0x00000001)
 #define RIN_GPU_SOFTWARE_BACKEND_FLAG_COLLECT_STATS UINT32_C(0x00000002)
+#define RIN_GPU_SOFTWARE_BACKEND_FLAG_HEADLESS UINT32_C(0x00000004)
 #define RIN_GPU_SOFTWARE_BACKEND_FLAGS_KNOWN \
     (RIN_GPU_SOFTWARE_BACKEND_FLAG_DETERMINISTIC | \
-     RIN_GPU_SOFTWARE_BACKEND_FLAG_COLLECT_STATS)
+     RIN_GPU_SOFTWARE_BACKEND_FLAG_COLLECT_STATS | \
+     RIN_GPU_SOFTWARE_BACKEND_FLAG_HEADLESS)
 
 #define RIN_GPU_SOFTWARE_FLOAT_POLICY_IEEE754_BINARY32 UINT32_C(1)
 #define RIN_GPU_SOFTWARE_FLOAT_ROUND_TO_NEAREST UINT32_C(1)

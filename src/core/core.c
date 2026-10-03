@@ -178,7 +178,8 @@ int ringpu_core_init(RinGpuCore* core, const RinGpuCoreConfigV1* config) {
         !config->backend.create_graphics_bind_group ||
         !config->backend.destroy_graphics_bind_group ||
         !config->backend.submit_commands ||
-        !config->displays || config->display_count == 0u ||
+        (config->display_count == 0u && config->displays != NULL) ||
+        (config->display_count != 0u && config->displays == NULL) ||
         config->display_count > RIN_GPU_MAX_DISPLAYS ||
         config->reserved0 != 0u ||
         config->backend_family > RIN_GPU_BACKEND_FAMILY_VIRTIO ||
@@ -204,7 +205,8 @@ int ringpu_core_init(RinGpuCore* core, const RinGpuCoreConfigV1* config) {
             }
         }
     }
-    if (primary_count != 1u) return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    if (primary_count != (config->display_count == 0u ? 0u : 1u))
+        return RIN_GPU_ERROR_INVALID_ARGUMENT;
     memset(core, 0, sizeof(*core));
     core->handle_secret = config->handle_secret;
     core->max_buffer_size = config->max_buffer_size;
@@ -215,8 +217,10 @@ int ringpu_core_init(RinGpuCore* core, const RinGpuCoreConfigV1* config) {
     core->max_image_mip_levels = config->max_image_mip_levels;
     core->max_image_sample_count = config->max_image_sample_count;
     core->adapter = config->adapter;
-    memcpy(core->displays, config->displays,
-           (size_t)config->display_count * sizeof(core->displays[0]));
+    if (config->display_count != 0u) {
+        memcpy(core->displays, config->displays,
+               (size_t)config->display_count * sizeof(core->displays[0]));
+    }
     core->display_count = config->display_count;
     core->backend = config->backend;
     core->backend_context = config->backend_context;

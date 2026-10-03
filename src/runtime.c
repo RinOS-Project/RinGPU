@@ -15,9 +15,22 @@ struct RinGpuRuntime {
     uint32_t initialized;
 };
 
+static int runtime_display_is_zero(const RinGpuDisplayInfoV1* display)
+{
+    const unsigned char* bytes = (const unsigned char*)display;
+    size_t index;
+    if (display == NULL) return 0;
+    for (index = 0u; index < sizeof(*display); ++index)
+        if (bytes[index] != 0u) return 0;
+    return 1;
+}
+
 static int runtime_desc_valid(const RinGpuRuntimeDescV1* desc)
 {
-    if (desc == NULL || desc->struct_size != sizeof(*desc) ||
+    int headless;
+    if (desc == NULL) return 0;
+    headless = (desc->flags & RIN_GPU_RUNTIME_FLAG_HEADLESS) != 0u;
+    if (desc->struct_size != sizeof(*desc) ||
         desc->version != RIN_GPU_RUNTIME_VERSION ||
         desc->device_generation == 0u || desc->handle_secret == 0u ||
         desc->max_buffer_size == 0u || desc->max_image_size == 0u ||
@@ -26,26 +39,36 @@ static int runtime_desc_valid(const RinGpuRuntimeDescV1* desc)
         desc->max_image_mip_levels == 0u || desc->max_image_sample_count == 0u ||
         desc->adapter.struct_size != sizeof(desc->adapter) ||
         desc->adapter.abi_version != RIN_GPU_ABI_VERSION ||
-        desc->display.struct_size != sizeof(desc->display) ||
-        desc->display.abi_version != RIN_GPU_ABI_VERSION ||
-        desc->display.width == 0u || desc->display.height == 0u ||
-        desc->flags != 0u || desc->reserved0 != 0u ||
-        desc->reserved[0] != 0u || desc->reserved[1] != 0u ||
-        desc->reserved1 != 0u)
+        (desc->flags & ~RIN_GPU_RUNTIME_FLAGS_KNOWN) != 0u ||
+        desc->reserved0 != 0u || desc->reserved[0] != 0u ||
+        desc->reserved[1] != 0u || desc->reserved1 != 0u)
         return 0;
+    if (headless) {
+        if (!runtime_display_is_zero(&desc->display)) return 0;
+    } else if (desc->display.struct_size != sizeof(desc->display) ||
+               desc->display.abi_version != RIN_GPU_ABI_VERSION ||
+               desc->display.width == 0u || desc->display.height == 0u) {
+        return 0;
+    }
     if (desc->backend_ops == NULL) {
         if (desc->backend_family != RIN_GPU_RUNTIME_BACKEND_FAMILY_UNKNOWN &&
             desc->backend_family != RIN_GPU_RUNTIME_BACKEND_FAMILY_SOFTWARE)
             return 0;
-        if (desc->present_callback == NULL || desc->acquire_image == NULL)
+        if (headless) {
+            if (desc->present_callback != NULL ||
+                desc->present_context != NULL || desc->acquire_image != NULL ||
+                desc->image_context != NULL)
+                return 0;
+        } else if (desc->present_callback == NULL ||
+                   desc->acquire_image == NULL) {
             return 0;
-    } else {
-        if (desc->backend_context == NULL ||
-            desc->backend_family < RIN_GPU_RUNTIME_BACKEND_FAMILY_INTEL ||
-            desc->backend_family > RIN_GPU_RUNTIME_BACKEND_FAMILY_VIRTIO ||
-            desc->present_callback != NULL || desc->present_context != NULL ||
-            desc->acquire_image != NULL || desc->image_context != NULL)
-            return 0;
+        }
+    } else if (desc->backend_context == NULL ||
+               desc->backend_family < RIN_GPU_RUNTIME_BACKEND_FAMILY_INTEL ||
+               desc->backend_family > RIN_GPU_RUNTIME_BACKEND_FAMILY_VIRTIO ||
+               desc->present_callback != NULL || desc->present_context != NULL ||
+               desc->acquire_image != NULL || desc->image_context != NULL) {
+        return 0;
     }
     return 1;
 }
@@ -55,6 +78,7 @@ int ringpu_runtime_create(const RinGpuRuntimeDescV1* desc,
 {
     RinGpuRuntime* runtime;
     RinGpuSoftwareBackendDescV3 software_desc;
+    RinGpuSoftwareBackendDescV4 headless_software_desc;
     RinGpuCoreConfigV1 config;
     const RinGpuBackendOpsV1* backend_ops;
     const RinGpuBackendOpsV1* external_ops;
@@ -69,6 +93,21 @@ int ringpu_runtime_create(const RinGpuRuntimeDescV1* desc,
     external_ops = (const RinGpuBackendOpsV1*)desc->backend_ops;
     if (external_ops != NULL) {
         backend_ops = external_ops;
+    } else if ((desc->flags & RIN_GPU_RUNTIME_FLAG_HEADLESS) != 0u) {
+        memset(&headless_software_desc, 0, sizeof(headless_software_desc));
+        headless_software_desc.base.base.base.struct_size =
+            sizeof(headless_software_desc);
+        headless_software_desc.base.base.base.version =
+            RIN_GPU_SOFTWARE_BACKEND_VERSION_4;
+        headless_software_desc.base.base.base.max_total_bytes =
+            desc->max_total_allocation_size;
+        headless_software_desc.base.base.base.flags =
+            RIN_GPU_SOFTWARE_BACKEND_FLAG_HEADLESS;
+        result = ringpu_software_backend_create(
+            &headless_software_desc.base.base.base,
+            &runtime->software_backend);
+        if (result != RIN_GPU_OK) goto fail;
+        backend_ops = ringpu_software_backend_ops();
     } else {
         memset(&software_desc, 0, sizeof(software_desc));
         software_desc.base.base.struct_size = sizeof(software_desc);
@@ -112,8 +151,12 @@ int ringpu_runtime_create(const RinGpuRuntimeDescV1* desc,
         goto fail;
     }
     config.diagnostics = &runtime->diagnostics;
-    config.displays = &desc->display;
-    config.display_count = 1u;
+    config.displays = (desc->flags & RIN_GPU_RUNTIME_FLAG_HEADLESS) != 0u
+                          ? NULL
+                          : &desc->display;
+    config.display_count = (desc->flags & RIN_GPU_RUNTIME_FLAG_HEADLESS) != 0u
+                               ? 0u
+                               : 1u;
     result = ringpu_core_init(&runtime->core, &config);
     if (result != RIN_GPU_OK) goto fail;
     runtime->initialized = RIN_GPU_RUNTIME_VERSION;

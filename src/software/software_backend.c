@@ -10548,10 +10548,17 @@ static int sw_submit(void* opaque, const RinGpuBackendCommandV1* commands,
 
             if (active_pass.color != NULL)
                 return RIN_GPU_ERROR_STATE;
-            /* Preserve V1's no-op PRESENT behavior for direct executor tests
-             * and embeddings that did not opt into publication. */
-            if (!backend || backend->present_callback == NULL)
+            /* Preserve V1's legacy no-op PRESENT behavior for direct executor
+             * tests and embeddings that did not opt into publication. An
+             * explicitly headless V4 backend, however, has no scanout target. */
+            if (!backend)
                 break;
+            if (backend->present_callback == NULL) {
+                if ((backend->flags &
+                     RIN_GPU_SOFTWARE_BACKEND_FLAG_HEADLESS) != 0u)
+                    return RIN_GPU_ERROR_UNSUPPORTED;
+                break;
+            }
             /* Publishing is a submission boundary. Reject a trailing command
              * before exposing the completed image to an embedder. */
             if (index + 1u != command_count)
@@ -10798,6 +10805,7 @@ int ringpu_software_backend_create(
     RinGpuSoftwareBackend* backend;
     RinGpuSoftwareBackendDescV2 desc_v2;
     RinGpuSoftwareBackendDescV3 desc_v3;
+    int headless_v4 = 0;
 
     if (!desc || !backend_out || desc->max_total_bytes == 0u ||
         desc->reserved0 != 0u ||
@@ -10822,6 +10830,26 @@ int ringpu_software_backend_create(
          FLT_ROUNDS != 1))
         return RIN_GPU_ERROR_UNSUPPORTED;
     *backend_out = NULL;
+    if (desc->version == RIN_GPU_SOFTWARE_BACKEND_VERSION_4) {
+        const RinGpuSoftwareBackendDescV4* desc_v4 =
+            (const RinGpuSoftwareBackendDescV4*)desc;
+        uint32_t flags = desc_v4->base.base.base.flags;
+
+        if ((flags & ~RIN_GPU_SOFTWARE_BACKEND_FLAGS_KNOWN) != 0u)
+            return RIN_GPU_ERROR_INVALID_ARGUMENT;
+        headless_v4 =
+            (flags & RIN_GPU_SOFTWARE_BACKEND_FLAG_HEADLESS) != 0u;
+        if (headless_v4) {
+            if (desc_v4->base.base.present_callback != NULL ||
+                desc_v4->base.base.present_context != NULL ||
+                desc_v4->base.acquire_image != NULL ||
+                desc_v4->base.image_context != NULL)
+                return RIN_GPU_ERROR_INVALID_ARGUMENT;
+        } else if (desc_v4->base.base.present_callback == NULL ||
+                   desc_v4->base.acquire_image == NULL) {
+            return RIN_GPU_ERROR_INVALID_ARGUMENT;
+        }
+    }
     backend = calloc(1u, sizeof(*backend));
     if (!backend)
         return RIN_GPU_ERROR_NO_MEMORY;
@@ -10839,7 +10867,7 @@ int ringpu_software_backend_create(
         desc->version == RIN_GPU_SOFTWARE_BACKEND_VERSION_3 ||
         desc->version == RIN_GPU_SOFTWARE_BACKEND_VERSION_4) {
         memcpy(&desc_v2, desc, sizeof(desc_v2));
-        if (!desc_v2.present_callback) {
+        if (!desc_v2.present_callback && !headless_v4) {
             free(backend);
             return RIN_GPU_ERROR_INVALID_ARGUMENT;
         }
@@ -10849,7 +10877,7 @@ int ringpu_software_backend_create(
     if (desc->version == RIN_GPU_SOFTWARE_BACKEND_VERSION_3 ||
         desc->version == RIN_GPU_SOFTWARE_BACKEND_VERSION_4) {
         memcpy(&desc_v3, desc, sizeof(desc_v3));
-        if (!desc_v3.acquire_image) {
+        if (!desc_v3.acquire_image && !headless_v4) {
             free(backend);
             return RIN_GPU_ERROR_INVALID_ARGUMENT;
         }
@@ -10860,9 +10888,7 @@ int ringpu_software_backend_create(
         RinGpuSoftwareBackendDescV4 desc_v4;
 
         memcpy(&desc_v4, desc, sizeof(desc_v4));
-        if ((desc_v4.base.base.base.flags &
-             ~RIN_GPU_SOFTWARE_BACKEND_FLAGS_KNOWN) != 0u ||
-            desc_v4.reserved[0] != 0u || desc_v4.reserved[1] != 0u)
+        if (desc_v4.reserved[0] != 0u || desc_v4.reserved[1] != 0u)
             goto fail_v4;
         backend->deterministic_seed = desc_v4.deterministic_seed;
     }

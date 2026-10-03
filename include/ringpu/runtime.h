@@ -12,6 +12,8 @@ extern "C" {
 #endif
 
 #define RIN_GPU_RUNTIME_VERSION 1u
+#define RIN_GPU_RUNTIME_FLAG_HEADLESS UINT32_C(0x00000001)
+#define RIN_GPU_RUNTIME_FLAGS_KNOWN RIN_GPU_RUNTIME_FLAG_HEADLESS
 
 typedef struct RinGpuRuntime RinGpuRuntime;
 
@@ -25,13 +27,15 @@ typedef struct RinGpuRuntime RinGpuRuntime;
 #define RIN_GPU_RUNTIME_BACKEND_FAMILY_NVIDIA 4u
 #define RIN_GPU_RUNTIME_BACKEND_FAMILY_VIRTIO 5u
 
-/* Public runtime construction descriptor.  The common limits, adapter, and
- * display fields describe the admitted backend.  When backend_ops is NULL,
- * the descriptor explicitly requests the reference software backend and the
- * present/acquire callbacks are required.  When backend_ops is non-NULL, it
- * is an opaque pointer supplied by the OS-core physical backend owner.  The
- * runtime copies and validates that operation table and never substitutes a
- * software backend for it. */
+/* Public runtime construction descriptor. The common limits and adapter
+ * fields describe the admitted backend. By default, one connected primary
+ * display is required. HEADLESS admits a zero display record and no
+ * presentation callbacks; resource/command execution remains available, but
+ * command presentation has no target. When backend_ops is NULL, the
+ * descriptor requests the reference software backend. When backend_ops is
+ * non-NULL, it is an opaque pointer supplied by the OS-core physical backend
+ * owner. The runtime copies and validates that operation table and never
+ * substitutes a software backend for it. */
 typedef struct RinGpuRuntimeDescV1 {
     uint32_t struct_size;
     uint32_t version;

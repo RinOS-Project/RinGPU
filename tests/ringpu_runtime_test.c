@@ -35,14 +35,32 @@ int main(void)
     RinGpuPresentV1 present_desc = {0};
     RinGpuSubmitInfoV1 submit = {0};
     RinGpuAdapterCapabilitiesV1 capabilities = {0};
+    RinGpuRuntimeDescV1 headless_desc = {0};
+    RinGpuBufferDescV1 buffer_desc = {0};
+    RinGpuMemoryDescV1 memory_desc = {0};
+    RinGpuResourceMemoryBindingV1 memory_binding = {0};
+    RinGpuQueueDescV1 headless_queue_desc = {0};
+    RinGpuCommandListDescV1 headless_command_desc = {0};
+    RinGpuSubmitInfoV1 headless_submit = {0};
+    RinGpuPresentV1 headless_present = {0};
     RinGpuHandle queue = 0u;
     RinGpuHandle fence = 0u;
     RinGpuHandle command_list = 0u;
     RinGpuHandle present_queue = 0u;
     RinGpuHandle present_list = 0u;
     RinGpuHandle image = 0u;
+    RinGpuHandle headless_source = 0u;
+    RinGpuHandle headless_destination = 0u;
+    RinGpuHandle headless_source_memory = 0u;
+    RinGpuHandle headless_destination_memory = 0u;
+    RinGpuHandle headless_queue = 0u;
+    RinGpuHandle headless_command_list = 0u;
+    RinGpuHandle headless_fence = 0u;
     uint64_t generation = 0u;
     uint32_t present_count = 0u;
+    uint8_t upload_bytes[8] = {0x52u, 0x69u, 0x6eu, 0x47u,
+                               0x50u, 0x55u, 0x01u, 0xa5u};
+    uint8_t readback_bytes[sizeof(upload_bytes)] = {0u};
 
     desc.struct_size = sizeof(desc);
     desc.version = RIN_GPU_RUNTIME_VERSION;
@@ -190,6 +208,98 @@ int main(void)
     ringpu_runtime_mark_device_lost(runtime);
     if (!ringpu_runtime_device_lost(runtime))
         return 7;
+    ringpu_runtime_destroy(runtime);
+
+    headless_desc = desc;
+    headless_desc.flags = RIN_GPU_RUNTIME_FLAG_HEADLESS;
+    memset(&headless_desc.display, 0, sizeof(headless_desc.display));
+    headless_desc.adapter.queue_capabilities = RIN_GPU_QUEUE_GRAPHICS |
+                                               RIN_GPU_QUEUE_COPY;
+    headless_desc.present_callback = NULL;
+    headless_desc.present_context = NULL;
+    headless_desc.acquire_image = NULL;
+    headless_desc.image_context = NULL;
+    if (ringpu_runtime_create(&headless_desc, &runtime) != RIN_GPU_OK)
+        return 16;
+    buffer_desc.abi_version = RIN_GPU_ABI_VERSION;
+    buffer_desc.struct_size = sizeof(buffer_desc);
+    buffer_desc.size_bytes = sizeof(upload_bytes);
+    buffer_desc.usage = RIN_GPU_BUFFER_COPY_SOURCE |
+                        RIN_GPU_BUFFER_COPY_DESTINATION;
+    buffer_desc.flags = RIN_GPU_BUFFER_CPU_VISIBLE;
+    memory_desc.abi_version = RIN_GPU_ABI_VERSION;
+    memory_desc.struct_size = sizeof(memory_desc);
+    memory_desc.size_bytes = UINT64_C(256);
+    memory_desc.alignment = UINT64_C(256);
+    if (ringpu_runtime_create_memory(runtime, &memory_desc,
+                                     &headless_source_memory) != RIN_GPU_OK ||
+        ringpu_runtime_create_buffer(runtime, &buffer_desc,
+                                     &headless_source) != RIN_GPU_OK)
+        return 17;
+    memory_binding.abi_version = RIN_GPU_ABI_VERSION;
+    memory_binding.struct_size = sizeof(memory_binding);
+    memory_binding.memory = headless_source_memory;
+    memory_binding.size_bytes = UINT64_C(256);
+    if (ringpu_runtime_bind_buffer_memory(runtime, headless_source,
+                                          &memory_binding) != RIN_GPU_OK)
+        return 19;
+    buffer_desc.usage = RIN_GPU_BUFFER_COPY_DESTINATION;
+    if (ringpu_runtime_create_memory(runtime, &memory_desc,
+                                     &headless_destination_memory) !=
+            RIN_GPU_OK ||
+        ringpu_runtime_create_buffer(runtime, &buffer_desc,
+                                     &headless_destination) != RIN_GPU_OK)
+        return 20;
+    memory_binding.memory = headless_destination_memory;
+    if (ringpu_runtime_bind_buffer_memory(runtime, headless_destination,
+                                          &memory_binding) != RIN_GPU_OK ||
+        ringpu_runtime_upload_buffer(runtime, headless_source, 0u,
+                                     upload_bytes, sizeof(upload_bytes)) !=
+            RIN_GPU_OK ||
+        ringpu_runtime_upload_buffer(runtime, headless_destination, 0u,
+                                     readback_bytes,
+                                     sizeof(readback_bytes)) != RIN_GPU_OK)
+        return 21;
+    headless_queue_desc.abi_version = RIN_GPU_ABI_VERSION;
+    headless_queue_desc.struct_size = sizeof(headless_queue_desc);
+    headless_queue_desc.capabilities = RIN_GPU_QUEUE_COPY;
+    headless_command_desc.abi_version = RIN_GPU_ABI_VERSION;
+    headless_command_desc.struct_size = sizeof(headless_command_desc);
+    headless_command_desc.capabilities = RIN_GPU_QUEUE_COPY;
+    if (ringpu_runtime_create_queue(runtime, &headless_queue_desc,
+                                    &headless_queue) != RIN_GPU_OK ||
+        ringpu_runtime_create_command_list(runtime, &headless_command_desc,
+                                           &headless_command_list) !=
+            RIN_GPU_OK ||
+        ringpu_runtime_create_fence(runtime, 0u, &headless_fence) !=
+            RIN_GPU_OK ||
+        ringpu_runtime_command_copy_buffer(
+            runtime, headless_command_list, headless_destination, 0u,
+            headless_source, 0u, sizeof(upload_bytes)) != RIN_GPU_OK ||
+        ringpu_runtime_command_list_close(runtime,
+                                          headless_command_list) !=
+            RIN_GPU_OK)
+        return 22;
+    headless_submit.abi_version = RIN_GPU_ABI_VERSION;
+    headless_submit.struct_size = sizeof(headless_submit);
+    headless_submit.command_list = headless_command_list;
+    headless_submit.signal_fence = headless_fence;
+    headless_submit.signal_value = 1u;
+    if (ringpu_runtime_queue_submit(runtime, headless_queue,
+                                    &headless_submit) != RIN_GPU_OK ||
+        ringpu_runtime_wait_fence(runtime, headless_fence, 1u, 0u) !=
+            RIN_GPU_OK ||
+        ringpu_runtime_readback_buffer(runtime, headless_destination, 0u,
+                                       readback_bytes,
+                                       sizeof(readback_bytes)) != RIN_GPU_OK ||
+        memcmp(upload_bytes, readback_bytes, sizeof(upload_bytes)) != 0)
+        return 23;
+    headless_present.abi_version = RIN_GPU_ABI_VERSION;
+    headless_present.struct_size = sizeof(headless_present);
+    headless_present.display_id = RIN_GPU_PRIMARY_DISPLAY;
+    if (ringpu_runtime_command_present(runtime, 0u, &headless_present) !=
+        RIN_GPU_ERROR_UNSUPPORTED)
+        return 18;
     ringpu_runtime_destroy(runtime);
     return 0;
 }
