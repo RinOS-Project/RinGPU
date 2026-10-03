@@ -15,6 +15,9 @@ static uint32_t external_fail_next_create_image;
 static uint32_t external_create_sampler_calls;
 static uint32_t external_destroy_sampler_calls;
 static uint32_t external_fail_next_create_sampler;
+static uint32_t external_create_memory_calls;
+static uint32_t external_destroy_memory_calls;
+static uint32_t external_fail_next_create_memory;
 
 static int external_create_buffer(
     void* context, const RinGpuBufferDescV1* desc, uint64_t* cookie_out)
@@ -74,6 +77,27 @@ static void external_destroy_sampler(void* context, uint64_t cookie)
     external_backend_delegate->destroy_sampler(context, cookie);
 }
 
+static int external_create_memory(
+    void* context, const RinGpuMemoryDescV1* desc, void** allocation_out)
+{
+    ++external_create_memory_calls;
+    if (external_fail_next_create_memory != 0u) {
+        --external_fail_next_create_memory;
+        if (allocation_out != NULL) *allocation_out = NULL;
+        return RIN_GPU_ERROR_BACKEND;
+    }
+    return external_backend_delegate->create_memory(context, desc,
+                                                     allocation_out);
+}
+
+static void external_destroy_memory(void* context, void* allocation,
+                                    uint64_t size_bytes)
+{
+    ++external_destroy_memory_calls;
+    external_backend_delegate->destroy_memory(context, allocation,
+                                               size_bytes);
+}
+
 static int present(void* context, const RinGpuSoftwarePresentedImageV1* image)
 {
     if (image == NULL || image->pixels == NULL || context == NULL)
@@ -111,6 +135,7 @@ int main(void)
     RinGpuRuntimeDescV1 headless_desc = {0};
     RinGpuRuntimeDescV1 external_desc = {0};
     RinGpuBufferDescV1 buffer_desc = {0};
+    RinGpuMemoryDescV1 external_memory_desc = {0};
     RinGpuSoftwareBackendDescV4 external_backend_desc = {0};
     RinGpuSoftwareBackend* external_backend = NULL;
     RinGpuBackendOpsV1 external_ops;
@@ -143,6 +168,8 @@ int main(void)
     RinGpuHandle failed_external_image = UINT64_C(1);
     RinGpuHandle external_sampler = 0u;
     RinGpuHandle failed_external_sampler = UINT64_C(1);
+    RinGpuHandle external_memory = 0u;
+    RinGpuHandle failed_external_memory = UINT64_C(1);
     uint64_t generation = 0u;
     uint32_t present_count = 0u;
     uint8_t upload_bytes[8] = {0x52u, 0x69u, 0x6eu, 0x47u,
@@ -409,6 +436,8 @@ int main(void)
     external_ops.destroy_image = external_destroy_image;
     external_ops.create_sampler = external_create_sampler;
     external_ops.destroy_sampler = external_destroy_sampler;
+    external_ops.create_memory = external_create_memory;
+    external_ops.destroy_memory = external_destroy_memory;
     external_desc = headless_desc;
     external_desc.backend_ops = &external_ops;
     external_desc.backend_context = external_backend;
@@ -469,6 +498,21 @@ int main(void)
         external_sampler == 0u || external_create_sampler_calls != 2u)
         return 35;
 
+    external_memory_desc.abi_version = RIN_GPU_ABI_VERSION;
+    external_memory_desc.struct_size = sizeof(external_memory_desc);
+    external_memory_desc.size_bytes = 256u;
+    external_memory_desc.alignment = 256u;
+    external_fail_next_create_memory = 1u;
+    if (ringpu_runtime_create_memory(external_runtime, &external_memory_desc,
+                                    &failed_external_memory) !=
+            RIN_GPU_ERROR_BACKEND ||
+        failed_external_memory != 0u || external_create_memory_calls != 1u)
+        return 36;
+    if (ringpu_runtime_create_memory(external_runtime, &external_memory_desc,
+                                    &external_memory) != RIN_GPU_OK ||
+        external_memory == 0u || external_create_memory_calls != 2u)
+        return 37;
+
     missing_ops = external_ops;
     missing_ops.create_buffer = NULL;
     external_desc.backend_ops = &missing_ops;
@@ -480,7 +524,8 @@ int main(void)
     ringpu_runtime_destroy(external_runtime);
     if (external_destroy_buffer_calls != 2u ||
         external_destroy_image_calls != 1u ||
-        external_destroy_sampler_calls != 1u) {
+        external_destroy_sampler_calls != 1u ||
+        external_destroy_memory_calls != 1u) {
         ringpu_software_backend_destroy(external_backend);
         return 32;
     }
