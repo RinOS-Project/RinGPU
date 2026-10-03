@@ -18,6 +18,8 @@ static uint32_t external_fail_next_create_sampler;
 static uint32_t external_create_memory_calls;
 static uint32_t external_destroy_memory_calls;
 static uint32_t external_fail_next_create_memory;
+static uint32_t external_bind_buffer_memory_calls;
+static uint32_t external_fail_next_bind_buffer_memory;
 
 static int external_create_buffer(
     void* context, const RinGpuBufferDescV1* desc, uint64_t* cookie_out)
@@ -98,6 +100,22 @@ static void external_destroy_memory(void* context, void* allocation,
                                                size_bytes);
 }
 
+static int external_bind_buffer_memory(
+    void* context, uint64_t buffer_cookie, const RinGpuBufferDescV1* desc,
+    void* allocation, uint64_t allocation_size, uint64_t offset_bytes,
+    uint64_t* bound_cookie_out)
+{
+    ++external_bind_buffer_memory_calls;
+    if (external_fail_next_bind_buffer_memory != 0u) {
+        --external_fail_next_bind_buffer_memory;
+        if (bound_cookie_out != NULL) *bound_cookie_out = 0u;
+        return RIN_GPU_ERROR_BACKEND;
+    }
+    return external_backend_delegate->bind_buffer_memory(
+        context, buffer_cookie, desc, allocation, allocation_size,
+        offset_bytes, bound_cookie_out);
+}
+
 static int present(void* context, const RinGpuSoftwarePresentedImageV1* image)
 {
     if (image == NULL || image->pixels == NULL || context == NULL)
@@ -136,6 +154,7 @@ int main(void)
     RinGpuRuntimeDescV1 external_desc = {0};
     RinGpuBufferDescV1 buffer_desc = {0};
     RinGpuMemoryDescV1 external_memory_desc = {0};
+    RinGpuResourceMemoryBindingV1 external_buffer_binding = {0};
     RinGpuSoftwareBackendDescV4 external_backend_desc = {0};
     RinGpuSoftwareBackend* external_backend = NULL;
     RinGpuBackendOpsV1 external_ops;
@@ -438,6 +457,7 @@ int main(void)
     external_ops.destroy_sampler = external_destroy_sampler;
     external_ops.create_memory = external_create_memory;
     external_ops.destroy_memory = external_destroy_memory;
+    external_ops.bind_buffer_memory = external_bind_buffer_memory;
     external_desc = headless_desc;
     external_desc.backend_ops = &external_ops;
     external_desc.backend_context = external_backend;
@@ -512,6 +532,23 @@ int main(void)
                                     &external_memory) != RIN_GPU_OK ||
         external_memory == 0u || external_create_memory_calls != 2u)
         return 37;
+    external_buffer_binding.abi_version = RIN_GPU_ABI_VERSION;
+    external_buffer_binding.struct_size = sizeof(external_buffer_binding);
+    external_buffer_binding.memory = external_memory;
+    external_buffer_binding.size_bytes = external_memory_desc.size_bytes;
+    external_fail_next_bind_buffer_memory = 1u;
+    if (ringpu_runtime_bind_buffer_memory(external_runtime, external_buffer,
+                                         &external_buffer_binding) !=
+            RIN_GPU_ERROR_BACKEND ||
+        external_bind_buffer_memory_calls != 1u ||
+        external_destroy_buffer_calls != 0u)
+        return 39;
+    if (ringpu_runtime_bind_buffer_memory(external_runtime, external_buffer,
+                                         &external_buffer_binding) !=
+            RIN_GPU_OK ||
+        external_bind_buffer_memory_calls != 2u ||
+        external_destroy_buffer_calls != 1u)
+        return 40;
 
     missing_ops = external_ops;
     missing_ops.create_buffer = NULL;
@@ -522,7 +559,7 @@ int main(void)
         return 31;
 
     ringpu_runtime_destroy(external_runtime);
-    if (external_destroy_buffer_calls != 2u ||
+    if (external_destroy_buffer_calls != 3u ||
         external_destroy_image_calls != 1u ||
         external_destroy_sampler_calls != 1u ||
         external_destroy_memory_calls != 1u) {
