@@ -33,7 +33,6 @@ ringpu_sources = files(
   'src/shader/modules.c',
   'src/shader/spirv_frontend.c',
   'src/capability/cross_process_capability.c',
-  'src/capability/cross_process_capability_ipc.c',
 )
 
 ringpu = library('RinGPU', ringpu_sources, include_directories: inc,
@@ -42,6 +41,15 @@ ringpu = library('RinGPU', ringpu_sources, include_directories: inc,
 ringpu_dep = declare_dependency(link_with: ringpu,
                                 include_directories: include_directories('include'))
 install_subdir('include/ringpu', install_dir: get_option('includedir'))
+
+if get_option('build_rinos_ipc_adapter')
+  ringpu_ipc = static_library('RinGPUIpc',
+                              'src/capability/cross_process_capability_ipc.c',
+                              include_directories: inc,
+                              install: true)
+  ringpu_ipc_dep = declare_dependency(link_with: [ringpu_ipc, ringpu],
+                                      include_directories: inc)
+endif
 
 if get_option('buildtype') != 'plain'
   test('ringpu-abi', executable('ringpu-abi-test', 'tests/ringpu_abi_test.c',
@@ -56,9 +64,12 @@ if get_option('buildtype') != 'plain'
   test('ringpu-result-mapping',
        executable('ringpu-result-mapping-test',
                   'tests/ringpu_result_mapping_test.c', dependencies: ringpu_dep))
-  test('ringpu-cross-process-ipc', executable('ringpu-cross-process-ipc-test',
-                                              'tests/ringpu_cross_process_ipc_test.c',
-                                              dependencies: ringpu_dep))
+  if get_option('build_rinos_ipc_adapter')
+    test('ringpu-cross-process-ipc',
+         executable('ringpu-cross-process-ipc-test',
+                    'tests/ringpu_cross_process_ipc_test.c',
+                    dependencies: ringpu_ipc_dep))
+  endif
   if get_option('build_differential_tests')
     test('ringpu-differential', executable('ringpu-differential-test',
                                           'tests/differential/differential_test.c',

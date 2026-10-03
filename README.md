@@ -26,6 +26,14 @@ headers from RinOS-SDK; install or expose RinOS-SDK alongside RinGPU. `src/`
 contains the portable implementation and backend-internal records; it is
 intentionally not an OS-Core include path.
 
+The core `RinGPU` shared library has no direct RinOS channel/service imports.
+Cross-process IPC helpers are built as the separate `RinGPUIpc` companion
+(`RinGPU::RinGPUIpc` in CMake, or `ringpu_ipc_dep` in Meson). Applications that
+use those helpers link the companion and their normal RinOS-SDK implementation;
+applications using only the GPU runtime link `RinGPU` without that OS service
+dependency. Set `RINGPU_BUILD_RINOS_IPC_ADAPTER=OFF` in CMake or
+`-Dbuild_rinos_ipc_adapter=false` in Meson to omit the companion explicitly.
+
 The public version is `RINGPU_API_VERSION == 1`.  ABI records use an explicit
 `struct_size`, version, and reserved fields; handles are opaque integers and
 are never process pointers or physical addresses.

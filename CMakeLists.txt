@@ -5,9 +5,12 @@ option(RINGPU_BUILD_SHARED "Build RinGPU as a shared library" OFF)
 option(RINGPU_BUILD_TESTS "Build RinGPU host tests" ON)
 option(RINGPU_BUILD_DIFFERENTIAL_TESTS "Build RinGPU differential support tests" OFF)
 option(RINGPU_BUILD_BENCHMARKS "Build optional RinGPU host benchmarks" OFF)
+option(RINGPU_BUILD_RINOS_IPC_ADAPTER
+       "Build the optional RinOS SDK cross-process IPC adapter" ON)
 option(RINGPU_BUILD_PRESENTATION "Build the RinGPU presentation runtime" ON)
 option(RINGPU_BUILD_SOFTWARE_BACKEND
        "Build the generic CPU software backend in the RinGPU archive" ON)
+include(GNUInstallDirs)
 
 set(RINGPU_SOURCES
     src/command/commands.c
@@ -36,8 +39,7 @@ set(RINGPU_SOURCES
     src/query/queries.c
     src/shader/modules.c
     src/shader/spirv_frontend.c
-    src/capability/cross_process_capability.c
-    src/capability/cross_process_capability_ipc.c)
+    src/capability/cross_process_capability.c)
 
 if(RINGPU_BUILD_PRESENTATION)
     list(APPEND RINGPU_SOURCES src/presentation/presentation.c)
@@ -58,6 +60,30 @@ else()
     add_library(RinGPU STATIC ${RINGPU_SOURCES})
 endif()
 add_library(RinGPU::RinGPU ALIAS RinGPU)
+
+if(WIN32 AND RINGPU_BUILD_SHARED)
+    set_target_properties(RinGPU PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
+endif()
+
+if(RINGPU_BUILD_RINOS_IPC_ADAPTER)
+    add_library(RinGPUIpc STATIC
+        src/capability/cross_process_capability_ipc.c)
+    add_library(RinGPU::RinGPUIpc ALIAS RinGPUIpc)
+    target_compile_features(RinGPUIpc PUBLIC c_std_11)
+    target_include_directories(RinGPUIpc
+        PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+               $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../RinOS-SDK/include>
+               $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
+    target_link_libraries(RinGPUIpc PUBLIC RinGPU::RinGPU)
+    set_target_properties(RinGPUIpc PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    if(MSVC)
+        target_compile_options(RinGPUIpc PRIVATE /W4)
+    else()
+        target_compile_options(RinGPUIpc PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+    install(TARGETS RinGPUIpc EXPORT RinGPUTargets
+            ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
+endif()
 
 target_compile_features(RinGPU PUBLIC c_std_11)
 target_compile_definitions(RinGPU PUBLIC
@@ -81,7 +107,6 @@ else()
     target_compile_options(RinGPU PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
-include(GNUInstallDirs)
 install(TARGETS RinGPU EXPORT RinGPUTargets
         ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
         LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
@@ -111,8 +136,14 @@ if(RINGPU_BUILD_TESTS)
                     tests/ringpu_shader_resource_test.c)
     ringpu_add_test(ringpu-result-mapping-test ringpu-result-mapping
                     tests/ringpu_result_mapping_test.c)
-    ringpu_add_test(ringpu-cross-process-ipc-test ringpu-cross-process-ipc
-                    tests/ringpu_cross_process_ipc_test.c)
+    if(RINGPU_BUILD_RINOS_IPC_ADAPTER)
+        add_executable(ringpu-cross-process-ipc-test
+                       tests/ringpu_cross_process_ipc_test.c)
+        target_link_libraries(ringpu-cross-process-ipc-test
+                              PRIVATE RinGPU::RinGPUIpc)
+        add_test(NAME ringpu-cross-process-ipc
+                 COMMAND ringpu-cross-process-ipc-test)
+    endif()
 
     if(RINGPU_BUILD_SOFTWARE_BACKEND)
         ringpu_add_test(ringpu-runtime-test ringpu-runtime

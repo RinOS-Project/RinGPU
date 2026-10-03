@@ -2,3 +2,7 @@ option('build_differential_tests',
        type: 'boolean',
        value: false,
        description: 'Build differential comparison support tests')
+option('build_rinos_ipc_adapter',
+       type: 'boolean',
+       value: true,
+       description: 'Build the separate RinOS SDK IPC adapter library')
