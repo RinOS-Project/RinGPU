@@ -93,7 +93,7 @@ typedef struct RinGpuDifferentialBackendStatsV1 {
     uint64_t reserved[2];
 } RinGpuDifferentialBackendStatsV1;
 
-#define RIN_GPU_DIFFERENTIAL_WORKLOAD_VERSION 1u
+#define RIN_GPU_DIFFERENTIAL_WORKLOAD_VERSION 2u
 #define RIN_GPU_DIFFERENTIAL_WORKLOAD_ID_MAX 64u
 #define RIN_GPU_DIFFERENTIAL_COMMAND_STREAM_MAX 8192u
 
@@ -105,7 +105,8 @@ typedef struct RinGpuDifferentialBackendStatsV1 {
 #define RIN_GPU_DIFFERENTIAL_SNAPSHOT_FIELD_RESOURCE_STATE UINT32_C(1u << 5)
 #define RIN_GPU_DIFFERENTIAL_SNAPSHOT_FIELD_CAPABILITY UINT32_C(1u << 6)
 #define RIN_GPU_DIFFERENTIAL_SNAPSHOT_FIELD_FAULT UINT32_C(1u << 7)
-#define RIN_GPU_DIFFERENTIAL_SNAPSHOT_FIELDS_KNOWN UINT32_C(0xff)
+#define RIN_GPU_DIFFERENTIAL_SNAPSHOT_FIELD_READBACK UINT32_C(1u << 8)
+#define RIN_GPU_DIFFERENTIAL_SNAPSHOT_FIELDS_KNOWN UINT32_C(0x1ff)
 
 typedef struct RinGpuDifferentialWorkloadV1 {
     uint32_t struct_size;
@@ -134,6 +135,8 @@ typedef struct RinGpuDifferentialSnapshotV1 {
     uint64_t stencil_bytes;
     const uint8_t* shader_result;
     uint64_t shader_result_bytes;
+    const uint8_t* readback;
+    uint64_t readback_bytes;
     const uint64_t* fence_order;
     uint64_t fence_values;
     const uint64_t* resource_state;

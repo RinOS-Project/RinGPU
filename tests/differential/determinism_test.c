@@ -7,6 +7,11 @@
 #include <stdint.h>
 #include <string.h>
 
+typedef struct SoftwareRuntimeAdapterContext {
+    RinGpuRuntime* runtime;
+    uint8_t readback[16u];
+} SoftwareRuntimeAdapterContext;
+
 static int present(void* context,
                    const RinGpuSoftwarePresentedImageV1* image)
 {
@@ -64,7 +69,9 @@ static int make_runtime(RinGpuRuntime** runtime_out)
     return ringpu_runtime_software_surface_create(&descriptor, runtime_out);
 }
 
-static int run_workload(RinGpuRuntime* runtime, uint8_t output[16u])
+static int run_workload(RinGpuRuntime* runtime,
+                        const RinGpuDifferentialWorkloadV1* workload,
+                        uint8_t output[16u])
 {
     RinGpuQueueDescV1 queue_descriptor;
     RinGpuCommandListDescV1 command_descriptor;
@@ -77,6 +84,11 @@ static int run_workload(RinGpuRuntime* runtime, uint8_t output[16u])
     RinGpuHandle buffer = 0u;
     static const uint8_t initial[16u] = {0u};
     int result;
+
+    if (runtime == NULL || workload == NULL || output == NULL ||
+        workload->command_stream == NULL ||
+        workload->command_stream_bytes != sizeof(clear.pattern))
+        return RIN_GPU_ERROR_INVALID_ARGUMENT;
 
     memset(&queue_descriptor, 0, sizeof(queue_descriptor));
     queue_descriptor.abi_version = RIN_GPU_ABI_VERSION;
@@ -112,7 +124,7 @@ static int run_workload(RinGpuRuntime* runtime, uint8_t output[16u])
     clear.abi_version = RIN_GPU_ABI_VERSION;
     clear.struct_size = sizeof(clear);
     clear.size_bytes = 16u;
-    clear.pattern = UINT32_C(0xa55a3cc3);
+    memcpy(&clear.pattern, workload->command_stream, sizeof(clear.pattern));
     result = ringpu_runtime_command_clear_buffer(runtime, command_list, buffer,
                                                  &clear);
     if (result != RIN_GPU_OK) return result;
@@ -133,48 +145,109 @@ static int run_workload(RinGpuRuntime* runtime, uint8_t output[16u])
     return ringpu_runtime_readback_buffer(runtime, buffer, 0u, output, 16u);
 }
 
+static int run_software_runtime_adapter(
+    void* context, const RinGpuDifferentialWorkloadV1* workload,
+    RinGpuDifferentialSnapshotV1* snapshot_out)
+{
+    SoftwareRuntimeAdapterContext* adapter_context =
+        (SoftwareRuntimeAdapterContext*)context;
+    int result;
+
+    if (adapter_context == NULL || workload == NULL || snapshot_out == NULL)
+        return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    result = run_workload(adapter_context->runtime, workload,
+                          adapter_context->readback);
+    if (result != RIN_GPU_OK) return result;
+
+    memset(snapshot_out, 0, sizeof(*snapshot_out));
+    snapshot_out->struct_size = sizeof(*snapshot_out);
+    snapshot_out->version = RIN_GPU_DIFFERENTIAL_WORKLOAD_VERSION;
+    snapshot_out->valid_fields = workload->expected_fields;
+    snapshot_out->backend.struct_size = sizeof(snapshot_out->backend);
+    snapshot_out->backend.version = RIN_GPU_DIFFERENTIAL_BACKEND_STATS_VERSION;
+    snapshot_out->backend.valid_fields =
+        RIN_GPU_DIFFERENTIAL_BACKEND_FIELD_DETERMINISTIC_SEED;
+    snapshot_out->backend.deterministic_seed = workload->deterministic_seed;
+    snapshot_out->readback = adapter_context->readback;
+    snapshot_out->readback_bytes = sizeof(adapter_context->readback);
+    return RIN_GPU_OK;
+}
+
 int main(void)
 {
     RinGpuRuntime* first = NULL;
     RinGpuRuntime* second = NULL;
+    SoftwareRuntimeAdapterContext first_context;
+    SoftwareRuntimeAdapterContext second_context;
+    RinGpuDifferentialBackendAdapterV1 first_adapter;
+    RinGpuDifferentialBackendAdapterV1 second_adapter;
+    RinGpuDifferentialWorkloadV1 workload;
+    RinGpuDifferentialPolicyV1 policy;
     RinGpuDifferentialReportV1 report;
-    uint8_t first_output[16u];
-    uint8_t second_output[16u];
+    const uint32_t clear_pattern = UINT32_C(0xa55a3cc3);
+    uint8_t expected_pattern_bytes[sizeof(clear_pattern)];
+    uint8_t expected_output[16u];
+    uint32_t index;
     int result;
 
-    memset(first_output, 0, sizeof(first_output));
-    memset(second_output, 0, sizeof(second_output));
+    memset(&workload, 0, sizeof(workload));
+    workload.struct_size = sizeof(workload);
+    workload.version = RIN_GPU_DIFFERENTIAL_WORKLOAD_VERSION;
+    memcpy(workload.id, "software-clear", sizeof("software-clear"));
+    workload.command_stream = (const uint8_t*)&clear_pattern;
+    workload.command_stream_bytes = sizeof(clear_pattern);
+    workload.expected_fields =
+        RIN_GPU_DIFFERENTIAL_SNAPSHOT_FIELD_READBACK;
+    workload.deterministic_seed = UINT64_C(0x4459464630303031);
+    memcpy(expected_pattern_bytes, &clear_pattern, sizeof(clear_pattern));
+    for (index = 0u; index < sizeof(expected_output); ++index)
+        expected_output[index] = expected_pattern_bytes[
+            index % sizeof(expected_pattern_bytes)];
+
+    if (rin_gpu_differential_policy_init(&policy, 0u, 0.0f, 0.0f,
+                                         0.0f) != 0) {
+        fprintf(stderr, "differential policy init failed\n");
+        return 1;
+    }
+    if (rin_gpu_differential_report_init(&report) !=
+        RIN_GPU_DIFFERENTIAL_MATCH) {
+        fprintf(stderr, "report init failed\n");
+        return 2;
+    }
     result = make_runtime(&first);
     if (result != RIN_GPU_OK) {
         fprintf(stderr, "first runtime failed: %d\n", result);
-        return 1;
+        return 3;
     }
     result = make_runtime(&second);
     if (result != RIN_GPU_OK) {
         fprintf(stderr, "second runtime failed: %d\n", result);
         ringpu_runtime_destroy(first);
-        return 2;
-    }
-    result = run_workload(first, first_output);
-    if (result != RIN_GPU_OK)
-        fprintf(stderr, "first workload failed: %d\n", result);
-    if (result == RIN_GPU_OK)
-        result = run_workload(second, second_output);
-    if (result != RIN_GPU_OK)
-        fprintf(stderr, "second workload failed: %d\n", result);
-    ringpu_runtime_destroy(first);
-    ringpu_runtime_destroy(second);
-    if (result != RIN_GPU_OK) return 3;
-    if (rin_gpu_differential_report_init(&report) !=
-        RIN_GPU_DIFFERENTIAL_MATCH) {
-        fprintf(stderr, "report init failed\n");
         return 4;
     }
-    if (rin_gpu_differential_compare_bytes(
-            RIN_GPU_DIFFERENTIAL_READBACK, first_output, second_output,
-            sizeof(first_output), 0u, &report) != RIN_GPU_DIFFERENTIAL_MATCH)
-    {
-        fprintf(stderr, "readback mismatch: flags=%u values=%llu/%llu\n",
+    memset(&first_context, 0, sizeof(first_context));
+    memset(&second_context, 0, sizeof(second_context));
+    first_context.runtime = first;
+    second_context.runtime = second;
+    memset(&first_adapter, 0, sizeof(first_adapter));
+    first_adapter.struct_size = sizeof(first_adapter);
+    first_adapter.version = RIN_GPU_DIFFERENTIAL_WORKLOAD_VERSION;
+    first_adapter.run = run_software_runtime_adapter;
+    first_adapter.context = &first_context;
+    second_adapter = first_adapter;
+    second_adapter.context = &second_context;
+    result = rin_gpu_differential_run_pair(
+        &workload, &first_adapter, &second_adapter, &policy, &report);
+    ringpu_runtime_destroy(first);
+    ringpu_runtime_destroy(second);
+    if (result != RIN_GPU_DIFFERENTIAL_MATCH ||
+        report.mismatched_values != 0u ||
+        memcmp(first_context.readback, expected_output,
+               sizeof(expected_output)) != 0 ||
+        memcmp(second_context.readback, expected_output,
+               sizeof(expected_output)) != 0) {
+        fprintf(stderr, "differential readback failed: result=%d flags=%u values=%llu/%llu\n",
+                result,
                 report.mismatch_flags,
                 (unsigned long long)report.compared_values,
                 (unsigned long long)report.mismatched_values);

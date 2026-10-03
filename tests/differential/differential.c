@@ -373,6 +373,10 @@ static int snapshot_valid(const RinGpuDifferentialWorkloadV1* workload,
                               snapshot->shader_result,
                               snapshot->shader_result_bytes) ||
         !snapshot_field_valid(snapshot,
+                              RIN_GPU_DIFFERENTIAL_SNAPSHOT_FIELD_READBACK,
+                              snapshot->readback,
+                              snapshot->readback_bytes) ||
+        !snapshot_field_valid(snapshot,
                               RIN_GPU_DIFFERENTIAL_SNAPSHOT_FIELD_FENCE_ORDER,
                               snapshot->fence_order, snapshot->fence_values) ||
         !snapshot_field_valid(snapshot,
@@ -457,6 +461,10 @@ int rin_gpu_differential_run_pair(
         expected_snapshot.shader_result_bytes != actual_snapshot.shader_result_bytes)
         return RIN_GPU_DIFFERENTIAL_BACKEND_ERROR;
     if ((workload->expected_fields &
+         RIN_GPU_DIFFERENTIAL_SNAPSHOT_FIELD_READBACK) != 0u &&
+        expected_snapshot.readback_bytes != actual_snapshot.readback_bytes)
+        return RIN_GPU_DIFFERENTIAL_BACKEND_ERROR;
+    if ((workload->expected_fields &
          RIN_GPU_DIFFERENTIAL_SNAPSHOT_FIELD_FENCE_ORDER) != 0u &&
         expected_snapshot.fence_values != actual_snapshot.fence_values)
         return RIN_GPU_DIFFERENTIAL_BACKEND_ERROR;
@@ -503,6 +511,15 @@ int rin_gpu_differential_run_pair(
             RIN_GPU_DIFFERENTIAL_SHADER_RESULT, expected_snapshot.shader_result,
             actual_snapshot.shader_result, expected_snapshot.shader_result_bytes,
             0u, report);
+        if (result == RIN_GPU_DIFFERENTIAL_INVALID_ARGUMENT) return result;
+        mismatch |= result == RIN_GPU_DIFFERENTIAL_MISMATCH;
+    }
+    if ((workload->expected_fields &
+         RIN_GPU_DIFFERENTIAL_SNAPSHOT_FIELD_READBACK) != 0u) {
+        result = rin_gpu_differential_compare_bytes(
+            RIN_GPU_DIFFERENTIAL_READBACK, expected_snapshot.readback,
+            actual_snapshot.readback, expected_snapshot.readback_bytes, 0u,
+            report);
         if (result == RIN_GPU_DIFFERENTIAL_INVALID_ARGUMENT) return result;
         mismatch |= result == RIN_GPU_DIFFERENTIAL_MISMATCH;
     }
