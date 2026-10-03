@@ -44,10 +44,10 @@ void ringpu_core_resource_lock(RinGpuCore* core)
 {
     if (!core) return;
 #if defined(_MSC_VER)
-    while (_InterlockedExchange(&core->resource_operation_lock, 1L) != 0L)
+    while (_InterlockedExchange(&core->object_operation_lock, 1L) != 0L)
         (void)SwitchToThread();
 #else
-    while (__atomic_exchange_n(&core->resource_operation_lock, 1L,
+    while (__atomic_exchange_n(&core->object_operation_lock, 1L,
                                __ATOMIC_ACQUIRE) != 0L)
         (void)sched_yield();
 #endif
@@ -57,9 +57,9 @@ void ringpu_core_resource_unlock(RinGpuCore* core)
 {
     if (!core) return;
 #if defined(_MSC_VER)
-    (void)_InterlockedExchange(&core->resource_operation_lock, 0L);
+    (void)_InterlockedExchange(&core->object_operation_lock, 0L);
 #else
-    __atomic_store_n(&core->resource_operation_lock, 0L, __ATOMIC_RELEASE);
+    __atomic_store_n(&core->object_operation_lock, 0L, __ATOMIC_RELEASE);
 #endif
 }
 
@@ -589,9 +589,9 @@ int ringpu_create_queue_v2(RinGpuCore* core, const RinGpuQueueDescV2* desc,
                                      desc->engine_index, queue);
 }
 
-int ringpu_create_command_list(RinGpuCore* core,
-                               const RinGpuCommandListDescV1* desc,
-                               RinGpuHandle* command_list) {
+static int ringpu_create_command_list_impl(
+    RinGpuCore* core, const RinGpuCommandListDescV1* desc,
+    RinGpuHandle* command_list) {
     RinGpuObjectSlot* slot;
     int result = ringpu_core_ready(core);
     if (result != RIN_GPU_OK) return result;
@@ -611,7 +611,18 @@ int ringpu_create_command_list(RinGpuCore* core,
     return result;
 }
 
-int ringpu_command_list_reset(RinGpuCore* core, RinGpuHandle command_list) {
+int ringpu_create_command_list(RinGpuCore* core,
+                               const RinGpuCommandListDescV1* desc,
+                               RinGpuHandle* command_list) {
+    int result;
+    ringpu_core_resource_lock(core);
+    result = ringpu_create_command_list_impl(core, desc, command_list);
+    ringpu_core_resource_unlock(core);
+    return result;
+}
+
+static int ringpu_command_list_reset_impl(RinGpuCore* core,
+                                          RinGpuHandle command_list) {
     RinGpuObjectSlot* list;
     int result = ringpu_core_ready(core);
     if (result != RIN_GPU_OK) return result;
@@ -623,10 +634,19 @@ int ringpu_command_list_reset(RinGpuCore* core, RinGpuHandle command_list) {
     return ringpu_collect_deferred(core);
 }
 
+int ringpu_command_list_reset(RinGpuCore* core, RinGpuHandle command_list) {
+    int result;
+    ringpu_core_resource_lock(core);
+    result = ringpu_command_list_reset_impl(core, command_list);
+    ringpu_core_resource_unlock(core);
+    return result;
+}
 
 
 
-int ringpu_command_list_close(RinGpuCore* core, RinGpuHandle command_list) {
+
+static int ringpu_command_list_close_impl(RinGpuCore* core,
+                                         RinGpuHandle command_list) {
     RinGpuObjectSlot* list;
     int result = ringpu_core_ready(core);
     if (result != RIN_GPU_OK) return result;
@@ -639,4 +659,12 @@ int ringpu_command_list_close(RinGpuCore* core, RinGpuHandle command_list) {
     }
     list->value.command_list.state = RIN_GPU_COMMAND_EXECUTABLE;
     return RIN_GPU_OK;
+}
+
+int ringpu_command_list_close(RinGpuCore* core, RinGpuHandle command_list) {
+    int result;
+    ringpu_core_resource_lock(core);
+    result = ringpu_command_list_close_impl(core, command_list);
+    ringpu_core_resource_unlock(core);
+    return result;
 }

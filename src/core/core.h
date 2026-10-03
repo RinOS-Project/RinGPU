@@ -951,10 +951,10 @@ typedef struct RinGpuObjectSlot {
 } RinGpuObjectSlot;
 
 struct RinGpuCore {
-    /* Serializes buffer creation and object-retirement transactions for host
-     * runtimes. This is not a blanket lock for arbitrary concurrent command
-     * recording against the same command list. */
-    volatile long resource_operation_lock;
+    /* Serializes buffer/command-list lifetime transactions and object
+     * retirement for host runtimes. It does not make recording to the same
+     * command list concurrently safe. */
+    volatile long object_operation_lock;
     uint64_t handle_secret;
     uint64_t max_buffer_size;
     uint64_t max_image_size;
