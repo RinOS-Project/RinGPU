@@ -31,6 +31,7 @@ int main(void)
     RinGpuImageDescV1 image_desc = {0};
     RinGpuImageTransitionV1 transition = {0};
     RinGpuSubmitInfoV1 submit = {0};
+    RinGpuAdapterCapabilitiesV1 capabilities = {0};
     RinGpuHandle queue = 0u;
     RinGpuHandle fence = 0u;
     RinGpuHandle command_list = 0u;
@@ -73,6 +74,21 @@ int main(void)
         generation != desc.device_generation ||
         ringpu_runtime_device_lost(runtime))
         return 6;
+    if (ringpu_runtime_get_adapter_capabilities(runtime, &capabilities) !=
+            RIN_GPU_OK ||
+        capabilities.abi_version != RIN_GPU_ABI_VERSION ||
+        capabilities.struct_size != sizeof(capabilities) ||
+        capabilities.queue_capabilities != desc.adapter.queue_capabilities ||
+        capabilities.feature_flags != RIN_GPU_ADAPTER_KNOWN_FEATURES ||
+        capabilities.max_buffer_size != desc.max_buffer_size ||
+        capabilities.max_image_size != desc.max_image_size ||
+        capabilities.max_total_allocation_size !=
+            desc.max_total_allocation_size ||
+        capabilities.max_image_dimension != desc.max_image_dimension ||
+        capabilities.max_image_layers != desc.max_image_layers ||
+        capabilities.max_image_mip_levels != desc.max_image_mip_levels ||
+        capabilities.max_image_sample_count != desc.max_image_sample_count)
+        return 10;
 
     queue_desc.abi_version = RIN_GPU_ABI_VERSION;
     queue_desc.struct_size = sizeof(queue_desc);

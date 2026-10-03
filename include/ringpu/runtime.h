@@ -75,6 +75,9 @@ int ringpu_runtime_get_device_generation(const RinGpuRuntime* runtime,
                                          uint64_t* generation_out);
 int ringpu_runtime_get_adapter_info(const RinGpuRuntime* runtime,
                                     RinGpuAdapterInfoV1* info);
+int ringpu_runtime_get_adapter_capabilities(
+    const RinGpuRuntime* runtime,
+    RinGpuAdapterCapabilitiesV1* capabilities);
 
 int ringpu_runtime_create_buffer(RinGpuRuntime* runtime,
                                  const RinGpuBufferDescV1* desc,

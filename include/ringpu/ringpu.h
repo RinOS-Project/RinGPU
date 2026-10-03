@@ -364,6 +364,30 @@ typedef struct RinGpuAdapterInfoV1 {
     char name[RIN_GPU_ADAPTER_NAME_MAX];
 } RinGpuAdapterInfoV1;
 
+#define RIN_GPU_ADAPTER_FEATURE_TIMESTAMP_QUERY   UINT32_C(0x00000001)
+#define RIN_GPU_ADAPTER_FEATURE_IMAGE_READBACK    UINT32_C(0x00000002)
+#define RIN_GPU_ADAPTER_FEATURE_COMPLETION_WAIT   UINT32_C(0x00000004)
+#define RIN_GPU_ADAPTER_KNOWN_FEATURES \
+    (RIN_GPU_ADAPTER_FEATURE_TIMESTAMP_QUERY | \
+     RIN_GPU_ADAPTER_FEATURE_IMAGE_READBACK | \
+     RIN_GPU_ADAPTER_FEATURE_COMPLETION_WAIT)
+
+/* Common limits and optional backend capabilities for the active adapter.
+ * Feature bits report optional backend callbacks, not physical-device claims. */
+typedef struct RinGpuAdapterCapabilitiesV1 {
+    uint32_t abi_version;
+    uint32_t struct_size;
+    uint32_t queue_capabilities;
+    uint32_t feature_flags;
+    uint64_t max_buffer_size;
+    uint64_t max_image_size;
+    uint64_t max_total_allocation_size;
+    uint32_t max_image_dimension;
+    uint32_t max_image_layers;
+    uint32_t max_image_mip_levels;
+    uint32_t max_image_sample_count;
+} RinGpuAdapterCapabilitiesV1;
+
 typedef struct RinGpuBufferDescV1 {
     uint32_t abi_version;
     uint32_t struct_size;
@@ -1469,6 +1493,8 @@ typedef struct RinGpuQueryResultV1 {
 typedef struct RinGpuCore RinGpuCore;
 
 int ringpu_get_adapter_info(const RinGpuCore* core, RinGpuAdapterInfoV1* info);
+int ringpu_get_adapter_capabilities(
+    const RinGpuCore* core, RinGpuAdapterCapabilitiesV1* capabilities);
 int ringpu_get_display_count(const RinGpuCore* core, uint32_t* count);
 int ringpu_get_display_info(const RinGpuCore* core, uint32_t index,
                             RinGpuDisplayInfoV1* info);
@@ -1723,6 +1749,8 @@ int ringpu_destroy(RinGpuCore* core, RinGpuHandle object);
 #if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
 _Static_assert(sizeof(RinGpuAdapterInfoV1) == 104u,
                "RinGPU adapter ABI drift");
+_Static_assert(sizeof(RinGpuAdapterCapabilitiesV1) == 56u,
+               "RinGPU adapter-capability ABI drift");
 _Static_assert(sizeof(RinGpuDisplayInfoV1) == 112u,
                "RinGPU display info ABI drift");
 _Static_assert(sizeof(RinGpuBufferDescV1) == 24u,

@@ -414,6 +414,41 @@ int ringpu_get_adapter_info(const RinGpuCore* core, RinGpuAdapterInfoV1* info) {
     return RIN_GPU_OK;
 }
 
+int ringpu_get_adapter_capabilities(
+    const RinGpuCore* core, RinGpuAdapterCapabilitiesV1* capabilities) {
+    int result = ringpu_core_ready(core);
+    if (result != RIN_GPU_OK) return result;
+    if (!capabilities) return RIN_GPU_ERROR_INVALID_ARGUMENT;
+
+    memset(capabilities, 0, sizeof(*capabilities));
+    capabilities->abi_version = RIN_GPU_ABI_VERSION;
+    capabilities->struct_size = sizeof(*capabilities);
+    capabilities->queue_capabilities = core->adapter.queue_capabilities;
+    capabilities->max_buffer_size = core->max_buffer_size;
+    capabilities->max_image_size = core->max_image_size;
+    capabilities->max_total_allocation_size =
+        core->max_total_allocation_size;
+    capabilities->max_image_dimension = core->max_image_dimension;
+    capabilities->max_image_layers = core->max_image_layers;
+    capabilities->max_image_mip_levels = core->max_image_mip_levels;
+    capabilities->max_image_sample_count = core->max_image_sample_count;
+
+    if (core->backend.get_query_result != NULL &&
+        core->backend.get_timestamp_period != NULL) {
+        capabilities->feature_flags |=
+            RIN_GPU_ADAPTER_FEATURE_TIMESTAMP_QUERY;
+    }
+    if (core->backend.readback_image != NULL) {
+        capabilities->feature_flags |=
+            RIN_GPU_ADAPTER_FEATURE_IMAGE_READBACK;
+    }
+    if (core->backend.wait_for_completion != NULL) {
+        capabilities->feature_flags |=
+            RIN_GPU_ADAPTER_FEATURE_COMPLETION_WAIT;
+    }
+    return RIN_GPU_OK;
+}
+
 int ringpu_get_display_count(const RinGpuCore* core, uint32_t* count) {
     int result = ringpu_core_ready(core);
     if (result != RIN_GPU_OK) return result;

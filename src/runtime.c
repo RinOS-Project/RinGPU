@@ -177,6 +177,15 @@ int ringpu_runtime_get_adapter_info(const RinGpuRuntime* runtime,
     return ringpu_get_adapter_info(&runtime->core, info);
 }
 
+int ringpu_runtime_get_adapter_capabilities(
+    const RinGpuRuntime* runtime,
+    RinGpuAdapterCapabilitiesV1* capabilities)
+{
+    if (runtime == NULL || runtime->initialized != RIN_GPU_RUNTIME_VERSION)
+        return RIN_GPU_ERROR_STATE;
+    return ringpu_get_adapter_capabilities(&runtime->core, capabilities);
+}
+
 int ringpu_runtime_create_buffer(RinGpuRuntime* runtime,
                                  const RinGpuBufferDescV1* desc,
                                  RinGpuHandle* buffer_out)

@@ -12,6 +12,14 @@ ABI contains no kernel object layout.
 Copy, transfer, and destruction semantics for handles are defined in
 [`object-ownership.md`](object-ownership.md).
 
+`ringpu_get_adapter_info` reports adapter identity and the queue capabilities
+admitted by the core. `ringpu_get_adapter_capabilities` reports those queue
+capabilities together with the configured resource limits and optional
+backend features. Timestamp-query support requires both query-result and
+timestamp-period callbacks; image-readback and completion-wait bits reflect
+their corresponding optional callbacks. These bits describe the installed
+backend operation table and do not claim physical-device support beyond it.
+
 The software backend and the RSH1 validator are portable host components.
 Physical discovery, MMIO, DMA, IRQ, firmware, and reset ownership stay in the
 OS-Core backend and are connected through the versioned backend operation table.
