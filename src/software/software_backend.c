@@ -10359,6 +10359,11 @@ static int sw_submit(void* opaque, const RinGpuBackendCommandV1* commands,
             ++delta.copy_commands;
             break;
         case RIN_GPU_BACKEND_COMMAND_TRANSITION_IMAGE:
+            if (command->value.image_transition.transition.aspect_mask == 0u ||
+                (command->value.image_transition.transition.aspect_mask &
+                 ~RIN_GPU_IMAGE_ASPECT_KNOWN) != 0u) {
+                return RIN_GPU_ERROR_INVALID_ARGUMENT;
+            }
             ++delta.transition_commands;
             break;
         case RIN_GPU_BACKEND_COMMAND_TRANSFER_IMAGE_OWNERSHIP:

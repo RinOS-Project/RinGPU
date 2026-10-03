@@ -106,6 +106,19 @@ int ringpu_stencil_aspect_format(uint32_t format)
            format == RIN_GPU_FORMAT_D32_FLOAT_S8_UINT;
 }
 
+uint32_t ringpu_image_format_aspects(uint32_t format)
+{
+    uint32_t aspects = 0u;
+
+    if (ringpu_depth_aspect_format(format))
+        aspects |= RIN_GPU_IMAGE_ASPECT_DEPTH;
+    if (ringpu_stencil_aspect_format(format))
+        aspects |= RIN_GPU_IMAGE_ASPECT_STENCIL;
+    if (aspects == 0u && ringpu_color_format(format))
+        aspects = RIN_GPU_IMAGE_ASPECT_COLOR;
+    return aspects;
+}
+
 int ringpu_scanout_format(uint32_t format)
 {
     return format == RIN_GPU_FORMAT_RGBA8_UNORM ||

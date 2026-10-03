@@ -566,9 +566,16 @@ typedef struct RinGpuImageResolveV1 {
     uint32_t reserved;
 } RinGpuImageResolveV1;
 
-#define RIN_GPU_IMAGE_CLEAR_COLOR UINT32_C(0x00000001)
-#define RIN_GPU_IMAGE_CLEAR_DEPTH UINT32_C(0x00000002)
-#define RIN_GPU_IMAGE_CLEAR_STENCIL UINT32_C(0x00000004)
+#define RIN_GPU_IMAGE_ASPECT_COLOR UINT32_C(0x00000001)
+#define RIN_GPU_IMAGE_ASPECT_DEPTH UINT32_C(0x00000002)
+#define RIN_GPU_IMAGE_ASPECT_STENCIL UINT32_C(0x00000004)
+#define RIN_GPU_IMAGE_ASPECT_KNOWN \
+    (RIN_GPU_IMAGE_ASPECT_COLOR | RIN_GPU_IMAGE_ASPECT_DEPTH | \
+     RIN_GPU_IMAGE_ASPECT_STENCIL)
+
+#define RIN_GPU_IMAGE_CLEAR_COLOR RIN_GPU_IMAGE_ASPECT_COLOR
+#define RIN_GPU_IMAGE_CLEAR_DEPTH RIN_GPU_IMAGE_ASPECT_DEPTH
+#define RIN_GPU_IMAGE_CLEAR_STENCIL RIN_GPU_IMAGE_ASPECT_STENCIL
 #define RIN_GPU_IMAGE_CLEAR_KNOWN_ASPECTS \
     (RIN_GPU_IMAGE_CLEAR_COLOR | RIN_GPU_IMAGE_CLEAR_DEPTH | \
      RIN_GPU_IMAGE_CLEAR_STENCIL)
@@ -639,6 +646,10 @@ typedef struct RinGpuImageReadbackV1 {
     uint32_t reserved;
 } RinGpuImageReadbackV1;
 
+/* Image states are tracked per mip/layer, shared across all format aspects.
+ * A zero aspect_mask selects every aspect in the format; a nonzero mask must
+ * equal that complete set. Partial depth/stencil state tracking is not part of
+ * this ABI. */
 typedef struct RinGpuImageTransitionV1 {
     uint32_t abi_version;
     uint32_t struct_size;
@@ -649,7 +660,10 @@ typedef struct RinGpuImageTransitionV1 {
     uint32_t before_state;
     uint32_t after_state;
     uint32_t flags;
-    uint32_t reserved;
+    union {
+        uint32_t aspect_mask;
+        uint32_t reserved;
+    };
 } RinGpuImageTransitionV1;
 
 /* The portable ownership profile is image-wide: a transfer must cover every

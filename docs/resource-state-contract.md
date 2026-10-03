@@ -18,7 +18,7 @@ image-descriptor validation performed at creation.
 | `COPY_DESTINATION` (2) | `COPY_DESTINATION` usage | Transfer write: image copy/blit/resolve destination and image-clear command. Full CPU upload also establishes this state for the uploaded subresource. | `VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL` | `D3D12_RESOURCE_STATE_COPY_DEST` |
 | `COLOR_TARGET` (3) | `COLOR_TARGET` usage and a color format; descriptor validation further excludes formats/usages outside the portable profile | Color-attachment access: render-pass attachment clear/load/store and graphics output. Render-pass use additionally requires a 2D, single-sample image. Presentation is a separate state and usage. | `VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL` | `D3D12_RESOURCE_STATE_RENDER_TARGET` |
 | `PRESENT` (4) | `PRESENT` usage; valid present descriptors are 2D, one mip/layer/sample, RGBA8/BGRA8 UNORM, and also color targets | External presentation read. Submit validates the display geometry/format and requires this state before present. | `VK_IMAGE_LAYOUT_PRESENT_SRC_KHR` | `D3D12_RESOURCE_STATE_PRESENT` (an alias of COMMON) |
-| `DEPTH_TARGET` (5) | `DEPTH_STENCIL` usage and a depth/stencil format (`D32_FLOAT`, `D32_FLOAT_S8_UINT`, or `S8_UINT`) | Depth/stencil attachment access for the aspects supported by the selected format; render-pass use additionally requires 2D and single-sample. The API currently has no aspect field. | `VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL` | `D3D12_RESOURCE_STATE_DEPTH_WRITE` |
+| `DEPTH_TARGET` (5) | `DEPTH_STENCIL` usage and a depth/stencil format (`D32_FLOAT`, `D32_FLOAT_S8_UINT`, or `S8_UINT`) | Depth/stencil attachment access for the aspects selected by the transition; render-pass use additionally requires 2D and single-sample. | `VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL` | `D3D12_RESOURCE_STATE_DEPTH_WRITE` |
 | `SHADER_READ` (6) | One sample and either `SAMPLED` with a sampled color/depth format, or `STORAGE` on a 2D `R8_UNORM` image | Shader read-only access. The storage-only R8 case is still read-only in this state; shader writes have no image state in the current API. | `VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL` for sampled color; `VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL` for sampled depth/stencil; `VK_IMAGE_LAYOUT_GENERAL` for the storage-image case | Pixel/non-pixel shader-resource state bits selected for the consuming shader stage(s) |
 
 `UNDEFINED` is a content-validity boundary, not a promise that newly allocated
@@ -33,8 +33,17 @@ is RGBA8/BGRA8 UNORM only.
 ## Transition and state-tracking rules
 
 - State is tracked independently for each `(array_layer, mip_level)` pair.
-  The transition record selects a rectangular mip/layer range; aspect selection
-  is not represented and remains part of RG-013.
+  The transition record selects a rectangular mip/layer range and an image
+  aspect mask. `COLOR`, `DEPTH`, and `STENCIL` are the supported aspect bits;
+  each image format admits only its own aspect set (`D32_FLOAT_S8_UINT` admits
+  both depth and stencil). A zero mask means all aspects of the format and is
+  normalized to that full mask in the recorded/backend transition.
+- State is shared across all aspects of a mip/layer. Therefore a nonzero
+  transition mask must select the complete format aspect set; partial
+  depth/stencil transitions are rejected rather than pretending the aspects
+  have independently tracked states. The separate image-clear aspect mask
+  selects which values a clear writes and does not change transition-state
+  tracking.
 - A transition must have distinct states, a non-empty in-bounds range, and both
   states must be eligible for the image. Recording is allowed only outside a
   render pass on a command list with COPY or GRAPHICS capability.
@@ -53,10 +62,11 @@ is RGBA8/BGRA8 UNORM only.
 ## Native-mapping boundary
 
 The native values in the table are semantic candidates, not emitted barriers.
-The image transition record contains neither pipeline-stage nor access masks,
-and `SHADER_READ` does not identify the consuming shader stage. Separate
-`RinGpuComputeBarrierV2` and `RinGpuGraphicsBarrierV2` records do carry source /
-destination stage and READ/WRITE access masks, but they have no resource or
+The image transition record carries an aspect mask but contains neither
+pipeline-stage nor access masks, and `SHADER_READ` does not identify the
+consuming shader stage. Separate `RinGpuComputeBarrierV2` and
+`RinGpuGraphicsBarrierV2` records do carry source / destination stage and
+READ/WRITE access masks, but they have no resource or
 subresource selector and therefore do not complete image layout transitions.
 A backend must derive stage/access details from consuming operations and
 descriptors; it must use GENERAL for the storage-image case in Vulkan. PRESENT
@@ -67,14 +77,14 @@ to this common-state definition.
 Buffer usages such as vertex, index, uniform, storage-write, and indirect
 arguments are not members of `RinGpuImageState`; this image transition API does
 not claim to provide buffer barriers for them. `RinGpuImageOwnershipTransferV1`
-is a separate ownership operation, and mip/layer/aspect range completion is
-tracked by RG-013.
+is a separate ownership operation and remains image-wide; it does not use the
+transition's mip/layer/aspect selector.
 
 ## Source and native-reference index
 
 Current implementation evidence:
 
-- `include/ringpu/ringpu.h`: state values, image usages, transition record.
+- `include/ringpu/ringpu.h`: state values, image usages/aspects, transition record.
 - `src/validation/resource.c`: state eligibility and image descriptor rules.
 - `src/sync/barriers.c`: transition recording validation.
 - `src/queue/submit.c`: per-subresource before-state validation and commit-on-
@@ -84,6 +94,9 @@ Current implementation evidence:
 - `tests/ringpu_runtime_test.c` and
   `tests/ringpu_resource_requirements_test.c`: host software-path transition
   and usage coverage.
+- `tests/ringpu_subresource_range_test.c`: rectangular mip/layer selection,
+  format/aspect validation, zero-mask normalization, and shared depth/stencil
+  state semantics.
 
 Native representation references (mapping guidance only):
 

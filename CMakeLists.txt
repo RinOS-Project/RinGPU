@@ -141,6 +141,11 @@ if(RINGPU_BUILD_TESTS)
                    tests/ringpu_memory_binding_test.c)
     target_link_libraries(ringpu-memory-binding-test PRIVATE RinGPU::RinGPU)
     add_test(NAME ringpu-memory-binding COMMAND ringpu-memory-binding-test)
+    add_executable(ringpu-subresource-range-test
+                   tests/ringpu_subresource_range_test.c)
+    target_link_libraries(ringpu-subresource-range-test PRIVATE RinGPU::RinGPU)
+    add_test(NAME ringpu-subresource-range
+             COMMAND ringpu-subresource-range-test)
 endif()
 
 if(RINGPU_BUILD_DIFFERENTIAL_TESTS)

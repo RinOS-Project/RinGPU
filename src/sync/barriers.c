@@ -13,6 +13,7 @@ int ringpu_command_transition_image(
     RinGpuObjectSlot* image_slot;
     RinGpuRecordedCommand* command;
     const RinGpuImageDescV1* desc;
+    uint32_t format_aspects;
     int result = ringpu_core_ready(core);
 
     if (result != RIN_GPU_OK) return result;
@@ -22,7 +23,7 @@ int ringpu_command_transition_image(
         transition->mip_level_count == 0u ||
         transition->array_layer_count == 0u ||
         transition->before_state == transition->after_state ||
-        transition->flags != 0u || transition->reserved != 0u) {
+        transition->flags != 0u) {
         return RIN_GPU_ERROR_INVALID_ARGUMENT;
     }
     result = ringpu_slot(core, command_list, RIN_GPU_OBJECT_COMMAND_LIST, NULL,
@@ -37,6 +38,12 @@ int ringpu_command_transition_image(
     result = ringpu_slot(core, image, RIN_GPU_OBJECT_IMAGE, NULL, &image_slot);
     if (result != RIN_GPU_OK) return result;
     desc = &image_slot->value.image.descriptor;
+    format_aspects = ringpu_image_format_aspects(desc->format);
+    if (format_aspects == 0u ||
+        (transition->aspect_mask != 0u &&
+         transition->aspect_mask != format_aspects)) {
+        return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    }
     if (transition->base_mip_level >= desc->mip_levels ||
         transition->mip_level_count >
             desc->mip_levels - transition->base_mip_level ||
@@ -56,6 +63,7 @@ int ringpu_command_transition_image(
     command->value.image_transition = *transition;
     command->value.image_transition.struct_size =
         sizeof(command->value.image_transition);
+    command->value.image_transition.aspect_mask = format_aspects;
     list->value.command_list.count++;
     image_slot->value.image.reference_count++;
     return RIN_GPU_OK;
