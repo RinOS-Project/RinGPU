@@ -121,6 +121,8 @@ typedef int (*RinGpuMemoryCreateBackingFn)(
     uint64_t* backing_cookie_out);
 typedef int (*RinGpuMemoryDestroyBackingFn)(void* context,
                                             uint64_t backing_cookie);
+/* Maps a GPU virtual-address range into the device/IOMMU domain; this is not
+ * a CPU pointer mapping. */
 typedef int (*RinGpuMemoryMapFn)(
     void* context, uint64_t iommu_domain_cookie,
     uint64_t iommu_map_generation, uint64_t backing_cookie,
@@ -131,6 +133,10 @@ typedef int (*RinGpuMemoryMapFn)(
 typedef int (*RinGpuMemoryUnmapFn)(
     void* context, uint64_t iommu_domain_cookie,
     uint64_t iommu_map_generation, uint64_t mapping_cookie);
+/* CPU_TO_DEVICE flushes CPU writes; DEVICE_TO_CPU invalidates stale CPU cache
+ * lines after device completion. The backend may expand the requested range
+ * to its cache-maintenance granularity, but must stay inside the allocation.
+ * Success guarantees visibility for the requested bytes. */
 typedef int (*RinGpuMemorySyncFn)(
     void* context, uint64_t backing_cookie, uint32_t action,
     uint64_t offset, uint64_t length);
@@ -225,6 +231,8 @@ int rin_gpu_memory_acquire(RinGpuMemoryRuntime* runtime,
                            uint64_t* lease_handle_out);
 int rin_gpu_memory_release(RinGpuMemoryRuntime* runtime,
                            uint64_t lease_handle);
+/* Synchronizes a CPU-visible allocation. Callers must wait for relevant
+ * device work before DEVICE_TO_CPU invalidation. */
 int rin_gpu_memory_sync(RinGpuMemoryRuntime* runtime,
                         uint64_t allocation_handle, uint32_t action,
                         uint64_t offset, uint64_t length);

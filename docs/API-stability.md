@@ -27,6 +27,10 @@ The common object factory and backend-operation boundary is described in
 [`backend-interface-contract.md`](backend-interface-contract.md). It is a
 source integration interface, not a public third-party driver ABI.
 
+GPU-domain memory mapping and CPU cache synchronization semantics are defined
+in [`memory-sync-contract.md`](memory-sync-contract.md); the current public
+API does not expose a CPU pointer map/unmap pair.
+
 The software backend and the RSH1 validator are portable host components.
 Physical discovery, MMIO, DMA, IRQ, firmware, and reset ownership stay in the
 OS-Core backend and are connected through the versioned backend operation table.
