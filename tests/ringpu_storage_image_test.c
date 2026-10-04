@@ -9,6 +9,8 @@
 static RinGpuBackendOpsV1 delegated_ops;
 static uint32_t fail_next_graphics_pipeline;
 static uint32_t fail_next_graphics_bind_group;
+static uint32_t empty_success_next_graphics_pipeline;
+static uint32_t empty_success_next_graphics_bind_group;
 static uint32_t destroy_graphics_pipeline_calls;
 static uint32_t destroy_graphics_bind_group_calls;
 
@@ -19,7 +21,13 @@ static int injected_create_graphics_pipeline(
     const RinShaderInfoV1* fragment_shader_info,
     const RinGpuBackendGraphicsPipelineDescV1* desc, uint64_t* cookie_out)
 {
-    int result = delegated_ops.create_graphics_pipeline(
+    int result;
+    if (empty_success_next_graphics_pipeline != 0u) {
+        --empty_success_next_graphics_pipeline;
+        if (cookie_out != NULL) *cookie_out = 0u;
+        return RIN_GPU_OK;
+    }
+    result = delegated_ops.create_graphics_pipeline(
         context, vertex_shader_cookie, vertex_shader_info,
         fragment_shader_cookie, fragment_shader_info, desc, cookie_out);
     if (result != RIN_GPU_OK) return result;
@@ -42,7 +50,13 @@ static int injected_create_graphics_bind_group(
     const RinGpuBackendGraphicsBindingV1* bindings, uint32_t binding_count,
     uint64_t* cookie_out)
 {
-    int result = delegated_ops.create_graphics_bind_group(
+    int result;
+    if (empty_success_next_graphics_bind_group != 0u) {
+        --empty_success_next_graphics_bind_group;
+        if (cookie_out != NULL) *cookie_out = 0u;
+        return RIN_GPU_OK;
+    }
+    result = delegated_ops.create_graphics_bind_group(
         context, pipeline_cookie, bindings, binding_count, cookie_out);
     if (result != RIN_GPU_OK) return result;
     if (fail_next_graphics_bind_group != 0u) {
@@ -255,6 +269,15 @@ int main(void)
             goto done;
     }
     {
+        empty_success_next_graphics_pipeline = 1u;
+        pipeline = UINT64_MAX;
+        int pipeline_result = ringpu_create_graphics_pipeline_native_v2(
+            &core, &pipeline_desc, NULL, 0u, NULL, 0u, &pipeline);
+        if (pipeline_result != RIN_GPU_ERROR_BACKEND || pipeline != 0u ||
+            destroy_graphics_pipeline_calls != 1u)
+            goto done;
+    }
+    {
         int pipeline_result = ringpu_create_graphics_pipeline_native_v2(
             &core, &pipeline_desc, NULL, 0u, NULL, 0u, &pipeline);
         if (pipeline_result != RIN_GPU_OK) {
@@ -289,6 +312,13 @@ int main(void)
     binding.resource = storage_image;
     failure_stage = "bind group";
     fail_next_graphics_bind_group = 1u;
+    bind_group = UINT64_MAX;
+    if (ringpu_create_graphics_bind_group_typed(
+            &core, pipeline, &binding, 1u, &bind_group) !=
+            RIN_GPU_ERROR_BACKEND ||
+        bind_group != 0u || destroy_graphics_bind_group_calls != 1u)
+        goto done;
+    empty_success_next_graphics_bind_group = 1u;
     bind_group = UINT64_MAX;
     if (ringpu_create_graphics_bind_group_typed(
             &core, pipeline, &binding, 1u, &bind_group) !=

@@ -451,6 +451,7 @@ static int ringpu_create_buffer_impl(RinGpuCore* core,
             core->backend.destroy_buffer(core->backend_context, cookie);
         return result;
     }
+    if (cookie == 0u) return RIN_GPU_ERROR_BACKEND;
     result = ringpu_allocate(core, RIN_GPU_OBJECT_BUFFER, buffer, &slot);
     if (result != RIN_GPU_OK) {
         core->backend.destroy_buffer(core->backend_context, cookie);
@@ -587,6 +588,11 @@ int ringpu_create_image(RinGpuCore* core, const RinGpuImageDescV1* desc,
         free(cpu_upload_complete);
         return result;
     }
+    if (cookie == 0u) {
+        free(subresource_states);
+        free(cpu_upload_complete);
+        return RIN_GPU_ERROR_BACKEND;
+    }
     result = ringpu_allocate(core, RIN_GPU_OBJECT_IMAGE, image, &slot);
     if (result != RIN_GPU_OK) {
         core->backend.destroy_image(core->backend_context, cookie);
@@ -631,6 +637,7 @@ int ringpu_create_sampler(RinGpuCore* core, const RinGpuSamplerDescV1* desc,
             core->backend.destroy_sampler(core->backend_context, cookie);
         return result;
     }
+    if (cookie == 0u) return RIN_GPU_ERROR_BACKEND;
     result = ringpu_allocate(core, RIN_GPU_OBJECT_SAMPLER, sampler, &slot);
     if (result != RIN_GPU_OK) {
         core->backend.destroy_sampler(core->backend_context, cookie);

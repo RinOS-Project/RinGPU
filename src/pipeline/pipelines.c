@@ -53,6 +53,7 @@ int ringpu_create_compute_pipeline(
                                                    cookie);
         return result;
     }
+    if (cookie == 0u) return RIN_GPU_ERROR_BACKEND;
     result = ringpu_allocate(core, RIN_GPU_OBJECT_COMPUTE_PIPELINE,
                              pipeline, &slot);
     if (result != RIN_GPU_OK) {
@@ -159,6 +160,10 @@ int ringpu_create_compute_bind_group(
         if (cookie != 0u)
             core->backend.destroy_compute_bind_group(core->backend_context,
                                                      cookie);
+        goto fail;
+    }
+    if (cookie == 0u) {
+        result = RIN_GPU_ERROR_BACKEND;
         goto fail;
     }
     result = ringpu_allocate(core, RIN_GPU_OBJECT_COMPUTE_BIND_GROUP,

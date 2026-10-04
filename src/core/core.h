@@ -602,9 +602,10 @@ typedef struct RinGpuBackendCommandV1 {
 typedef struct RinGpuBackendOpsV1 {
     uint32_t abi_version;
     uint32_t struct_size;
-    /* Factory callbacks start with an empty output. If one returns an error
-     * after publishing a cookie/allocation, the core invokes its matching
-     * destroy callback before returning the error. */
+    /* Factory callbacks start with an empty output. Success requires a valid
+     * nonzero cookie (or non-null memory token); otherwise the core returns
+     * BACKEND. If an error returns a cookie/allocation, the core invokes its
+     * matching destroy callback before returning the error. */
     int (*create_buffer)(void* context, const RinGpuBufferDescV1* desc,
                          uint64_t* cookie);
     void (*destroy_buffer)(void* context, uint64_t cookie);

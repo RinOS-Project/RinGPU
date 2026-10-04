@@ -11,6 +11,9 @@ static RinGpuBackendOpsV1 delegated_ops;
 static uint32_t fail_next_shader_module;
 static uint32_t fail_next_compute_pipeline;
 static uint32_t fail_next_compute_bind_group;
+static uint32_t empty_success_next_shader_module;
+static uint32_t empty_success_next_compute_pipeline;
+static uint32_t empty_success_next_compute_bind_group;
 static uint32_t destroy_shader_module_calls;
 static uint32_t destroy_compute_pipeline_calls;
 static uint32_t destroy_compute_bind_group_calls;
@@ -19,7 +22,13 @@ static int injected_create_shader_module(
     void* context, const void* rin_shader_ir, uint64_t shader_size,
     const RinShaderInfoV1* info, uint64_t* cookie_out)
 {
-    int result = delegated_ops.create_shader_module(
+    int result;
+    if (empty_success_next_shader_module != 0u) {
+        --empty_success_next_shader_module;
+        if (cookie_out != NULL) *cookie_out = 0u;
+        return RIN_GPU_OK;
+    }
+    result = delegated_ops.create_shader_module(
         context, rin_shader_ir, shader_size, info, cookie_out);
     if (result != RIN_GPU_OK) return result;
     if (fail_next_shader_module != 0u) {
@@ -39,7 +48,13 @@ static int injected_create_compute_pipeline(
     void* context, uint64_t shader_module_cookie,
     const RinShaderInfoV1* shader_info, uint64_t* cookie_out)
 {
-    int result = delegated_ops.create_compute_pipeline(
+    int result;
+    if (empty_success_next_compute_pipeline != 0u) {
+        --empty_success_next_compute_pipeline;
+        if (cookie_out != NULL) *cookie_out = 0u;
+        return RIN_GPU_OK;
+    }
+    result = delegated_ops.create_compute_pipeline(
         context, shader_module_cookie, shader_info, cookie_out);
     if (result != RIN_GPU_OK) return result;
     if (fail_next_compute_pipeline != 0u) {
@@ -60,7 +75,13 @@ static int injected_create_compute_bind_group(
     const RinGpuBackendBufferBindingV1* bindings, uint32_t binding_count,
     uint64_t* cookie_out)
 {
-    int result = delegated_ops.create_compute_bind_group(
+    int result;
+    if (empty_success_next_compute_bind_group != 0u) {
+        --empty_success_next_compute_bind_group;
+        if (cookie_out != NULL) *cookie_out = 0u;
+        return RIN_GPU_OK;
+    }
+    result = delegated_ops.create_compute_bind_group(
         context, pipeline_cookie, bindings, binding_count, cookie_out);
     if (result != RIN_GPU_OK) return result;
     if (fail_next_compute_bind_group != 0u) {
@@ -240,6 +261,11 @@ int main(void)
     CHECK(ringpu_create_shader_module(&core, shader, sizeof(shader),
                                      &shader_module) == RIN_GPU_ERROR_BACKEND);
     CHECK(shader_module == 0u && destroy_shader_module_calls == 1u);
+    empty_success_next_shader_module = 1u;
+    shader_module = UINT64_MAX;
+    CHECK(ringpu_create_shader_module(&core, shader, sizeof(shader),
+                                     &shader_module) == RIN_GPU_ERROR_BACKEND);
+    CHECK(shader_module == 0u && destroy_shader_module_calls == 1u);
     CHECK(ringpu_create_shader_module(&core, shader, sizeof(shader),
                                      &shader_module) == RIN_GPU_OK);
     memset(&pipeline_desc, 0, sizeof(pipeline_desc));
@@ -247,6 +273,11 @@ int main(void)
     pipeline_desc.struct_size = sizeof(pipeline_desc);
     pipeline_desc.shader_module = shader_module;
     fail_next_compute_pipeline = 1u;
+    pipeline = UINT64_MAX;
+    CHECK(ringpu_create_compute_pipeline(&core, &pipeline_desc, &pipeline) ==
+          RIN_GPU_ERROR_BACKEND);
+    CHECK(pipeline == 0u && destroy_compute_pipeline_calls == 1u);
+    empty_success_next_compute_pipeline = 1u;
     pipeline = UINT64_MAX;
     CHECK(ringpu_create_compute_pipeline(&core, &pipeline_desc, &pipeline) ==
           RIN_GPU_ERROR_BACKEND);
@@ -262,6 +293,12 @@ int main(void)
     binding.buffer = buffer;
     binding.size_bytes = sizeof(initial_value);
     fail_next_compute_bind_group = 1u;
+    bind_group = UINT64_MAX;
+    CHECK(ringpu_create_compute_bind_group(&core, pipeline, &binding, 1u,
+                                           &bind_group) ==
+          RIN_GPU_ERROR_BACKEND);
+    CHECK(bind_group == 0u && destroy_compute_bind_group_calls == 1u);
+    empty_success_next_compute_bind_group = 1u;
     bind_group = UINT64_MAX;
     CHECK(ringpu_create_compute_bind_group(&core, pipeline, &binding, 1u,
                                            &bind_group) ==

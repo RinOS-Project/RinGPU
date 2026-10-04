@@ -179,6 +179,10 @@ int ringpu_create_shader_module(RinGpuCore* core, const void* rin_shader_ir,
         free(snapshot);
         return result;
     }
+    if (cookie == 0u) {
+        free(snapshot);
+        return RIN_GPU_ERROR_BACKEND;
+    }
     result = ringpu_allocate(core, RIN_GPU_OBJECT_SHADER_MODULE,
                              shader_module, &slot);
     if (result != RIN_GPU_OK) {
