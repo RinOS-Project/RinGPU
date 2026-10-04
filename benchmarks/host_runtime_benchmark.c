@@ -22,6 +22,8 @@
 
 #define BENCHMARK_BUFFER_BYTES 4096u
 #define BENCHMARK_READBACK_BYTES BENCHMARK_BUFFER_BYTES
+#define PIPELINE_CACHE_BATCH_SIZE 16u
+#define PIPELINE_CACHE_CAPACITY 64u
 #define FRAME_WIDTH 32u
 #define FRAME_HEIGHT 32u
 #define FRAME_BYTES (FRAME_WIDTH * FRAME_HEIGHT * 4u)
@@ -38,6 +40,12 @@ typedef struct BenchmarkRuntime {
     RinGpuHandle descriptor_buffer;
     RinGpuHandle descriptor_shader;
     RinGpuHandle descriptor_pipeline;
+    RinGpuHandle pipeline_cache_shader;
+    RinGpuHandle pipeline_cache_saturation_shaders[
+        PIPELINE_CACHE_CAPACITY];
+    RinGpuHandle pipeline_cache_saturation_pipelines[
+        PIPELINE_CACHE_CAPACITY];
+    uint32_t pipeline_cache_saturation_count;
     uint64_t submission_value;
     RinGpuRuntime* frame_runtime;
     RinGpuHandle frame_queue;
@@ -427,6 +435,38 @@ static int create_suballocator_benchmark_runtime(BenchmarkRuntime* state)
     return ringpu_runtime_create(&runtime_desc, &state->suballocator_runtime);
 }
 
+static int destroy_pipeline_cache_saturation(BenchmarkRuntime* state)
+{
+    int first_error = RIN_GPU_OK;
+    if (!state || !state->runtime) return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    for (uint32_t index = state->pipeline_cache_saturation_count;
+         index > 0u; --index) {
+        const uint32_t slot = index - 1u;
+        int result;
+        if (state->pipeline_cache_saturation_pipelines[slot] != 0u) {
+            result = ringpu_runtime_destroy_object(
+                state->runtime,
+                state->pipeline_cache_saturation_pipelines[slot]);
+            if (result == RIN_GPU_OK)
+                state->pipeline_cache_saturation_pipelines[slot] = 0u;
+            else if (first_error == RIN_GPU_OK)
+                first_error = result;
+        }
+        if (state->pipeline_cache_saturation_shaders[slot] != 0u) {
+            result = ringpu_runtime_destroy_object(
+                state->runtime,
+                state->pipeline_cache_saturation_shaders[slot]);
+            if (result == RIN_GPU_OK)
+                state->pipeline_cache_saturation_shaders[slot] = 0u;
+            else if (first_error == RIN_GPU_OK)
+                first_error = result;
+        }
+    }
+    if (first_error == RIN_GPU_OK)
+        state->pipeline_cache_saturation_count = 0u;
+    return first_error;
+}
+
 static int destroy_benchmark_runtime(BenchmarkRuntime* state)
 {
     int first_error = RIN_GPU_OK;
@@ -459,6 +499,17 @@ static int destroy_benchmark_runtime(BenchmarkRuntime* state)
         ringpu_runtime_destroy(state->frame_runtime);
     if (state->suballocator_runtime != NULL)
         ringpu_runtime_destroy(state->suballocator_runtime);
+    if (state->pipeline_cache_saturation_count != 0u) {
+        result = destroy_pipeline_cache_saturation(state);
+        if (first_error == RIN_GPU_OK && result != RIN_GPU_OK)
+            first_error = result;
+    }
+    if (state->runtime != NULL && state->pipeline_cache_shader != 0u) {
+        result = ringpu_runtime_destroy_object(
+            state->runtime, state->pipeline_cache_shader);
+        if (first_error == RIN_GPU_OK && result != RIN_GPU_OK)
+            first_error = result;
+    }
     if (state->runtime != NULL && state->descriptor_buffer != 0u) {
         result = ringpu_runtime_destroy_object(state->runtime,
                                               state->descriptor_buffer);
@@ -861,6 +912,111 @@ static int run_descriptor_iteration(BenchmarkRuntime* state,
     return cleanup_result;
 }
 
+static int create_pipeline_cache_shader(BenchmarkRuntime* state,
+                                        uint32_t workgroup_x,
+                                        RinGpuHandle* shader_out)
+{
+    struct PipelineCacheShader {
+        RinShaderHeaderV1 header;
+        RinShaderInstructionV1 instruction;
+    } shader;
+    int result;
+    if (!state || !shader_out || workgroup_x == 0u || workgroup_x > 1024u)
+        return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    *shader_out = 0u;
+    memset(&shader, 0, sizeof(shader));
+    shader.header.magic = RIN_SHADER_MAGIC;
+    shader.header.version = RIN_SHADER_IR_VERSION;
+    shader.header.header_size = sizeof(shader.header);
+    shader.header.total_size = sizeof(shader);
+    shader.header.stage = RIN_SHADER_STAGE_COMPUTE;
+    shader.header.instruction_count = 1u;
+    shader.header.register_count = 1u;
+    shader.header.workgroup_x = workgroup_x;
+    shader.header.workgroup_y = 1u;
+    shader.header.workgroup_z = 1u;
+    set_shader_instruction(&shader.instruction, RIN_SHADER_OP_RETURN,
+                           RIN_SHADER_UNUSED, RIN_SHADER_UNUSED,
+                           RIN_SHADER_UNUSED, RIN_SHADER_UNUSED, 0u);
+    result = ringpu_runtime_create_shader_module(
+        state->runtime, &shader, sizeof(shader), shader_out);
+    return result;
+}
+
+static int saturate_pipeline_cache(BenchmarkRuntime* state)
+{
+    if (!state || !state->runtime ||
+        state->pipeline_cache_saturation_count != 0u)
+        return RIN_GPU_ERROR_STATE;
+    for (uint32_t index = 0u; index < PIPELINE_CACHE_CAPACITY; ++index) {
+        const uint32_t slot = state->pipeline_cache_saturation_count;
+        RinGpuComputePipelineDescV1 desc;
+        int result = create_pipeline_cache_shader(
+            state, index + 1u,
+            &state->pipeline_cache_saturation_shaders[slot]);
+        if (result != RIN_GPU_OK) return result;
+        memset(&desc, 0, sizeof(desc));
+        desc.abi_version = RIN_GPU_ABI_VERSION;
+        desc.struct_size = sizeof(desc);
+        desc.shader_module = state->pipeline_cache_saturation_shaders[slot];
+        result = ringpu_runtime_create_compute_pipeline(
+            state->runtime, &desc,
+            &state->pipeline_cache_saturation_pipelines[slot]);
+        if (result != RIN_GPU_OK) {
+            (void)ringpu_runtime_destroy_object(
+                state->runtime,
+                state->pipeline_cache_saturation_shaders[slot]);
+            state->pipeline_cache_saturation_shaders[slot] = 0u;
+            return result;
+        }
+        state->pipeline_cache_saturation_count++;
+    }
+    return RIN_GPU_OK;
+}
+
+static int run_pipeline_cache_batch_iteration(
+    BenchmarkRuntime* state, uint64_t iteration, uint64_t* checksum_out)
+{
+    RinGpuComputePipelineDescV1 desc;
+    RinGpuHandle pipelines[PIPELINE_CACHE_BATCH_SIZE] = {0u};
+    uint32_t created_count = 0u;
+    int result = RIN_GPU_OK;
+    if (!state || !checksum_out || state->runtime == NULL ||
+        state->pipeline_cache_shader == 0u)
+        return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    memset(&desc, 0, sizeof(desc));
+    desc.abi_version = RIN_GPU_ABI_VERSION;
+    desc.struct_size = sizeof(desc);
+    desc.shader_module = state->pipeline_cache_shader;
+    for (uint32_t index = 0u; index < PIPELINE_CACHE_BATCH_SIZE; ++index) {
+        result = ringpu_runtime_create_compute_pipeline(
+            state->runtime, &desc, &pipelines[index]);
+        if (result != RIN_GPU_OK) break;
+        created_count++;
+        result = ringpu_runtime_destroy_object(
+            state->runtime, pipelines[index]);
+        if (result != RIN_GPU_OK) break;
+        pipelines[index] = 0u;
+    }
+    for (uint32_t index = created_count; index > 0u; --index) {
+        if (pipelines[index - 1u] == 0u) continue;
+        int cleanup_result = ringpu_runtime_destroy_object(
+            state->runtime, pipelines[index - 1u]);
+        if (result == RIN_GPU_OK && cleanup_result != RIN_GPU_OK)
+            result = cleanup_result;
+    }
+    if (result != RIN_GPU_OK) return result;
+    *checksum_out = (*checksum_out * UINT64_C(1099511628211)) ^
+                    (iteration + PIPELINE_CACHE_BATCH_SIZE);
+    return RIN_GPU_OK;
+}
+
+static int run_pipeline_cache_churn_iteration(
+    BenchmarkRuntime* state, uint64_t iteration, uint64_t* checksum_out)
+{
+    return run_pipeline_cache_batch_iteration(state, iteration, checksum_out);
+}
+
 static int run_frame_iteration(BenchmarkRuntime* state, uint64_t iteration,
                                uint64_t* checksum_out)
 {
@@ -1117,6 +1273,80 @@ static int measure_fragmentation_pair(BenchmarkRuntime* state,
                          suballocator_checksum);
 }
 
+static int measure_pipeline_cache_pair(BenchmarkRuntime* state,
+                                       uint32_t iterations,
+                                       uint32_t warmup,
+                                       uint64_t* uncached_samples,
+                                       uint64_t* cached_samples)
+{
+    uint64_t uncached_checksum = UINT64_C(1469598103934665603);
+    uint64_t cached_checksum = UINT64_C(1469598103934665603);
+    if (!state || state->pipeline_cache_saturation_count !=
+                      PIPELINE_CACHE_CAPACITY ||
+        state->pipeline_cache_shader == 0u)
+        return RIN_GPU_ERROR_STATE;
+    for (uint32_t index = 0u; index < warmup; ++index) {
+        int result = run_pipeline_cache_churn_iteration(
+            state, (uint64_t)index + 1u, &uncached_checksum);
+        if (result != RIN_GPU_OK) {
+            fprintf(stderr, "pipeline-cache uncached warmup failed at %"
+                    PRIu32
+                    ": RinGPU status %d\n", index, result);
+            return result;
+        }
+    }
+    for (uint32_t index = 0u; index < iterations; ++index) {
+        const uint64_t sequence = (uint64_t)warmup + index + 1u;
+        int result = time_iteration(state, run_pipeline_cache_churn_iteration,
+                                    sequence, &uncached_checksum,
+                                    &uncached_samples[index]);
+        if (result != RIN_GPU_OK) {
+            fprintf(stderr, "pipeline-cache uncached sample failed at %"
+                    PRIu32
+                    ": RinGPU status %d\n", index, result);
+            return result;
+        }
+    }
+    {
+        int result = report_metric("pipeline_create_destroy_uncached_batch16",
+                                   iterations, warmup, uncached_samples,
+                                   uncached_checksum);
+        if (result != RIN_GPU_OK) return result;
+    }
+
+    {
+        int result = destroy_pipeline_cache_saturation(state);
+        if (result != RIN_GPU_OK) return result;
+    }
+    for (uint32_t index = 0u; index < warmup; ++index) {
+        int result = run_pipeline_cache_churn_iteration(
+            state, (uint64_t)index + 1u, &cached_checksum);
+        if (result != RIN_GPU_OK) {
+            fprintf(stderr, "pipeline-cache cached warmup failed at %"
+                    PRIu32 ": RinGPU status %d\n", index, result);
+            return result;
+        }
+    }
+    for (uint32_t index = 0u; index < iterations; ++index) {
+        const uint64_t sequence = (uint64_t)warmup + index + 1u;
+        int result = time_iteration(state, run_pipeline_cache_churn_iteration,
+                                    sequence, &cached_checksum,
+                                    &cached_samples[index]);
+        if (result != RIN_GPU_OK) {
+            fprintf(stderr, "pipeline-cache cached sample failed at %"
+                    PRIu32 ": RinGPU status %d\n", index, result);
+            return result;
+        }
+    }
+    if (uncached_checksum != cached_checksum) {
+        fprintf(stderr, "pipeline-cache workload checksums differ\n");
+        return RIN_GPU_ERROR_STATE;
+    }
+    return report_metric("pipeline_create_destroy_cached_batch16",
+                         iterations, warmup, cached_samples,
+                         cached_checksum);
+}
+
 static int run_benchmark(uint32_t iterations, uint32_t warmup)
 {
     BenchmarkRuntime state;
@@ -1160,6 +1390,22 @@ static int run_benchmark(uint32_t iterations, uint32_t warmup)
     result = measure_metric(&state, "compute_bind_group_churn",
                             run_descriptor_iteration,
                             iterations, warmup, samples);
+    if (result != RIN_GPU_OK) goto cleanup;
+    result = ringpu_runtime_destroy_object(state.runtime,
+                                           state.descriptor_pipeline);
+    if (result != RIN_GPU_OK) goto cleanup;
+    state.descriptor_pipeline = 0u;
+    result = ringpu_runtime_destroy_object(state.runtime,
+                                           state.descriptor_shader);
+    if (result != RIN_GPU_OK) goto cleanup;
+    state.descriptor_shader = 0u;
+    result = create_pipeline_cache_shader(&state, 65u,
+                                          &state.pipeline_cache_shader);
+    if (result != RIN_GPU_OK) goto cleanup;
+    result = saturate_pipeline_cache(&state);
+    if (result != RIN_GPU_OK) goto cleanup;
+    result = measure_pipeline_cache_pair(&state, iterations, warmup, samples,
+                                         samples + iterations);
     if (result != RIN_GPU_OK) goto cleanup;
     result = measure_metric(&state, "software_frame_roundtrip",
                             run_frame_iteration, iterations, warmup, samples);

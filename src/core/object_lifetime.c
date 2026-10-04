@@ -3,6 +3,7 @@
 
 #include "../command/record.h"
 #include "../pipeline/pipelines.h"
+#include "../pipeline/cache.h"
 #include "../shader/modules.h"
 #include "object_table.h"
 
@@ -70,6 +71,8 @@ static int ringpu_destroy_slot(RinGpuCore* core, RinGpuHandle object,
         if (slot->value.shader_module.reference_count != 0u) {
             return RIN_GPU_ERROR_BUSY;
         }
+        ringpu_pipeline_cache_evict_shader(
+            core, slot->value.shader_module.backend_cookie);
         if (slot->value.shader_module.cache_index !=
             RIN_GPU_SHADER_CACHE_INDEX_NONE) {
             ringpu_shader_cache_release(
@@ -92,9 +95,17 @@ static int ringpu_destroy_slot(RinGpuCore* core, RinGpuHandle object,
             shader->value.shader_module.reference_count == 0u) {
             return RIN_GPU_ERROR_STATE;
         }
-        core->backend.destroy_compute_pipeline(
-            core->backend_context,
-            slot->value.compute_pipeline.backend_cookie);
+        if (slot->value.compute_pipeline.cache_index ==
+            RIN_GPU_PIPELINE_CACHE_INDEX_NONE) {
+            core->backend.destroy_compute_pipeline(
+                core->backend_context,
+                slot->value.compute_pipeline.backend_cookie);
+        } else {
+            result = ringpu_pipeline_cache_release(
+                core, slot->value.compute_pipeline.cache_index,
+                slot->value.compute_pipeline.backend_cookie);
+            if (result != RIN_GPU_OK) return result;
+        }
         shader->value.shader_module.reference_count--;
     } else if (slot->type == RIN_GPU_OBJECT_GRAPHICS_PIPELINE) {
         RinGpuObjectSlot* vertex_shader;
@@ -116,9 +127,17 @@ static int ringpu_destroy_slot(RinGpuCore* core, RinGpuHandle object,
             fragment_shader->value.shader_module.reference_count == 0u) {
             return RIN_GPU_ERROR_STATE;
         }
-        core->backend.destroy_graphics_pipeline(
-            core->backend_context,
-            slot->value.graphics_pipeline.backend_cookie);
+        if (slot->value.graphics_pipeline.cache_index ==
+            RIN_GPU_PIPELINE_CACHE_INDEX_NONE) {
+            core->backend.destroy_graphics_pipeline(
+                core->backend_context,
+                slot->value.graphics_pipeline.backend_cookie);
+        } else {
+            result = ringpu_pipeline_cache_release(
+                core, slot->value.graphics_pipeline.cache_index,
+                slot->value.graphics_pipeline.backend_cookie);
+            if (result != RIN_GPU_OK) return result;
+        }
         vertex_shader->value.shader_module.reference_count--;
         fragment_shader->value.shader_module.reference_count--;
     } else if (slot->type == RIN_GPU_OBJECT_COMPUTE_BIND_GROUP) {

@@ -19,6 +19,10 @@
 #define RIN_GPU_CORE_MAX_COMMANDS 4096u
 #define RIN_GPU_CORE_MAX_IMAGE_SUBRESOURCES 4096u
 #define RIN_GPU_CORE_MAX_SHADER_MODULE_CACHE 64u
+#define RIN_GPU_CORE_MAX_PIPELINE_CACHE 64u
+#define RIN_GPU_PIPELINE_CACHE_INDEX_NONE UINT32_MAX
+#define RIN_GPU_PIPELINE_CACHE_COMPUTE 1u
+#define RIN_GPU_PIPELINE_CACHE_GRAPHICS 2u
 
 #include <ringpu/backend_ops_v1.h>
 
@@ -64,6 +68,25 @@ typedef struct RinGpuShaderModuleCacheEntry {
     uint8_t occupied;
     uint8_t reserved[3];
 } RinGpuShaderModuleCacheEntry;
+
+/* Retains bounded immutable backend realizations while their shader modules
+ * remain alive. Public pipeline handles share entries, and idle entries can
+ * be reused or evicted without extending shader-module lifetime. */
+typedef struct RinGpuPipelineCacheEntry {
+    uint64_t shader_cookie_a;
+    uint64_t shader_cookie_b;
+    uint64_t backend_cookie;
+    uint64_t device_generation;
+    uint64_t descriptor_hash;
+    uint64_t last_used;
+    void* descriptor_snapshot;
+    uint32_t backend_family;
+    uint32_t pipeline_kind;
+    uint32_t reference_count;
+    uint32_t descriptor_size;
+    uint8_t occupied;
+    uint8_t reserved[7];
+} RinGpuPipelineCacheEntry;
 
 typedef struct RinGpuRecordedCommand {
     uint32_t type;
@@ -173,6 +196,8 @@ typedef struct RinGpuObjectSlot {
             uint64_t backend_cookie;
             uint32_t resource_count;
             uint32_t reference_count;
+            uint32_t cache_index;
+            uint32_t reserved;
             uint32_t resource_access[RIN_SHADER_MAX_RESOURCES];
             uint32_t resource_kinds[RIN_SHADER_MAX_RESOURCES];
         } compute_pipeline;
@@ -224,6 +249,8 @@ typedef struct RinGpuObjectSlot {
             uint32_t varying_count;
             uint32_t resource_count;
             uint32_t reference_count;
+            uint32_t cache_index;
+            uint32_t reserved;
             uint32_t resource_access[RIN_SHADER_MAX_RESOURCES];
             uint32_t resource_kinds[RIN_SHADER_MAX_RESOURCES];
         } graphics_pipeline;
@@ -288,6 +315,7 @@ struct RinGpuCore {
      * retirement for host runtimes. It does not make recording to the same
      * command list concurrently safe. */
     volatile long object_operation_lock;
+    volatile long pipeline_cache_lock;
     uint64_t handle_secret;
     uint64_t max_buffer_size;
     uint64_t max_image_size;
@@ -315,6 +343,9 @@ struct RinGpuCore {
     RinGpuObjectSlot objects[RIN_GPU_CORE_MAX_OBJECTS];
     RinGpuShaderModuleCacheEntry
         shader_module_cache[RIN_GPU_CORE_MAX_SHADER_MODULE_CACHE];
+    RinGpuPipelineCacheEntry
+        pipeline_cache[RIN_GPU_CORE_MAX_PIPELINE_CACHE];
+    uint64_t pipeline_cache_clock;
     uint8_t initialized;
     uint8_t device_lost;
     uint8_t marking_command_references;

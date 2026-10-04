@@ -15,6 +15,7 @@ static uint32_t empty_success_next_shader_module;
 static uint32_t empty_success_next_compute_pipeline;
 static uint32_t empty_success_next_compute_bind_group;
 static uint32_t destroy_shader_module_calls;
+static uint32_t create_compute_pipeline_calls;
 static uint32_t destroy_compute_pipeline_calls;
 static uint32_t destroy_compute_bind_group_calls;
 
@@ -49,6 +50,7 @@ static int injected_create_compute_pipeline(
     const RinShaderInfoV1* shader_info, uint64_t* cookie_out)
 {
     int result;
+    ++create_compute_pipeline_calls;
     if (empty_success_next_compute_pipeline != 0u) {
         --empty_success_next_compute_pipeline;
         if (cookie_out != NULL) *cookie_out = 0u;
@@ -152,6 +154,49 @@ static int make_core(RinGpuCore* core, RinGpuSoftwareBackend** backend_out)
     return 1;
 }
 
+static int test_pipeline_reuse_after_handle_retirement(
+    const void* shader_ir, uint64_t shader_size)
+{
+    RinGpuCore core;
+    RinGpuSoftwareBackend* backend = NULL;
+    RinGpuHandle shader_module = 0u;
+    RinGpuHandle pipeline = 0u;
+    RinGpuComputePipelineDescV1 desc;
+    const uint32_t initial_creates = create_compute_pipeline_calls;
+    const uint32_t initial_destroys = destroy_compute_pipeline_calls;
+
+    memset(&core, 0, sizeof(core));
+    CHECK(make_core(&core, &backend));
+    delegated_ops = core.backend;
+    core.backend.create_shader_module = injected_create_shader_module;
+    core.backend.destroy_shader_module = injected_destroy_shader_module;
+    core.backend.create_compute_pipeline = injected_create_compute_pipeline;
+    core.backend.destroy_compute_pipeline = injected_destroy_compute_pipeline;
+    CHECK(ringpu_create_shader_module(&core, shader_ir, shader_size,
+                                     &shader_module) == RIN_GPU_OK);
+    memset(&desc, 0, sizeof(desc));
+    desc.abi_version = RIN_GPU_ABI_VERSION;
+    desc.struct_size = sizeof(desc);
+    desc.shader_module = shader_module;
+    CHECK(ringpu_create_compute_pipeline(&core, &desc, &pipeline) ==
+          RIN_GPU_OK);
+    CHECK(create_compute_pipeline_calls == initial_creates + 1u);
+    CHECK(ringpu_destroy(&core, pipeline) == RIN_GPU_OK);
+    CHECK(destroy_compute_pipeline_calls == initial_destroys);
+
+    pipeline = 0u;
+    CHECK(ringpu_create_compute_pipeline(&core, &desc, &pipeline) ==
+          RIN_GPU_OK);
+    CHECK(create_compute_pipeline_calls == initial_creates + 1u);
+    CHECK(ringpu_destroy(&core, pipeline) == RIN_GPU_OK);
+    CHECK(ringpu_destroy(&core, shader_module) == RIN_GPU_OK);
+    CHECK(destroy_compute_pipeline_calls == initial_destroys + 1u);
+    ringpu_core_shutdown(&core);
+    CHECK(destroy_compute_pipeline_calls == initial_destroys + 1u);
+    ringpu_software_backend_destroy(backend);
+    return 0;
+}
+
 static void set_instruction(RinShaderInstructionV1* instruction,
                             uint16_t opcode, uint16_t destination,
                             uint16_t source0, uint16_t source1,
@@ -224,6 +269,7 @@ int main(void)
     RinGpuHandle buffer = 0u;
     RinGpuHandle shader_module = 0u;
     RinGpuHandle pipeline = 0u;
+    RinGpuHandle pipeline_alias = 0u;
     RinGpuHandle bind_group = 0u;
     RinGpuHandle queue = 0u;
     RinGpuHandle command_list = 0u;
@@ -284,6 +330,10 @@ int main(void)
     CHECK(pipeline == 0u && destroy_compute_pipeline_calls == 1u);
     CHECK(ringpu_create_compute_pipeline(&core, &pipeline_desc, &pipeline) ==
           RIN_GPU_OK);
+    CHECK(create_compute_pipeline_calls == 3u);
+    CHECK(ringpu_create_compute_pipeline(&core, &pipeline_desc,
+                                        &pipeline_alias) == RIN_GPU_OK);
+    CHECK(pipeline_alias != pipeline && create_compute_pipeline_calls == 3u);
 
     memset(&binding, 0, sizeof(binding));
     binding.abi_version = RIN_GPU_ABI_VERSION;
@@ -371,7 +421,12 @@ int main(void)
     submit.command_list = indirect_command_list;
     CHECK(ringpu_queue_submit(&core, queue, &submit) == RIN_GPU_OK);
 
+    CHECK(ringpu_destroy(&core, pipeline_alias) == RIN_GPU_OK);
+    CHECK(destroy_compute_pipeline_calls == 1u);
     ringpu_core_shutdown(&core);
+    CHECK(destroy_compute_pipeline_calls == 2u);
     ringpu_software_backend_destroy(backend);
+    CHECK(test_pipeline_reuse_after_handle_retirement(
+              shader, sizeof(shader)) == 0);
     return 0;
 }

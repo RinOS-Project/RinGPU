@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include "pipelines.h"
+#include "cache.h"
 
 #include "../core/object_table.h"
 #include "../validation/resource.h"
@@ -17,6 +18,8 @@ int ringpu_create_compute_pipeline(
     uint32_t resource_access[RIN_SHADER_MAX_RESOURCES];
     uint32_t resource_kinds[RIN_SHADER_MAX_RESOURCES];
     uint64_t cookie = 0u;
+    uint32_t cache_index = RIN_GPU_PIPELINE_CACHE_INDEX_NONE;
+    int cache_hit;
     int result = ringpu_core_ready(core);
 
     if (result != RIN_GPU_OK) return result;
@@ -44,27 +47,52 @@ int ringpu_create_compute_pipeline(
             return RIN_GPU_ERROR_UNSUPPORTED;
         }
     }
-    result = core->backend.create_compute_pipeline(
-        core->backend_context, shader->value.shader_module.backend_cookie,
-        &shader->value.shader_module.info, &cookie);
-    if (result != RIN_GPU_OK) {
-        if (cookie != 0u)
-            core->backend.destroy_compute_pipeline(core->backend_context,
-                                                   cookie);
-        return result;
+    cache_hit = ringpu_pipeline_cache_acquire(
+        core, RIN_GPU_PIPELINE_CACHE_COMPUTE,
+        shader->value.shader_module.backend_cookie, 0u, NULL, 0u,
+        &cookie, &cache_index);
+    if (!cache_hit) {
+        result = core->backend.create_compute_pipeline(
+            core->backend_context, shader->value.shader_module.backend_cookie,
+            &shader->value.shader_module.info, &cookie);
+        if (result != RIN_GPU_OK) {
+            if (cookie != 0u)
+                core->backend.destroy_compute_pipeline(
+                    core->backend_context, cookie);
+            return result;
+        }
+        if (cookie == 0u) return RIN_GPU_ERROR_BACKEND;
     }
-    if (cookie == 0u) return RIN_GPU_ERROR_BACKEND;
     result = ringpu_allocate(core, RIN_GPU_OBJECT_COMPUTE_PIPELINE,
                              pipeline, &slot);
     if (result != RIN_GPU_OK) {
-        core->backend.destroy_compute_pipeline(core->backend_context, cookie);
+        if (cache_hit)
+            (void)ringpu_pipeline_cache_release(core, cache_index, cookie);
+        else
+            core->backend.destroy_compute_pipeline(core->backend_context,
+                                                   cookie);
         *pipeline = 0u;
         return result;
+    }
+    if (!cache_hit) {
+        uint64_t published_cookie = cookie;
+        int publish_result = ringpu_pipeline_cache_publish(
+            core, RIN_GPU_PIPELINE_CACHE_COMPUTE,
+            shader->value.shader_module.backend_cookie, 0u, NULL, 0u,
+            cookie, &published_cookie, &cache_index);
+        if (publish_result == 2) {
+            core->backend.destroy_compute_pipeline(core->backend_context,
+                                                   cookie);
+            cookie = published_cookie;
+        } else if (publish_result == 0) {
+            cache_index = RIN_GPU_PIPELINE_CACHE_INDEX_NONE;
+        }
     }
     slot->value.compute_pipeline.shader_module = desc->shader_module;
     slot->value.compute_pipeline.backend_cookie = cookie;
     slot->value.compute_pipeline.resource_count =
         shader->value.shader_module.info.resource_count;
+    slot->value.compute_pipeline.cache_index = cache_index;
     memcpy(slot->value.compute_pipeline.resource_access, resource_access,
            sizeof(resource_access));
     memcpy(slot->value.compute_pipeline.resource_kinds, resource_kinds,

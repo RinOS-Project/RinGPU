@@ -35,6 +35,7 @@ set(RINGPU_SOURCES
     src/presentation/present.c
     src/presentation/render_pass.c
     src/pipeline/pipelines.c
+    src/pipeline/cache.c
     src/queue/submit.c
     src/pipeline/graphics.c
     src/resource/resources.c

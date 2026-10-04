@@ -11,6 +11,7 @@ static uint32_t fail_next_graphics_pipeline;
 static uint32_t fail_next_graphics_bind_group;
 static uint32_t empty_success_next_graphics_pipeline;
 static uint32_t empty_success_next_graphics_bind_group;
+static uint32_t create_graphics_pipeline_calls;
 static uint32_t destroy_graphics_pipeline_calls;
 static uint32_t destroy_graphics_bind_group_calls;
 
@@ -22,6 +23,7 @@ static int injected_create_graphics_pipeline(
     const RinGpuBackendGraphicsPipelineDescV1* desc, uint64_t* cookie_out)
 {
     int result;
+    ++create_graphics_pipeline_calls;
     if (empty_success_next_graphics_pipeline != 0u) {
         --empty_success_next_graphics_pipeline;
         if (cookie_out != NULL) *cookie_out = 0u;
@@ -223,7 +225,8 @@ int main(void)
     RinGpuSubmitInfoV1 submit = {0};
     RinGpuImageReadbackV1 readback = {0};
     RinGpuHandle vertex_module = 0u, fragment_module = 0u;
-    RinGpuHandle pipeline = 0u, storage_image = 0u, color_image = 0u;
+    RinGpuHandle pipeline = 0u, pipeline_alias = 0u, variant_pipeline = 0u;
+    RinGpuHandle storage_image = 0u, color_image = 0u;
     RinGpuHandle bind_group = 0u, queue = 0u, command_list = 0u, fence = 0u;
     uint8_t value = 0u;
     const char* failure_stage = "initialization";
@@ -284,6 +287,22 @@ int main(void)
             fprintf(stderr, "graphics pipeline error %d\n", pipeline_result);
             goto done;
         }
+    }
+    if (create_graphics_pipeline_calls != 3u ||
+        ringpu_create_graphics_pipeline_native_v2(
+            &core, &pipeline_desc, NULL, 0u, NULL, 0u,
+            &pipeline_alias) != RIN_GPU_OK ||
+        pipeline_alias == pipeline || create_graphics_pipeline_calls != 3u)
+        goto done;
+    {
+        RinGpuGraphicsPipelineNativeDescV2 variant_desc = pipeline_desc;
+        variant_desc.base.primitive_topology = RIN_GPU_PRIMITIVE_LINE_LIST;
+        if (ringpu_create_graphics_pipeline_native_v2(
+                &core, &variant_desc, NULL, 0u, NULL, 0u,
+                &variant_pipeline) != RIN_GPU_OK ||
+            variant_pipeline == pipeline ||
+            create_graphics_pipeline_calls != 4u)
+            goto done;
     }
     storage_desc.abi_version = RIN_GPU_ABI_VERSION;
     storage_desc.struct_size = sizeof(storage_desc);
@@ -426,11 +445,44 @@ int main(void)
             goto done;
         }
     }
+    failure_stage = "idle graphics pipeline cache";
+    if (ringpu_destroy(&core, command_list) != RIN_GPU_OK) goto done;
+    command_list = 0u;
+    if (ringpu_destroy(&core, bind_group) != RIN_GPU_OK) goto done;
+    bind_group = 0u;
+    if (ringpu_destroy(&core, pipeline_alias) != RIN_GPU_OK) goto done;
+    pipeline_alias = 0u;
+    if (ringpu_destroy(&core, variant_pipeline) != RIN_GPU_OK) goto done;
+    variant_pipeline = 0u;
+    if (ringpu_destroy(&core, pipeline) != RIN_GPU_OK) goto done;
+    pipeline = 0u;
+    if (destroy_graphics_pipeline_calls != 1u) goto done;
+    {
+        RinGpuHandle reused_pipeline = 0u;
+        if (ringpu_create_graphics_pipeline_native_v2(
+                &core, &pipeline_desc, NULL, 0u, NULL, 0u,
+                &reused_pipeline) != RIN_GPU_OK ||
+            create_graphics_pipeline_calls != 4u ||
+            ringpu_destroy(&core, reused_pipeline) != RIN_GPU_OK ||
+            destroy_graphics_pipeline_calls != 1u)
+            goto done;
+    }
+    if (ringpu_destroy(&core, vertex_module) != RIN_GPU_OK) goto done;
+    vertex_module = 0u;
+    if (destroy_graphics_pipeline_calls != 3u ||
+        ringpu_destroy(&core, fragment_module) != RIN_GPU_OK)
+        goto done;
+    fragment_module = 0u;
     result = 0;
 done:
     if (result != 0)
         fprintf(stderr, "storage image test failed at %s\n", failure_stage);
     ringpu_core_shutdown(&core);
+    if (destroy_graphics_pipeline_calls != 3u) {
+        fprintf(stderr, "pipeline cache retired %u realizations, expected 3\n",
+                destroy_graphics_pipeline_calls);
+        result = 1;
+    }
     ringpu_software_backend_destroy(backend);
     return result;
 }

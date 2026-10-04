@@ -13,6 +13,7 @@
 #include "../resource/resources.h"
 #include "../shader/modules.h"
 #include "../pipeline/pipelines.h"
+#include "../pipeline/cache.h"
 #include "../command/commands.h"
 #include "../command/draw.h"
 #include "../platform/thread.h"
@@ -390,9 +391,16 @@ void ringpu_core_shutdown(RinGpuCore* core) {
             slot->type != RIN_GPU_OBJECT_GRAPHICS_PIPELINE) {
             continue;
         }
-        core->backend.destroy_graphics_pipeline(
-            core->backend_context,
-            slot->value.graphics_pipeline.backend_cookie);
+        if (slot->value.graphics_pipeline.cache_index ==
+            RIN_GPU_PIPELINE_CACHE_INDEX_NONE) {
+            core->backend.destroy_graphics_pipeline(
+                core->backend_context,
+                slot->value.graphics_pipeline.backend_cookie);
+        } else {
+            (void)ringpu_pipeline_cache_release(
+                core, slot->value.graphics_pipeline.cache_index,
+                slot->value.graphics_pipeline.backend_cookie);
+        }
         if (ringpu_slot_retained(core,
                         slot->value.graphics_pipeline.vertex_shader,
                         RIN_GPU_OBJECT_SHADER_MODULE, NULL, &vertex_shader) ==
@@ -416,9 +424,16 @@ void ringpu_core_shutdown(RinGpuCore* core) {
             slot->type != RIN_GPU_OBJECT_COMPUTE_PIPELINE) {
             continue;
         }
-        core->backend.destroy_compute_pipeline(
-            core->backend_context,
-            slot->value.compute_pipeline.backend_cookie);
+        if (slot->value.compute_pipeline.cache_index ==
+            RIN_GPU_PIPELINE_CACHE_INDEX_NONE) {
+            core->backend.destroy_compute_pipeline(
+                core->backend_context,
+                slot->value.compute_pipeline.backend_cookie);
+        } else {
+            (void)ringpu_pipeline_cache_release(
+                core, slot->value.compute_pipeline.cache_index,
+                slot->value.compute_pipeline.backend_cookie);
+        }
         if (ringpu_slot_retained(core,
                         slot->value.compute_pipeline.shader_module,
                         RIN_GPU_OBJECT_SHADER_MODULE, NULL, &shader) ==
@@ -428,6 +443,7 @@ void ringpu_core_shutdown(RinGpuCore* core) {
         }
         ringpu_release_slot(slot);
     }
+    ringpu_pipeline_cache_clear(core);
     for (uint32_t index = 0; index < RIN_GPU_CORE_MAX_OBJECTS; index++) {
         RinGpuObjectSlot* slot = &core->objects[index];
         if (!slot->occupied) continue;
