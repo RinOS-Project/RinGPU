@@ -611,6 +611,46 @@ typedef struct SwQueryState {
     uint64_t values[RIN_GPU_QUERY_RESULT_VALUE_COUNT];
 } SwQueryState;
 
+#define SW_MEMORY_POOL_BLOCK_BYTES UINT64_C(65536)
+#define SW_MEMORY_POOL_GRANULARITY UINT64_C(4096)
+#define SW_MEMORY_POOL_SLOT_COUNT 16u
+#define SW_MEMORY_POOL_HASH_BUCKETS 512u
+#define SW_MEMORY_POOL_DIRECT_BLOCK UINT32_MAX
+#define SW_MEMORY_POOL_INDEX_NONE UINT32_MAX
+
+typedef struct SwMemoryPoolBlock {
+    uint8_t* bytes;
+    void* allocation;
+    uint64_t capacity;
+    uint64_t allocation_bytes;
+    uint32_t active_allocations;
+    uint32_t used_slots;
+} SwMemoryPoolBlock;
+
+typedef struct SwMemoryPoolAllocation {
+    uint8_t* address;
+    void* allocation_base;
+    uint64_t size_bytes;
+    uint64_t allocation_bytes;
+    uint32_t block_index;
+    uint32_t active;
+    uint32_t start_slot;
+    uint32_t slot_count;
+    uint32_t next_free;
+    uint32_t next_hash;
+} SwMemoryPoolAllocation;
+
+typedef struct SwMemoryPoolState {
+    SwMemoryPoolBlock blocks[RIN_GPU_CORE_MAX_OBJECTS];
+    SwMemoryPoolAllocation allocations[RIN_GPU_CORE_MAX_OBJECTS];
+    uint64_t backing_allocation_count;
+    uint64_t reserved_bytes;
+    uint64_t suballocated_bytes;
+    uint32_t active_allocations;
+    uint32_t free_allocation_head;
+    uint32_t hash_buckets[SW_MEMORY_POOL_HASH_BUCKETS];
+} SwMemoryPoolState;
+
 struct RinGpuSoftwareBackend {
     uint64_t max_total_bytes;
     uint64_t allocated_bytes;
@@ -620,11 +660,32 @@ struct RinGpuSoftwareBackend {
     void* image_context;
     uint32_t flags;
     uint32_t reserved0;
+    SwMemoryPoolState* memory_pool;
     uint64_t deterministic_seed;
     RinGpuSoftwareBackendStatsV1 stats;
     uint64_t timestamp_ticks;
     SwQueryState queries[RIN_GPU_CORE_MAX_OBJECTS];
 };
+
+static void sw_memory_pool_aligned_free(RinGpuSoftwareBackend* backend,
+                                       void* allocation, uint64_t bytes);
+
+static void sw_memory_pool_reclaim_idle(RinGpuSoftwareBackend* backend)
+{
+    SwMemoryPoolState* pool;
+    uint32_t index;
+
+    if (!backend || !backend->memory_pool) return;
+    pool = backend->memory_pool;
+    for (index = 0u; index < RIN_GPU_CORE_MAX_OBJECTS; ++index) {
+        SwMemoryPoolBlock* block = &pool->blocks[index];
+        if (!block->bytes || block->active_allocations != 0u) continue;
+        sw_memory_pool_aligned_free(backend, block->allocation,
+                                   block->allocation_bytes);
+        pool->reserved_bytes -= block->capacity;
+        memset(block, 0, sizeof(*block));
+    }
+}
 
 static uint32_t sw_image_bytes_per_pixel(uint32_t format);
 static int sw_multiply_u64(uint64_t left, uint64_t right, uint64_t* value);
@@ -864,6 +925,9 @@ static int sw_reserve(RinGpuSoftwareBackend* backend, uint64_t bytes)
         return RIN_GPU_ERROR_INVALID_ARGUMENT;
     if (backend->allocated_bytes > backend->max_total_bytes ||
         bytes > backend->max_total_bytes - backend->allocated_bytes)
+        sw_memory_pool_reclaim_idle(backend);
+    if (backend->allocated_bytes > backend->max_total_bytes ||
+        bytes > backend->max_total_bytes - backend->allocated_bytes)
         return RIN_GPU_ERROR_NO_MEMORY;
     backend->allocated_bytes += bytes;
     return RIN_GPU_OK;
@@ -905,6 +969,352 @@ static void sw_free(RinGpuSoftwareBackend* backend, void* allocation,
         free(allocation);
     if (backend != NULL && bytes != 0u)
         sw_release(backend, bytes);
+}
+
+static void* sw_memory_pool_aligned_alloc(RinGpuSoftwareBackend* backend,
+                                          uint64_t alignment,
+                                          uint64_t bytes,
+                                          void** allocation_out,
+                                          uint64_t* allocation_bytes_out)
+{
+    void* allocation;
+    uintptr_t address;
+    uint64_t allocation_bytes;
+    uint64_t padding;
+    if (!backend || alignment < sizeof(void*) || alignment > SIZE_MAX ||
+        bytes == 0u || bytes > SIZE_MAX || bytes % alignment != 0u ||
+        (alignment & (alignment - 1u)) != 0u || !allocation_out ||
+        !allocation_bytes_out)
+        return NULL;
+    padding = alignment - 1u;
+    if (bytes > UINT64_MAX - padding) return NULL;
+    allocation_bytes = bytes + padding;
+    allocation = sw_alloc(backend, allocation_bytes, 1);
+    if (!allocation) return NULL;
+    address = (uintptr_t)allocation;
+    if (address > UINTPTR_MAX - (uintptr_t)padding) {
+        sw_free(backend, allocation, allocation_bytes);
+        return NULL;
+    }
+    address = (address + (uintptr_t)padding) &
+              ~((uintptr_t)alignment - (uintptr_t)1u);
+    *allocation_out = allocation;
+    *allocation_bytes_out = allocation_bytes;
+    return (void*)address;
+}
+
+static void sw_memory_pool_aligned_free(RinGpuSoftwareBackend* backend,
+                                        void* allocation, uint64_t bytes)
+{
+    if (!allocation) return;
+    sw_free(backend, allocation, bytes);
+}
+
+static void sw_memory_pool_state_init(SwMemoryPoolState* pool)
+{
+    uint32_t index;
+    if (!pool) return;
+    pool->free_allocation_head = 0u;
+    for (index = 0u; index < SW_MEMORY_POOL_HASH_BUCKETS; ++index)
+        pool->hash_buckets[index] = SW_MEMORY_POOL_INDEX_NONE;
+    for (index = 0u; index < RIN_GPU_CORE_MAX_OBJECTS; ++index)
+        pool->allocations[index].next_free =
+            index + 1u < RIN_GPU_CORE_MAX_OBJECTS
+                ? index + 1u
+                : SW_MEMORY_POOL_INDEX_NONE;
+}
+
+static int sw_memory_pool_align_up(uint64_t value, uint64_t alignment,
+                                   uint64_t* aligned_out)
+{
+    uint64_t mask;
+    if (!aligned_out || alignment == 0u ||
+        (alignment & (alignment - 1u)) != 0u)
+        return 0;
+    mask = alignment - 1u;
+    if (value > UINT64_MAX - mask) return 0;
+    *aligned_out = (value + mask) & ~mask;
+    return 1;
+}
+
+static uint32_t sw_memory_pool_hash(const void* address)
+{
+    return (uint32_t)(((uintptr_t)address >> 4u) &
+                      (SW_MEMORY_POOL_HASH_BUCKETS - 1u));
+}
+
+static uint32_t sw_memory_pool_take_allocation_slot(SwMemoryPoolState* pool)
+{
+    uint32_t index;
+    if (!pool || pool->free_allocation_head == SW_MEMORY_POOL_INDEX_NONE)
+        return SW_MEMORY_POOL_INDEX_NONE;
+    index = pool->free_allocation_head;
+    pool->free_allocation_head = pool->allocations[index].next_free;
+    pool->allocations[index].next_free = SW_MEMORY_POOL_INDEX_NONE;
+    return index;
+}
+
+static void sw_memory_pool_return_allocation_slot(SwMemoryPoolState* pool,
+                                                   uint32_t index)
+{
+    SwMemoryPoolAllocation* allocation;
+    if (!pool || index >= RIN_GPU_CORE_MAX_OBJECTS) return;
+    allocation = &pool->allocations[index];
+    memset(allocation, 0, sizeof(*allocation));
+    allocation->next_free = pool->free_allocation_head;
+    allocation->next_hash = SW_MEMORY_POOL_INDEX_NONE;
+    pool->free_allocation_head = index;
+}
+
+static void sw_memory_pool_hash_insert(SwMemoryPoolState* pool,
+                                       uint32_t index)
+{
+    SwMemoryPoolAllocation* allocation = &pool->allocations[index];
+    const uint32_t bucket = sw_memory_pool_hash(allocation->address);
+    allocation->next_hash = pool->hash_buckets[bucket];
+    pool->hash_buckets[bucket] = index;
+}
+
+static int sw_memory_pool_find_slots(const SwMemoryPoolBlock* block,
+                                     uint32_t allocation_slots,
+                                     uint32_t alignment_slots,
+                                     uint64_t alignment,
+                                     uint32_t* start_slot_out)
+{
+    uint32_t capacity_slots;
+    uint32_t start_slot;
+    if (!block || !block->bytes || !start_slot_out || allocation_slots == 0u ||
+        alignment == 0u || alignment_slots == 0u)
+        return 0;
+    capacity_slots = (uint32_t)(block->capacity / SW_MEMORY_POOL_GRANULARITY);
+    if (allocation_slots > capacity_slots ||
+        capacity_slots > SW_MEMORY_POOL_SLOT_COUNT)
+        return 0;
+    if (((uintptr_t)block->bytes % (uintptr_t)alignment) != 0u) return 0;
+    for (start_slot = 0u;
+         start_slot + allocation_slots <= capacity_slots; ++start_slot) {
+        const uint32_t mask = ((UINT32_C(1) << allocation_slots) - 1u)
+                              << start_slot;
+        if (start_slot % alignment_slots == 0u &&
+            (block->used_slots & mask) == 0u) {
+            *start_slot_out = start_slot;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static void sw_memory_pool_publish_allocation(
+    SwMemoryPoolState* pool, uint32_t allocation_index,
+    uint32_t block_index, uint32_t start_slot, uint32_t allocation_slots,
+    uint8_t* address, uint64_t size_bytes)
+{
+    SwMemoryPoolAllocation* allocation =
+        &pool->allocations[allocation_index];
+    allocation->address = address;
+    allocation->size_bytes = size_bytes;
+    allocation->block_index = block_index;
+    allocation->active = 1u;
+    allocation->start_slot = start_slot;
+    allocation->slot_count = allocation_slots;
+    if (block_index != SW_MEMORY_POOL_DIRECT_BLOCK) {
+        const uint32_t mask = ((UINT32_C(1) << allocation_slots) - 1u)
+                              << start_slot;
+        pool->blocks[block_index].used_slots |= mask;
+        pool->blocks[block_index].active_allocations++;
+        pool->active_allocations++;
+        pool->suballocated_bytes += size_bytes;
+    }
+    sw_memory_pool_hash_insert(pool, allocation_index);
+    memset(address, 0, (size_t)size_bytes);
+}
+
+static int sw_memory_pool_allocate(
+    RinGpuSoftwareBackend* backend, const RinGpuMemoryDescV1* desc,
+    void** allocation_out)
+{
+    SwMemoryPoolState* pool;
+    uint32_t allocation_index;
+    uint64_t alignment;
+    uint32_t index;
+    int use_pool;
+
+    if (!backend || !backend->memory_pool || !desc || !allocation_out ||
+        desc->size_bytes == 0u || desc->size_bytes > SIZE_MAX)
+        return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    *allocation_out = NULL;
+    pool = backend->memory_pool;
+    allocation_index = sw_memory_pool_take_allocation_slot(pool);
+    if (allocation_index == SW_MEMORY_POOL_INDEX_NONE)
+        return RIN_GPU_ERROR_LIMIT;
+    alignment = desc->alignment == 0u ? 1u : desc->alignment;
+    if ((alignment & (alignment - 1u)) != 0u) {
+        sw_memory_pool_return_allocation_slot(pool, allocation_index);
+        return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    }
+
+    use_pool = (desc->flags & RIN_GPU_MEMORY_BINDING_DEDICATED) == 0u &&
+        desc->size_bytes <= SW_MEMORY_POOL_BLOCK_BYTES &&
+        alignment <= SW_MEMORY_POOL_BLOCK_BYTES;
+    if (use_pool) {
+        uint64_t rounded_size;
+        const uint32_t allocation_slots = (uint32_t)(
+            (desc->size_bytes + SW_MEMORY_POOL_GRANULARITY - 1u) /
+            SW_MEMORY_POOL_GRANULARITY);
+        const uint32_t alignment_slots = alignment <=
+                SW_MEMORY_POOL_GRANULARITY
+            ? 1u
+            : (uint32_t)(alignment / SW_MEMORY_POOL_GRANULARITY);
+
+        for (index = 0u; index < RIN_GPU_CORE_MAX_OBJECTS; ++index) {
+            SwMemoryPoolBlock* block = &pool->blocks[index];
+            uint32_t start_slot;
+            if (!sw_memory_pool_find_slots(block, allocation_slots,
+                                           alignment_slots, alignment,
+                                           &start_slot))
+                continue;
+            sw_memory_pool_publish_allocation(
+                pool, allocation_index, index, start_slot, allocation_slots,
+                block->bytes +
+                    (size_t)start_slot * (size_t)SW_MEMORY_POOL_GRANULARITY,
+                desc->size_bytes);
+            *allocation_out = pool->allocations[allocation_index].address;
+            return RIN_GPU_OK;
+        }
+
+        for (index = 0u; index < RIN_GPU_CORE_MAX_OBJECTS; ++index)
+            if (!pool->blocks[index].bytes) break;
+        if (index == RIN_GPU_CORE_MAX_OBJECTS)
+            goto direct;
+        {
+            uint64_t capacity = SW_MEMORY_POOL_BLOCK_BYTES;
+            uint64_t available = backend->allocated_bytes <=
+                    backend->max_total_bytes
+                ? backend->max_total_bytes - backend->allocated_bytes : 0u;
+            const uint64_t backing_alignment = alignment >
+                    SW_MEMORY_POOL_GRANULARITY
+                ? alignment : SW_MEMORY_POOL_GRANULARITY;
+            uint8_t* storage;
+            void* storage_allocation;
+            uint64_t storage_allocation_bytes;
+            uint32_t start_slot;
+
+            if (!sw_memory_pool_align_up(
+                    desc->size_bytes > SW_MEMORY_POOL_GRANULARITY
+                        ? desc->size_bytes
+                        : SW_MEMORY_POOL_GRANULARITY,
+                    SW_MEMORY_POOL_GRANULARITY, &rounded_size)) {
+                sw_memory_pool_return_allocation_slot(pool,
+                                                     allocation_index);
+                return RIN_GPU_ERROR_LIMIT;
+            }
+            if (capacity > available) capacity = available;
+            capacity -= capacity % backing_alignment;
+            if (capacity < rounded_size) goto direct;
+            storage = (uint8_t*)sw_memory_pool_aligned_alloc(
+                backend, backing_alignment, capacity, &storage_allocation,
+                &storage_allocation_bytes);
+            if (!storage) goto direct;
+            pool->blocks[index].bytes = storage;
+            pool->blocks[index].allocation = storage_allocation;
+            pool->blocks[index].capacity = capacity;
+            pool->blocks[index].allocation_bytes = storage_allocation_bytes;
+            pool->reserved_bytes += capacity;
+            pool->backing_allocation_count++;
+            if (!sw_memory_pool_find_slots(&pool->blocks[index],
+                                           allocation_slots,
+                                           alignment_slots, alignment,
+                                           &start_slot)) {
+                sw_memory_pool_aligned_free(backend, storage_allocation,
+                                            storage_allocation_bytes);
+                pool->reserved_bytes -= capacity;
+                memset(&pool->blocks[index], 0,
+                       sizeof(pool->blocks[index]));
+                goto direct;
+            }
+            sw_memory_pool_publish_allocation(
+                pool, allocation_index, index, start_slot, allocation_slots,
+                storage + (size_t)start_slot *
+                    (size_t)SW_MEMORY_POOL_GRANULARITY,
+                desc->size_bytes);
+            *allocation_out = pool->allocations[allocation_index].address;
+            return RIN_GPU_OK;
+        }
+    }
+
+direct:
+    {
+        uint64_t direct_alignment = alignment < sizeof(void*)
+            ? sizeof(void*) : alignment;
+        uint64_t direct_size;
+        uint64_t direct_allocation_bytes;
+        void* direct_base = NULL;
+        uint8_t* direct_address;
+
+        if (!sw_memory_pool_align_up(desc->size_bytes, direct_alignment,
+                                     &direct_size)) {
+            sw_memory_pool_return_allocation_slot(pool, allocation_index);
+            return RIN_GPU_ERROR_LIMIT;
+        }
+        direct_address = (uint8_t*)sw_memory_pool_aligned_alloc(
+            backend, direct_alignment, direct_size, &direct_base,
+            &direct_allocation_bytes);
+        if (!direct_address) {
+            sw_memory_pool_return_allocation_slot(pool, allocation_index);
+            return RIN_GPU_ERROR_NO_MEMORY;
+        }
+        sw_memory_pool_publish_allocation(
+            pool, allocation_index, SW_MEMORY_POOL_DIRECT_BLOCK, 0u, 0u,
+            direct_address, desc->size_bytes);
+        pool->allocations[allocation_index].allocation_base = direct_base;
+        pool->allocations[allocation_index].allocation_bytes =
+            direct_allocation_bytes;
+        *allocation_out = direct_address;
+        return RIN_GPU_OK;
+    }
+}
+
+static void sw_memory_pool_destroy_allocation(
+    RinGpuSoftwareBackend* backend, void* address, uint64_t size_bytes)
+{
+    SwMemoryPoolState* pool;
+    uint32_t bucket;
+    uint32_t previous = SW_MEMORY_POOL_INDEX_NONE;
+    uint32_t index;
+
+    if (!backend || !backend->memory_pool || !address) return;
+    pool = backend->memory_pool;
+    bucket = sw_memory_pool_hash(address);
+    index = pool->hash_buckets[bucket];
+    while (index != SW_MEMORY_POOL_INDEX_NONE) {
+        SwMemoryPoolAllocation* allocation = &pool->allocations[index];
+        if (allocation->address != address) {
+            previous = index;
+            index = allocation->next_hash;
+            continue;
+        }
+        if (allocation->size_bytes != size_bytes) return;
+        if (previous == SW_MEMORY_POOL_INDEX_NONE)
+            pool->hash_buckets[bucket] = allocation->next_hash;
+        else
+            pool->allocations[previous].next_hash = allocation->next_hash;
+        if (allocation->block_index == SW_MEMORY_POOL_DIRECT_BLOCK) {
+            sw_memory_pool_aligned_free(backend,
+                                        allocation->allocation_base,
+                                        allocation->allocation_bytes);
+        } else {
+            SwMemoryPoolBlock* block =
+                &pool->blocks[allocation->block_index];
+            const uint32_t mask = ((UINT32_C(1) << allocation->slot_count) - 1u)
+                                  << allocation->start_slot;
+            block->used_slots &= ~mask;
+            block->active_allocations--;
+            pool->active_allocations--;
+            pool->suballocated_bytes -= allocation->size_bytes;
+        }
+        sw_memory_pool_return_allocation_slot(pool, index);
+        return;
+    }
 }
 
 static int sw_create_buffer(void* opaque, const RinGpuBufferDescV1* desc,
@@ -1112,12 +1522,15 @@ static int sw_ops_create_memory(void* opaque,
                                 const RinGpuMemoryDescV1* desc,
                                 void** allocation_out)
 {
+    RinGpuSoftwareBackend* backend = opaque;
     uint8_t* bytes = NULL;
     int result;
 
-    if (desc == NULL || allocation_out == NULL)
+    if (backend == NULL || desc == NULL || allocation_out == NULL)
         return RIN_GPU_ERROR_INVALID_ARGUMENT;
     *allocation_out = NULL;
+    if (backend->memory_pool != NULL)
+        return sw_memory_pool_allocate(backend, desc, allocation_out);
     result = ringpu_software_backend_create_memory(
         opaque, desc->size_bytes, &bytes);
     if (result == RIN_GPU_OK) *allocation_out = bytes;
@@ -1127,7 +1540,12 @@ static int sw_ops_create_memory(void* opaque,
 static void sw_ops_destroy_memory(void* opaque, void* allocation,
                                   uint64_t size_bytes)
 {
-    ringpu_software_backend_destroy_memory(opaque, allocation, size_bytes);
+    RinGpuSoftwareBackend* backend = opaque;
+    if (backend && backend->memory_pool) {
+        sw_memory_pool_destroy_allocation(backend, allocation, size_bytes);
+        return;
+    }
+    ringpu_software_backend_destroy_memory(backend, allocation, size_bytes);
 }
 
 static int sw_ops_bind_buffer_memory(
@@ -10939,6 +11357,16 @@ int ringpu_software_backend_create(
         if (desc_v4.reserved[0] != 0u || desc_v4.reserved[1] != 0u)
             goto fail_v4;
         backend->deterministic_seed = desc_v4.deterministic_seed;
+        if ((desc_v4.base.base.base.flags &
+             RIN_GPU_SOFTWARE_BACKEND_FLAG_MEMORY_SUBALLOCATOR) != 0u) {
+            backend->memory_pool = (SwMemoryPoolState*)sw_alloc(
+                backend, sizeof(*backend->memory_pool), 1);
+            if (!backend->memory_pool) {
+                free(backend);
+                return RIN_GPU_ERROR_NO_MEMORY;
+            }
+            sw_memory_pool_state_init(backend->memory_pool);
+        }
     }
     backend->stats.struct_size = sizeof(backend->stats);
     backend->stats.version = RIN_GPU_SOFTWARE_BACKEND_VERSION;
@@ -10955,7 +11383,48 @@ fail_v4:
 
 void ringpu_software_backend_destroy(RinGpuSoftwareBackend* backend)
 {
+    if (backend && backend->memory_pool) {
+        SwMemoryPoolState* pool = backend->memory_pool;
+        uint32_t index;
+        for (index = 0u; index < RIN_GPU_CORE_MAX_OBJECTS; ++index) {
+            SwMemoryPoolAllocation* allocation = &pool->allocations[index];
+            if (allocation->active != 0u &&
+                allocation->block_index == SW_MEMORY_POOL_DIRECT_BLOCK)
+                sw_memory_pool_aligned_free(
+                    backend, allocation->allocation_base,
+                    allocation->allocation_bytes);
+        }
+        for (index = 0u; index < RIN_GPU_CORE_MAX_OBJECTS; ++index) {
+            SwMemoryPoolBlock* block = &pool->blocks[index];
+            if (!block->bytes) continue;
+            sw_memory_pool_aligned_free(backend, block->allocation,
+                                        block->allocation_bytes);
+        }
+        sw_free(backend, pool, sizeof(*pool));
+    }
     free(backend);
+}
+
+int ringpu_software_backend_query_memory_pool_stats(
+    const RinGpuSoftwareBackend* backend,
+    RinGpuSoftwareMemoryPoolStatsV1* stats_out)
+{
+    if (!backend || !stats_out ||
+        stats_out->struct_size != sizeof(*stats_out) ||
+        stats_out->version != RIN_GPU_SOFTWARE_MEMORY_POOL_STATS_VERSION)
+        return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    memset(stats_out, 0, sizeof(*stats_out));
+    stats_out->struct_size = sizeof(*stats_out);
+    stats_out->version = RIN_GPU_SOFTWARE_MEMORY_POOL_STATS_VERSION;
+    if (!backend->memory_pool) return RIN_GPU_OK;
+    stats_out->enabled = 1u;
+    stats_out->active_suballocations =
+        backend->memory_pool->active_allocations;
+    stats_out->backing_allocation_count =
+        backend->memory_pool->backing_allocation_count;
+    stats_out->reserved_bytes = backend->memory_pool->reserved_bytes;
+    stats_out->suballocated_bytes = backend->memory_pool->suballocated_bytes;
+    return RIN_GPU_OK;
 }
 
 int ringpu_software_backend_query_stats(

@@ -206,6 +206,7 @@ int main(void)
     desc.max_image_layers = 1u;
     desc.max_image_mip_levels = 1u;
     desc.max_image_sample_count = 1u;
+    desc.flags = RIN_GPU_RUNTIME_FLAG_MEMORY_SUBALLOCATOR;
     desc.adapter.abi_version = RIN_GPU_ABI_VERSION;
     desc.adapter.struct_size = sizeof(desc.adapter);
     desc.adapter.queue_capabilities = RIN_GPU_QUEUE_GRAPHICS |
@@ -228,6 +229,16 @@ int main(void)
     desc.acquire_image = acquire;
     if (ringpu_runtime_software_surface_create(&desc, &runtime) != RIN_GPU_OK)
         return 1;
+    memory_desc.abi_version = RIN_GPU_ABI_VERSION;
+    memory_desc.struct_size = sizeof(memory_desc);
+    memory_desc.size_bytes = UINT64_C(4096);
+    memory_desc.alignment = UINT64_C(4096);
+    if (ringpu_runtime_create_memory(runtime, &memory_desc,
+                                     &headless_source_memory) != RIN_GPU_OK ||
+        ringpu_runtime_destroy_object(runtime, headless_source_memory) !=
+            RIN_GPU_OK)
+        return 41;
+    headless_source_memory = 0u;
     if (ringpu_runtime_get_device_generation(runtime, &generation) !=
             RIN_GPU_OK ||
         generation != desc.device_generation ||
@@ -344,7 +355,8 @@ int main(void)
     ringpu_runtime_destroy(runtime);
 
     headless_desc = desc;
-    headless_desc.flags = RIN_GPU_RUNTIME_FLAG_HEADLESS;
+    headless_desc.flags = RIN_GPU_RUNTIME_FLAG_HEADLESS |
+        RIN_GPU_RUNTIME_FLAG_MEMORY_SUBALLOCATOR;
     memset(&headless_desc.display, 0, sizeof(headless_desc.display));
     headless_desc.adapter.queue_capabilities = RIN_GPU_QUEUE_GRAPHICS |
                                                RIN_GPU_QUEUE_COPY;
@@ -462,6 +474,12 @@ int main(void)
     external_desc.backend_ops = &external_ops;
     external_desc.backend_context = external_backend;
     external_desc.backend_family = RIN_GPU_RUNTIME_BACKEND_FAMILY_VIRTIO;
+    external_desc.flags = RIN_GPU_RUNTIME_FLAG_HEADLESS |
+                          RIN_GPU_RUNTIME_FLAG_MEMORY_SUBALLOCATOR;
+    if (ringpu_runtime_create(&external_desc, &rejected_runtime) !=
+            RIN_GPU_ERROR_INVALID_ARGUMENT || rejected_runtime != NULL)
+        return 42;
+    external_desc.flags = RIN_GPU_RUNTIME_FLAG_HEADLESS;
     if (ringpu_runtime_create(&external_desc, &external_runtime) !=
             RIN_GPU_OK ||
         ringpu_runtime_create_buffer(external_runtime, &buffer_desc,

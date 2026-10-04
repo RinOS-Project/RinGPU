@@ -1,7 +1,7 @@
 # RinGPU host runtime benchmark
 
 `ringpu-host-benchmark` is an optional host-only benchmark for real RinGPU
-software runtimes. It reports six workloads:
+software runtimes. It reports eight workloads:
 
 - `command_roundtrip`: command-list create, 4 KiB buffer clear recording,
   close, queue submit, fence wait, 4 KiB readback, byte-for-byte validation,
@@ -12,6 +12,13 @@ software runtimes. It reports six workloads:
   separately from list creation/recording and readback;
 - `memory_buffer_bind_roundtrip`: dedicated memory create, buffer create and
   bind, 4 KiB upload/readback with byte-for-byte validation, then destruction;
+- `allocation_fragmentation_baseline` and
+  `allocation_fragmentation_suballocator`: repeatedly allocate sixteen 4 KiB
+  blocks, free alternating blocks, allocate eight 8 KiB blocks, then release
+  everything. The second row uses the explicitly enabled 64 KiB software-host
+  memory pools; the first uses one host allocation per memory object. These
+  two workloads are sampled in alternating pairs, and their checksums must
+  match.
 - `compute_bind_group_churn`: create and destroy a validated typed buffer bind
   group against a real compute pipeline and storage buffer;
 - `software_frame_roundtrip`: clear a 32×32 BGRA target, transition/present it,
@@ -32,9 +39,15 @@ phase; the other rows report their complete workload callback. Windows uses
 QueryPerformanceCounter; POSIX hosts use
 `CLOCK_MONOTONIC`.
 
-The numbers characterize the host software backend only. They are suitable for
+The memory pool is opt-in through
+`RIN_GPU_RUNTIME_FLAG_MEMORY_SUBALLOCATOR`; dedicated allocations remain
+individual host allocations. The pool caches empty 64 KiB blocks and releases
+them under backend memory-budget pressure. The numbers characterize the host
+software backend only. They are suitable for
 repeatable software-runtime comparisons under a recorded compiler/host setup,
 not as physical-GPU or presentation-performance claims. Compare runs only when
 the host, compiler, configuration, and iteration settings are held constant.
 The first committed software-host sample is in
-`baselines/host-software-msvc-19.44-x64-release-2026-10-04.md`.
+`baselines/host-software-msvc-19.44-x64-release-2026-10-04.md`. The allocation
+fragmentation comparison is also recorded for MinGW GCC in
+`baselines/host-software-gcc-13.2.0-x64-release-2026-10-04.md`.

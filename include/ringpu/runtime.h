@@ -13,7 +13,12 @@ extern "C" {
 
 #define RIN_GPU_RUNTIME_VERSION 1u
 #define RIN_GPU_RUNTIME_FLAG_HEADLESS UINT32_C(0x00000001)
-#define RIN_GPU_RUNTIME_FLAGS_KNOWN RIN_GPU_RUNTIME_FLAG_HEADLESS
+/* Enables 64 KiB host-memory pools when the reference software backend is
+ * selected. This software-only option is invalid with an external backend. */
+#define RIN_GPU_RUNTIME_FLAG_MEMORY_SUBALLOCATOR UINT32_C(0x00000002)
+#define RIN_GPU_RUNTIME_FLAGS_KNOWN \
+    (RIN_GPU_RUNTIME_FLAG_HEADLESS | \
+     RIN_GPU_RUNTIME_FLAG_MEMORY_SUBALLOCATOR)
 
 typedef struct RinGpuRuntime RinGpuRuntime;
 

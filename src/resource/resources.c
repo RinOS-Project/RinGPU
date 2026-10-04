@@ -244,8 +244,9 @@ int ringpu_get_image_memory_requirements(
         RIN_GPU_MEMORY_MIN_PAGE_SIZE, requirements);
 }
 
-int ringpu_create_memory(RinGpuCore* core, const RinGpuMemoryDescV1* desc,
-                         RinGpuHandle* memory)
+static int ringpu_create_memory_impl(RinGpuCore* core,
+                                    const RinGpuMemoryDescV1* desc,
+                                    RinGpuHandle* memory)
 {
     RinGpuObjectSlot* slot;
     void* allocation = NULL;
@@ -285,6 +286,16 @@ int ringpu_create_memory(RinGpuCore* core, const RinGpuMemoryDescV1* desc,
                            RIN_GPU_OBJECT_MEMORY, desc->size_bytes,
                            RIN_GPU_OK);
     return RIN_GPU_OK;
+}
+
+int ringpu_create_memory(RinGpuCore* core, const RinGpuMemoryDescV1* desc,
+                         RinGpuHandle* memory)
+{
+    int result;
+    ringpu_core_resource_lock(core);
+    result = ringpu_create_memory_impl(core, desc, memory);
+    ringpu_core_resource_unlock(core);
+    return result;
 }
 
 int ringpu_bind_buffer_memory(

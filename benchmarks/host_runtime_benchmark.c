@@ -31,6 +31,7 @@
 
 typedef struct BenchmarkRuntime {
     RinGpuRuntime* runtime;
+    RinGpuRuntime* suballocator_runtime;
     RinGpuHandle queue;
     RinGpuHandle fence;
     RinGpuHandle buffer;
@@ -398,6 +399,34 @@ static int create_benchmark_runtime(BenchmarkRuntime* state)
                                         zeroes, sizeof(zeroes));
 }
 
+static int create_suballocator_benchmark_runtime(BenchmarkRuntime* state)
+{
+    RinGpuRuntimeDescV1 runtime_desc;
+
+    if (!state) return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    memset(&runtime_desc, 0, sizeof(runtime_desc));
+    runtime_desc.struct_size = sizeof(runtime_desc);
+    runtime_desc.version = RIN_GPU_RUNTIME_VERSION;
+    runtime_desc.device_generation = 1u;
+    runtime_desc.handle_secret = UINT64_C(0x535542414c4c4f43);
+    runtime_desc.max_buffer_size = UINT64_C(1) * 1024u * 1024u;
+    runtime_desc.max_image_size = UINT64_C(1) * 1024u * 1024u;
+    runtime_desc.max_total_allocation_size =
+        UINT64_C(16) * 1024u * 1024u;
+    runtime_desc.max_image_dimension = 64u;
+    runtime_desc.max_image_layers = 1u;
+    runtime_desc.max_image_mip_levels = 1u;
+    runtime_desc.max_image_sample_count = 1u;
+    runtime_desc.adapter.abi_version = RIN_GPU_ABI_VERSION;
+    runtime_desc.adapter.struct_size = sizeof(runtime_desc.adapter);
+    runtime_desc.adapter.queue_capabilities = RIN_GPU_QUEUE_COPY;
+    memcpy(runtime_desc.adapter.name, "memory-pool-benchmark",
+           sizeof("memory-pool-benchmark"));
+    runtime_desc.flags = RIN_GPU_RUNTIME_FLAG_HEADLESS |
+                         RIN_GPU_RUNTIME_FLAG_MEMORY_SUBALLOCATOR;
+    return ringpu_runtime_create(&runtime_desc, &state->suballocator_runtime);
+}
+
 static int destroy_benchmark_runtime(BenchmarkRuntime* state)
 {
     int first_error = RIN_GPU_OK;
@@ -428,6 +457,8 @@ static int destroy_benchmark_runtime(BenchmarkRuntime* state)
     }
     if (state->frame_runtime != NULL)
         ringpu_runtime_destroy(state->frame_runtime);
+    if (state->suballocator_runtime != NULL)
+        ringpu_runtime_destroy(state->suballocator_runtime);
     if (state->runtime != NULL && state->descriptor_buffer != 0u) {
         result = ringpu_runtime_destroy_object(state->runtime,
                                               state->descriptor_buffer);
@@ -735,6 +766,76 @@ cleanup:
     return result;
 }
 
+static int run_memory_fragmentation_iteration(
+    RinGpuRuntime* runtime, uint64_t iteration, uint64_t* checksum_out)
+{
+    RinGpuMemoryDescV1 small_desc;
+    RinGpuMemoryDescV1 large_desc;
+    RinGpuHandle small[16] = {0u};
+    RinGpuHandle large[8] = {0u};
+    uint32_t index;
+    int result = RIN_GPU_OK;
+    int cleanup_result;
+
+    if (!runtime || !checksum_out) return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    memset(&small_desc, 0, sizeof(small_desc));
+    small_desc.abi_version = RIN_GPU_ABI_VERSION;
+    small_desc.struct_size = sizeof(small_desc);
+    small_desc.size_bytes = UINT64_C(4096);
+    small_desc.alignment = UINT64_C(4096);
+    large_desc = small_desc;
+    large_desc.size_bytes = UINT64_C(8192);
+
+    for (index = 0u; index < 16u; ++index) {
+        result = ringpu_runtime_create_memory(runtime, &small_desc,
+                                              &small[index]);
+        if (result != RIN_GPU_OK) goto cleanup;
+    }
+    for (index = 1u; index < 16u; index += 2u) {
+        result = ringpu_runtime_destroy_object(runtime, small[index]);
+        if (result != RIN_GPU_OK) goto cleanup;
+        small[index] = 0u;
+    }
+    for (index = 0u; index < 8u; ++index) {
+        result = ringpu_runtime_create_memory(runtime, &large_desc,
+                                              &large[index]);
+        if (result != RIN_GPU_OK) goto cleanup;
+    }
+    *checksum_out = (*checksum_out * UINT64_C(1099511628211)) ^
+                    iteration ^ UINT64_C(0x100010000);
+
+cleanup:
+    for (index = 0u; index < 16u; ++index) {
+        if (small[index] == 0u) continue;
+        cleanup_result = ringpu_runtime_destroy_object(runtime, small[index]);
+        if (result == RIN_GPU_OK && cleanup_result != RIN_GPU_OK)
+            result = cleanup_result;
+    }
+    for (index = 0u; index < 8u; ++index) {
+        if (large[index] == 0u) continue;
+        cleanup_result = ringpu_runtime_destroy_object(runtime, large[index]);
+        if (result == RIN_GPU_OK && cleanup_result != RIN_GPU_OK)
+            result = cleanup_result;
+    }
+    return result;
+}
+
+static int run_memory_fragmentation_baseline_iteration(
+    BenchmarkRuntime* state, uint64_t iteration, uint64_t* checksum_out)
+{
+    return state ? run_memory_fragmentation_iteration(
+                       state->runtime, iteration, checksum_out)
+                 : RIN_GPU_ERROR_INVALID_ARGUMENT;
+}
+
+static int run_memory_fragmentation_suballocator_iteration(
+    BenchmarkRuntime* state, uint64_t iteration, uint64_t* checksum_out)
+{
+    return state ? run_memory_fragmentation_iteration(
+                       state->suballocator_runtime, iteration, checksum_out)
+                 : RIN_GPU_ERROR_INVALID_ARGUMENT;
+}
+
 static int run_descriptor_iteration(BenchmarkRuntime* state,
                                     uint64_t iteration,
                                     uint64_t* checksum_out)
@@ -855,44 +956,37 @@ static int compare_u64(const void* left, const void* right)
 
 typedef int (*BenchmarkIterationFn)(BenchmarkRuntime*, uint64_t, uint64_t*);
 
-static int measure_metric(BenchmarkRuntime* state, const char* metric,
+static int time_iteration(BenchmarkRuntime* state,
                           BenchmarkIterationFn run_iteration_fn,
-                          uint32_t iterations, uint32_t warmup,
-                          uint64_t* samples)
+                          uint64_t sequence, uint64_t* checksum,
+                          uint64_t* elapsed_ns_out)
 {
-    uint64_t checksum = UINT64_C(1469598103934665603);
     uint64_t start_ns;
     uint64_t end_ns;
+    int result;
+
+    if (!state || !run_iteration_fn || !checksum || !elapsed_ns_out ||
+        !timer_now_ns(&start_ns))
+        return RIN_GPU_ERROR_STATE;
+    state->timed_phase_ns = 0u;
+    result = run_iteration_fn(state, sequence, checksum);
+    if (result != RIN_GPU_OK) return result;
+    if (!timer_now_ns(&end_ns) || end_ns < start_ns)
+        return RIN_GPU_ERROR_STATE;
+    *elapsed_ns_out = state->timed_phase_ns != 0u
+                          ? state->timed_phase_ns
+                          : end_ns - start_ns;
+    return RIN_GPU_OK;
+}
+
+static int report_metric(const char* metric, uint32_t iterations,
+                         uint32_t warmup, uint64_t* samples,
+                         uint64_t checksum)
+{
     long double elapsed_sum = 0.0L;
     uint64_t median_ns;
     uint64_t p95_ns;
     uint32_t index;
-    int result;
-
-    for (index = 0u; index < warmup; ++index) {
-        result = run_iteration_fn(state, (uint64_t)index + 1u, &checksum);
-        if (result != RIN_GPU_OK) {
-            fprintf(stderr, "%s warmup failed at %" PRIu32
-                    ": RinGPU status %d\n", metric, index, result);
-            return result;
-        }
-    }
-    for (index = 0u; index < iterations; ++index) {
-        const uint64_t sequence = (uint64_t)warmup + index + 1u;
-        state->timed_phase_ns = 0u;
-        if (!timer_now_ns(&start_ns)) return RIN_GPU_ERROR_STATE;
-        result = run_iteration_fn(state, sequence, &checksum);
-        if (result != RIN_GPU_OK) {
-            fprintf(stderr, "%s sample failed at %" PRIu32
-                    ": RinGPU status %d\n", metric, index, result);
-            return result;
-        }
-        if (!timer_now_ns(&end_ns) || end_ns < start_ns)
-            return RIN_GPU_ERROR_STATE;
-        samples[index] = state->timed_phase_ns != 0u
-                             ? state->timed_phase_ns
-                             : end_ns - start_ns;
-    }
 
     qsort(samples, iterations, sizeof(*samples), compare_u64);
     for (index = 0u; index < iterations; ++index)
@@ -917,6 +1011,112 @@ static int measure_metric(BenchmarkRuntime* state, const char* metric,
     return RIN_GPU_OK;
 }
 
+static int measure_metric(BenchmarkRuntime* state, const char* metric,
+                          BenchmarkIterationFn run_iteration_fn,
+                          uint32_t iterations, uint32_t warmup,
+                          uint64_t* samples)
+{
+    uint64_t checksum = UINT64_C(1469598103934665603);
+    uint32_t index;
+    int result;
+
+    for (index = 0u; index < warmup; ++index) {
+        result = run_iteration_fn(state, (uint64_t)index + 1u, &checksum);
+        if (result != RIN_GPU_OK) {
+            fprintf(stderr, "%s warmup failed at %" PRIu32
+                    ": RinGPU status %d\n", metric, index, result);
+            return result;
+        }
+    }
+    for (index = 0u; index < iterations; ++index) {
+        const uint64_t sequence = (uint64_t)warmup + index + 1u;
+        result = time_iteration(state, run_iteration_fn, sequence, &checksum,
+                                &samples[index]);
+        if (result != RIN_GPU_OK) {
+            fprintf(stderr, "%s sample failed at %" PRIu32
+                    ": RinGPU status %d\n", metric, index, result);
+            return result;
+        }
+    }
+
+    return report_metric(metric, iterations, warmup, samples, checksum);
+}
+
+static int measure_fragmentation_pair(BenchmarkRuntime* state,
+                                      uint32_t iterations, uint32_t warmup,
+                                      uint64_t* baseline_samples,
+                                      uint64_t* suballocator_samples)
+{
+    uint64_t baseline_checksum = UINT64_C(1469598103934665603);
+    uint64_t suballocator_checksum = UINT64_C(1469598103934665603);
+    uint32_t index;
+    int result;
+
+    for (index = 0u; index < warmup; ++index) {
+        const uint64_t sequence = (uint64_t)index + 1u;
+        BenchmarkIterationFn first = (index & 1u) == 0u
+            ? run_memory_fragmentation_baseline_iteration
+            : run_memory_fragmentation_suballocator_iteration;
+        BenchmarkIterationFn second = (index & 1u) == 0u
+            ? run_memory_fragmentation_suballocator_iteration
+            : run_memory_fragmentation_baseline_iteration;
+        uint64_t* first_checksum = (index & 1u) == 0u
+            ? &baseline_checksum : &suballocator_checksum;
+        uint64_t* second_checksum = (index & 1u) == 0u
+            ? &suballocator_checksum : &baseline_checksum;
+
+        result = first(state, sequence, first_checksum);
+        if (result == RIN_GPU_OK)
+            result = second(state, sequence, second_checksum);
+        if (result != RIN_GPU_OK) {
+            fprintf(stderr, "fragmentation warmup failed at %" PRIu32
+                    ": RinGPU status %d\n", index, result);
+            return result;
+        }
+    }
+    for (index = 0u; index < iterations; ++index) {
+        const uint64_t sequence = (uint64_t)warmup + index + 1u;
+        const int baseline_first = (index & 1u) == 0u;
+        uint64_t* first_checksum = baseline_first
+            ? &baseline_checksum : &suballocator_checksum;
+        uint64_t* second_checksum = baseline_first
+            ? &suballocator_checksum : &baseline_checksum;
+        uint64_t first_elapsed;
+        uint64_t second_elapsed;
+
+        result = time_iteration(
+            state, baseline_first
+                ? run_memory_fragmentation_baseline_iteration
+                : run_memory_fragmentation_suballocator_iteration,
+            sequence, first_checksum, &first_elapsed);
+        if (result == RIN_GPU_OK)
+            result = time_iteration(
+                state, baseline_first
+                    ? run_memory_fragmentation_suballocator_iteration
+                    : run_memory_fragmentation_baseline_iteration,
+                sequence, second_checksum, &second_elapsed);
+        if (result != RIN_GPU_OK) {
+            fprintf(stderr, "fragmentation sample failed at %" PRIu32
+                    ": RinGPU status %d\n", index, result);
+            return result;
+        }
+        baseline_samples[index] = baseline_first
+            ? first_elapsed : second_elapsed;
+        suballocator_samples[index] = baseline_first
+            ? second_elapsed : first_elapsed;
+    }
+    if (baseline_checksum != suballocator_checksum) {
+        fprintf(stderr, "fragmentation workload checksums differ\n");
+        return RIN_GPU_ERROR_STATE;
+    }
+    result = report_metric("allocation_fragmentation_baseline", iterations,
+                           warmup, baseline_samples, baseline_checksum);
+    if (result != RIN_GPU_OK) return result;
+    return report_metric("allocation_fragmentation_suballocator", iterations,
+                         warmup, suballocator_samples,
+                         suballocator_checksum);
+}
+
 static int run_benchmark(uint32_t iterations, uint32_t warmup)
 {
     BenchmarkRuntime state;
@@ -924,7 +1124,7 @@ static int run_benchmark(uint32_t iterations, uint32_t warmup)
     int result;
     int cleanup_result;
 
-    samples = (uint64_t*)malloc((size_t)iterations * sizeof(*samples));
+    samples = (uint64_t*)malloc((size_t)iterations * 2u * sizeof(*samples));
     if (samples == NULL) return RIN_GPU_ERROR_NO_MEMORY;
     result = create_benchmark_runtime(&state);
     if (result != RIN_GPU_OK) {
@@ -935,6 +1135,8 @@ static int run_benchmark(uint32_t iterations, uint32_t warmup)
     result = create_frame_runtime(&state);
     if (result != RIN_GPU_OK) goto cleanup;
     result = create_descriptor_resources(&state);
+    if (result != RIN_GPU_OK) goto cleanup;
+    result = create_suballocator_benchmark_runtime(&state);
     if (result != RIN_GPU_OK) goto cleanup;
     printf("benchmark,backend,compiler,iterations,warmup,min_ns,"
            "median_ns,p95_ns,mean_ns,ops_per_second,checksum\n");
@@ -951,6 +1153,9 @@ static int run_benchmark(uint32_t iterations, uint32_t warmup)
     if (result != RIN_GPU_OK) goto cleanup;
     result = measure_metric(&state, "memory_buffer_bind_roundtrip",
                             run_memory_iteration, iterations, warmup, samples);
+    if (result != RIN_GPU_OK) goto cleanup;
+    result = measure_fragmentation_pair(&state, iterations, warmup, samples,
+                                        samples + iterations);
     if (result != RIN_GPU_OK) goto cleanup;
     result = measure_metric(&state, "compute_bind_group_churn",
                             run_descriptor_iteration,
