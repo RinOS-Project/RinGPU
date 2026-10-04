@@ -2,6 +2,7 @@
 #include "backend_bridge.h"
 
 #include <stddef.h>
+#include <stdlib.h>
 #include <string.h>
 
 _Static_assert(sizeof(RinGpuBackendCommandV1) ==
@@ -446,6 +447,96 @@ static int bridge_create_graphics_bind_group(
 BRIDGE_COOKIE_DESTROY(graphics_bind_group,
     RIN_GPU_PLATFORM_BACKEND_BRIDGE_OP_DESTROY_GRAPHICS_BIND_GROUP)
 
+static int bridge_command_record_from_common(
+    const RinGpuBackendCommandV1* command,
+    RinGpuBackendCommandRecordV1* record)
+{
+    if (command == NULL || record == NULL || command->reserved != 0u)
+        return RIN_GPU_ERROR_PROTOCOL;
+    memset(record, 0, sizeof(*record));
+    record->type = command->type;
+#define BRIDGE_COPY_COMMAND_PAYLOAD(command_type, member)                    \
+    case command_type: {                                                     \
+        _Static_assert(sizeof(command->value.member) <=                     \
+                           RIN_GPU_BACKEND_COMMAND_PAYLOAD_BYTES_V1,          \
+                       "command payload exceeds canonical record");         \
+        memcpy(record->payload, &command->value.member,                      \
+               sizeof(command->value.member));                               \
+        break;                                                               \
+    }
+    switch (command->type) {
+    BRIDGE_COPY_COMMAND_PAYLOAD(RIN_GPU_BACKEND_COMMAND_COPY_BUFFER,
+                                buffer_copy);
+    BRIDGE_COPY_COMMAND_PAYLOAD(RIN_GPU_BACKEND_COMMAND_COPY_IMAGE,
+                                image_copy);
+    BRIDGE_COPY_COMMAND_PAYLOAD(RIN_GPU_BACKEND_COMMAND_TRANSITION_IMAGE,
+                                image_transition);
+    BRIDGE_COPY_COMMAND_PAYLOAD(RIN_GPU_BACKEND_COMMAND_DISPATCH, dispatch);
+    BRIDGE_COPY_COMMAND_PAYLOAD(RIN_GPU_BACKEND_COMMAND_COMPUTE_BARRIER,
+                                compute_barrier);
+    BRIDGE_COPY_COMMAND_PAYLOAD(RIN_GPU_BACKEND_COMMAND_DRAW, draw);
+    BRIDGE_COPY_COMMAND_PAYLOAD(
+        RIN_GPU_BACKEND_COMMAND_BEGIN_RENDER_PASS, render_pass_begin);
+    case RIN_GPU_BACKEND_COMMAND_END_RENDER_PASS:
+        break;
+    BRIDGE_COPY_COMMAND_PAYLOAD(RIN_GPU_BACKEND_COMMAND_PRESENT, present);
+    BRIDGE_COPY_COMMAND_PAYLOAD(RIN_GPU_BACKEND_COMMAND_DRAW_VERTICES,
+                                draw_vertices);
+    BRIDGE_COPY_COMMAND_PAYLOAD(RIN_GPU_BACKEND_COMMAND_DRAW_INDEXED,
+                                draw_indexed);
+    BRIDGE_COPY_COMMAND_PAYLOAD(
+        RIN_GPU_BACKEND_COMMAND_BEGIN_RENDER_PASS_DEPTH,
+        render_pass_depth_begin);
+    BRIDGE_COPY_COMMAND_PAYLOAD(RIN_GPU_BACKEND_COMMAND_GRAPHICS_BARRIER,
+                                graphics_barrier);
+    BRIDGE_COPY_COMMAND_PAYLOAD(
+        RIN_GPU_BACKEND_COMMAND_DRAW_INDEXED_BASE_VERTEX,
+        draw_indexed_base_vertex);
+    BRIDGE_COPY_COMMAND_PAYLOAD(RIN_GPU_BACKEND_COMMAND_SET_RASTER_STATE,
+                                raster_state);
+    BRIDGE_COPY_COMMAND_PAYLOAD(RIN_GPU_BACKEND_COMMAND_DRAW_VERTICES_V2,
+                                draw_vertices_v2);
+    BRIDGE_COPY_COMMAND_PAYLOAD(RIN_GPU_BACKEND_COMMAND_DRAW_INDEXED_V2,
+                                draw_indexed_v2);
+    BRIDGE_COPY_COMMAND_PAYLOAD(
+        RIN_GPU_BACKEND_COMMAND_BEGIN_RENDER_PASS_DEPTH_STENCIL,
+        render_pass_depth_stencil_begin);
+    BRIDGE_COPY_COMMAND_PAYLOAD(RIN_GPU_BACKEND_COMMAND_BEGIN_RENDER_PASS_MRT,
+                                render_pass_mrt_begin);
+    BRIDGE_COPY_COMMAND_PAYLOAD(RIN_GPU_BACKEND_COMMAND_CLEAR_BUFFER,
+                                buffer_clear);
+    BRIDGE_COPY_COMMAND_PAYLOAD(RIN_GPU_BACKEND_COMMAND_CLEAR_IMAGE,
+                                image_clear);
+    BRIDGE_COPY_COMMAND_PAYLOAD(RIN_GPU_BACKEND_COMMAND_BLIT_IMAGE,
+                                image_blit);
+    BRIDGE_COPY_COMMAND_PAYLOAD(
+        RIN_GPU_BACKEND_COMMAND_COMPUTE_BARRIER_V2, compute_barrier_v2);
+    BRIDGE_COPY_COMMAND_PAYLOAD(
+        RIN_GPU_BACKEND_COMMAND_GRAPHICS_BARRIER_V2, graphics_barrier_v2);
+    BRIDGE_COPY_COMMAND_PAYLOAD(RIN_GPU_BACKEND_COMMAND_SET_PUSH_CONSTANTS,
+                                push_constants);
+    BRIDGE_COPY_COMMAND_PAYLOAD(RIN_GPU_BACKEND_COMMAND_BEGIN_QUERY, query);
+    BRIDGE_COPY_COMMAND_PAYLOAD(RIN_GPU_BACKEND_COMMAND_END_QUERY, query);
+    BRIDGE_COPY_COMMAND_PAYLOAD(RIN_GPU_BACKEND_COMMAND_RESET_QUERY, query);
+    BRIDGE_COPY_COMMAND_PAYLOAD(
+        RIN_GPU_BACKEND_COMMAND_TRANSFER_IMAGE_OWNERSHIP,
+        image_ownership_transfer);
+    BRIDGE_COPY_COMMAND_PAYLOAD(RIN_GPU_BACKEND_COMMAND_RESOLVE_IMAGE,
+                                image_resolve);
+    BRIDGE_COPY_COMMAND_PAYLOAD(RIN_GPU_BACKEND_COMMAND_DRAW_INDIRECT,
+                                draw_indirect);
+    BRIDGE_COPY_COMMAND_PAYLOAD(
+        RIN_GPU_BACKEND_COMMAND_DRAW_INDEXED_INDIRECT,
+        draw_indexed_indirect);
+    BRIDGE_COPY_COMMAND_PAYLOAD(RIN_GPU_BACKEND_COMMAND_DISPATCH_INDIRECT,
+                                dispatch_indirect);
+    default:
+        return RIN_GPU_ERROR_PROTOCOL;
+    }
+#undef BRIDGE_COPY_COMMAND_PAYLOAD
+    return RIN_GPU_OK;
+}
+
 static int bridge_submit_commands(void* context,
                                   const RinGpuBackendCommandV1* commands,
                                   uint32_t command_count)
@@ -454,14 +545,36 @@ static int bridge_submit_commands(void* context,
         (RinGpuPlatformBackendAdapterV1*)context;
     RinGpuPlatformBackendBridgeCallV1 call;
     RinGpuPlatformBackendBridgeResponseV1 response;
+    RinGpuBackendCommandRecordV1* records;
+    uint32_t index;
+    int result;
+    if ((command_count != 0u && commands == NULL) ||
+        command_count > RIN_GPU_CORE_MAX_COMMANDS)
+        return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    records = command_count != 0u
+                  ? (RinGpuBackendCommandRecordV1*)calloc(
+                        command_count, sizeof(*records))
+                  : NULL;
+    if (command_count != 0u && records == NULL)
+        return RIN_GPU_ERROR_NO_MEMORY;
+    for (index = 0u; index < command_count; ++index) {
+        result = bridge_command_record_from_common(&commands[index],
+                                                  &records[index]);
+        if (result != RIN_GPU_OK) {
+            free(records);
+            return result;
+        }
+    }
     bridge_call_init(&call,
                      RIN_GPU_PLATFORM_BACKEND_BRIDGE_OP_SUBMIT_COMMANDS);
     call.values[0] = command_count;
     call.values[1] = sizeof(RinGpuBackendCommandRecordV1);
     call.values[2] = RIN_GPU_BACKEND_COMMAND_ABI_VERSION;
-    call.records[0] = commands;
+    call.records[0] = records;
     call.record_sizes[0] = sizeof(RinGpuBackendCommandRecordV1);
-    return bridge_invoke(adapter, &call, &response);
+    result = bridge_invoke(adapter, &call, &response);
+    free(records);
+    return result;
 }
 
 static int bridge_get_query_result(void* context, uint64_t query_cookie,

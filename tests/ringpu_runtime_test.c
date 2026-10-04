@@ -2,6 +2,7 @@
 #include <ringpu/runtime.h>
 
 #include "../src/core/core.h"
+#include "../src/platform/backend_bridge.h"
 
 #include <string.h>
 
@@ -62,6 +63,9 @@ typedef struct PlatformBackendBridgeMock {
     uint32_t upload_count;
     uint32_t readback_count;
     uint32_t fail_next_upload;
+    const RinGpuBackendCommandV1* expected_commands;
+    uint32_t expected_command_count;
+    uint32_t submit_count;
 } PlatformBackendBridgeMock;
 
 typedef struct PlatformBackendBridgeResolverState {
@@ -70,6 +74,84 @@ typedef struct PlatformBackendBridgeResolverState {
     uint32_t expected_family;
     uint32_t call_count;
 } PlatformBackendBridgeResolverState;
+
+static uint32_t platform_backend_command_payload_size(uint32_t type)
+{
+#define PLATFORM_COMMAND_PAYLOAD_SIZE(command_type, member)                  \
+    case command_type:                                                       \
+        return (uint32_t)sizeof(                                                \
+            ((RinGpuBackendCommandV1*)0)->value.member)
+    switch (type) {
+    PLATFORM_COMMAND_PAYLOAD_SIZE(RIN_GPU_BACKEND_COMMAND_COPY_BUFFER,
+                                  buffer_copy);
+    PLATFORM_COMMAND_PAYLOAD_SIZE(RIN_GPU_BACKEND_COMMAND_COPY_IMAGE,
+                                  image_copy);
+    PLATFORM_COMMAND_PAYLOAD_SIZE(RIN_GPU_BACKEND_COMMAND_TRANSITION_IMAGE,
+                                  image_transition);
+    PLATFORM_COMMAND_PAYLOAD_SIZE(RIN_GPU_BACKEND_COMMAND_DISPATCH, dispatch);
+    PLATFORM_COMMAND_PAYLOAD_SIZE(RIN_GPU_BACKEND_COMMAND_COMPUTE_BARRIER,
+                                  compute_barrier);
+    PLATFORM_COMMAND_PAYLOAD_SIZE(RIN_GPU_BACKEND_COMMAND_DRAW, draw);
+    PLATFORM_COMMAND_PAYLOAD_SIZE(
+        RIN_GPU_BACKEND_COMMAND_BEGIN_RENDER_PASS, render_pass_begin);
+    case RIN_GPU_BACKEND_COMMAND_END_RENDER_PASS:
+        return 0u;
+    PLATFORM_COMMAND_PAYLOAD_SIZE(RIN_GPU_BACKEND_COMMAND_PRESENT, present);
+    PLATFORM_COMMAND_PAYLOAD_SIZE(RIN_GPU_BACKEND_COMMAND_DRAW_VERTICES,
+                                  draw_vertices);
+    PLATFORM_COMMAND_PAYLOAD_SIZE(RIN_GPU_BACKEND_COMMAND_DRAW_INDEXED,
+                                  draw_indexed);
+    PLATFORM_COMMAND_PAYLOAD_SIZE(
+        RIN_GPU_BACKEND_COMMAND_BEGIN_RENDER_PASS_DEPTH,
+        render_pass_depth_begin);
+    PLATFORM_COMMAND_PAYLOAD_SIZE(RIN_GPU_BACKEND_COMMAND_GRAPHICS_BARRIER,
+                                  graphics_barrier);
+    PLATFORM_COMMAND_PAYLOAD_SIZE(
+        RIN_GPU_BACKEND_COMMAND_DRAW_INDEXED_BASE_VERTEX,
+        draw_indexed_base_vertex);
+    PLATFORM_COMMAND_PAYLOAD_SIZE(RIN_GPU_BACKEND_COMMAND_SET_RASTER_STATE,
+                                  raster_state);
+    PLATFORM_COMMAND_PAYLOAD_SIZE(RIN_GPU_BACKEND_COMMAND_DRAW_VERTICES_V2,
+                                  draw_vertices_v2);
+    PLATFORM_COMMAND_PAYLOAD_SIZE(RIN_GPU_BACKEND_COMMAND_DRAW_INDEXED_V2,
+                                  draw_indexed_v2);
+    PLATFORM_COMMAND_PAYLOAD_SIZE(
+        RIN_GPU_BACKEND_COMMAND_BEGIN_RENDER_PASS_DEPTH_STENCIL,
+        render_pass_depth_stencil_begin);
+    PLATFORM_COMMAND_PAYLOAD_SIZE(RIN_GPU_BACKEND_COMMAND_BEGIN_RENDER_PASS_MRT,
+                                  render_pass_mrt_begin);
+    PLATFORM_COMMAND_PAYLOAD_SIZE(RIN_GPU_BACKEND_COMMAND_CLEAR_BUFFER,
+                                  buffer_clear);
+    PLATFORM_COMMAND_PAYLOAD_SIZE(RIN_GPU_BACKEND_COMMAND_CLEAR_IMAGE,
+                                  image_clear);
+    PLATFORM_COMMAND_PAYLOAD_SIZE(RIN_GPU_BACKEND_COMMAND_BLIT_IMAGE,
+                                  image_blit);
+    PLATFORM_COMMAND_PAYLOAD_SIZE(
+        RIN_GPU_BACKEND_COMMAND_COMPUTE_BARRIER_V2, compute_barrier_v2);
+    PLATFORM_COMMAND_PAYLOAD_SIZE(
+        RIN_GPU_BACKEND_COMMAND_GRAPHICS_BARRIER_V2, graphics_barrier_v2);
+    PLATFORM_COMMAND_PAYLOAD_SIZE(RIN_GPU_BACKEND_COMMAND_SET_PUSH_CONSTANTS,
+                                  push_constants);
+    PLATFORM_COMMAND_PAYLOAD_SIZE(RIN_GPU_BACKEND_COMMAND_BEGIN_QUERY, query);
+    PLATFORM_COMMAND_PAYLOAD_SIZE(RIN_GPU_BACKEND_COMMAND_END_QUERY, query);
+    PLATFORM_COMMAND_PAYLOAD_SIZE(RIN_GPU_BACKEND_COMMAND_RESET_QUERY, query);
+    PLATFORM_COMMAND_PAYLOAD_SIZE(
+        RIN_GPU_BACKEND_COMMAND_TRANSFER_IMAGE_OWNERSHIP,
+        image_ownership_transfer);
+    PLATFORM_COMMAND_PAYLOAD_SIZE(RIN_GPU_BACKEND_COMMAND_RESOLVE_IMAGE,
+                                  image_resolve);
+    PLATFORM_COMMAND_PAYLOAD_SIZE(RIN_GPU_BACKEND_COMMAND_DRAW_INDIRECT,
+                                  draw_indirect);
+    PLATFORM_COMMAND_PAYLOAD_SIZE(
+        RIN_GPU_BACKEND_COMMAND_DRAW_INDEXED_INDIRECT,
+        draw_indexed_indirect);
+    PLATFORM_COMMAND_PAYLOAD_SIZE(RIN_GPU_BACKEND_COMMAND_DISPATCH_INDIRECT,
+                                  dispatch_indirect);
+    default:
+        return UINT32_MAX;
+    }
+#undef PLATFORM_COMMAND_PAYLOAD_SIZE
+}
 
 static int platform_backend_bridge_invoke(
     void* context, const RinGpuPlatformBackendBridgeCallV1* call,
@@ -82,6 +164,40 @@ static int platform_backend_bridge_invoke(
         call->reserved != 0u)
         return RIN_GPU_ERROR_PROTOCOL;
     switch (call->operation) {
+    case RIN_GPU_PLATFORM_BACKEND_BRIDGE_OP_SUBMIT_COMMANDS: {
+        const RinGpuBackendCommandRecordV1* records =
+            (const RinGpuBackendCommandRecordV1*)call->records[0];
+        uint32_t count = mock->expected_command_count;
+        if ((count == 0u &&
+             (mock->expected_commands != NULL || records != NULL)) ||
+            (count != 0u &&
+             (mock->expected_commands == NULL || records == NULL)) ||
+            call->values[0] != count ||
+            call->values[1] != sizeof(RinGpuBackendCommandRecordV1) ||
+            call->values[2] != RIN_GPU_BACKEND_COMMAND_ABI_VERSION ||
+            call->record_sizes[0] !=
+                sizeof(RinGpuBackendCommandRecordV1))
+            return RIN_GPU_ERROR_PROTOCOL;
+        for (uint32_t index = 0u; index < count; ++index) {
+            uint32_t payload_size = platform_backend_command_payload_size(
+                mock->expected_commands[index].type);
+            if (payload_size == UINT32_MAX ||
+                records[index].type != mock->expected_commands[index].type ||
+                records[index].reserved != 0u ||
+                payload_size > sizeof(records[index].payload) ||
+                memcmp(records[index].payload,
+                       &mock->expected_commands[index].value,
+                       payload_size) != 0)
+                return RIN_GPU_ERROR_PROTOCOL;
+            for (uint32_t byte = payload_size;
+                 byte < sizeof(records[index].payload); ++byte) {
+                if (records[index].payload[byte] != 0u)
+                    return RIN_GPU_ERROR_PROTOCOL;
+            }
+        }
+        ++mock->submit_count;
+        return RIN_GPU_OK;
+    }
     case RIN_GPU_PLATFORM_BACKEND_BRIDGE_OP_CREATE_BUFFER: {
         const RinGpuBufferDescV1* desc =
             (const RinGpuBufferDescV1*)call->records[0];
@@ -147,6 +263,67 @@ static int platform_resolve_backend_bridge(
     *bridge_out = resolver->bridge;
     *bridge_context_out = resolver->bridge_context;
     return RIN_GPU_OK;
+}
+
+static int test_platform_backend_command_record_translation(void)
+{
+    RinGpuPlatformBackendBridgeV1 bridge = {0};
+    RinGpuPlatformBackendAdapterV1 adapter = {0};
+    PlatformBackendBridgeMock mock = {0};
+    RinGpuBackendCommandV1 commands[RIN_GPU_BACKEND_COMMAND_LAST_V1];
+
+    bridge.struct_size = sizeof(bridge);
+    bridge.version = RIN_GPU_PLATFORM_BACKEND_BRIDGE_VERSION;
+    bridge.backend_family = RIN_GPU_BACKEND_FAMILY_INTEL;
+    bridge.contract_version = RIN_GPU_BACKEND_CONTRACT_VERSION;
+    bridge.adapter_version = RIN_GPU_OS_CORE_BACKEND_ADAPTER_VERSION;
+    bridge.command_abi_version = RIN_GPU_BACKEND_COMMAND_ABI_VERSION;
+    bridge.command_record_size = sizeof(RinGpuBackendCommandRecordV1);
+    bridge.invoke = platform_backend_bridge_invoke;
+    mock.expected_commands = commands;
+    mock.expected_command_count =
+        RIN_GPU_BACKEND_COMMAND_LAST_V1;
+    memset(commands, 0, sizeof(commands));
+    for (uint32_t index = 0u;
+         index < RIN_GPU_BACKEND_COMMAND_LAST_V1; ++index) {
+        uint8_t* payload = (uint8_t*)&commands[index].value;
+        commands[index].type = index + 1u;
+        for (uint32_t byte = 0u; byte < sizeof(commands[index].value);
+             ++byte) {
+            payload[byte] =
+                (uint8_t)(0x37u + index * 19u + byte * 23u);
+        }
+    }
+    if (ringpu_platform_backend_adapter_init(
+            &adapter, &bridge, &mock, RIN_GPU_BACKEND_FAMILY_INTEL) !=
+            RIN_GPU_OK ||
+        adapter.backend_ops.submit_commands == NULL ||
+        adapter.backend_ops.submit_commands(
+            &adapter, commands, RIN_GPU_BACKEND_COMMAND_LAST_V1) !=
+            RIN_GPU_OK ||
+        mock.submit_count != 1u)
+        return 67;
+
+    commands[0].type = 0u;
+    if (adapter.backend_ops.submit_commands(
+            &adapter, commands, RIN_GPU_BACKEND_COMMAND_LAST_V1) !=
+            RIN_GPU_ERROR_PROTOCOL ||
+        mock.submit_count != 1u)
+        return 68;
+    commands[0].type = RIN_GPU_BACKEND_COMMAND_COPY_BUFFER;
+    commands[0].reserved = 1u;
+    if (adapter.backend_ops.submit_commands(
+            &adapter, commands, RIN_GPU_BACKEND_COMMAND_LAST_V1) !=
+            RIN_GPU_ERROR_PROTOCOL ||
+        mock.submit_count != 1u)
+        return 69;
+    mock.expected_commands = NULL;
+    mock.expected_command_count = 0u;
+    if (adapter.backend_ops.submit_commands(&adapter, NULL, 0u) !=
+            RIN_GPU_OK ||
+        mock.submit_count != 2u)
+        return 70;
+    return 0;
 }
 
 static int test_platform_backend_bridge(
@@ -1096,6 +1273,12 @@ int main(void)
         const int bridge_result =
             test_platform_backend_bridge(&headless_desc);
         if (bridge_result != 0) return bridge_result;
+    }
+    {
+        const int command_translation_result =
+            test_platform_backend_command_record_translation();
+        if (command_translation_result != 0)
+            return command_translation_result;
     }
     return 0;
 }
