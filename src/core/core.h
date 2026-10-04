@@ -716,6 +716,8 @@ typedef struct RinGpuCoreConfigV1 {
     RinGpuDiagnosticsRuntime* diagnostics;
     RinGpuPlatformYieldThreadCallbackV1 platform_yield_thread;
     void* platform_scheduler_context;
+    RinGpuPlatformDiagnosticCallbackV1 platform_diagnostic_callback;
+    void* platform_diagnostic_context;
     /* The cache never crosses a core instance, but this discriminator keeps
      * backend realizations explicit when a core is recreated. */
     uint32_t backend_family;
@@ -975,6 +977,8 @@ struct RinGpuCore {
     RinGpuDiagnosticsRuntime* diagnostics;
     RinGpuPlatformYieldThreadCallbackV1 platform_yield_thread;
     void* platform_scheduler_context;
+    RinGpuPlatformDiagnosticCallbackV1 platform_diagnostic_callback;
+    void* platform_diagnostic_context;
     uint64_t device_generation;
     uint32_t backend_family;
     uint64_t submitted_serial;

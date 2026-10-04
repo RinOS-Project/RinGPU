@@ -20,6 +20,42 @@
 #include <stdlib.h>
 #include <string.h>
 
+_Static_assert(RIN_GPU_PLATFORM_DIAGNOSTIC_RESOURCE_CREATE ==
+                   RIN_GPU_DIAGNOSTIC_RESOURCE_CREATE,
+               "platform resource diagnostic type drift");
+_Static_assert(RIN_GPU_PLATFORM_DIAGNOSTIC_SUBMISSION ==
+                   RIN_GPU_DIAGNOSTIC_SUBMISSION,
+               "platform submission diagnostic type drift");
+_Static_assert(RIN_GPU_PLATFORM_DIAGNOSTIC_QUEUE ==
+                   RIN_GPU_DIAGNOSTIC_QUEUE,
+               "platform queue diagnostic type drift");
+_Static_assert(RIN_GPU_PLATFORM_DIAGNOSTIC_FENCE ==
+                   RIN_GPU_DIAGNOSTIC_FENCE,
+               "platform fence diagnostic type drift");
+_Static_assert(RIN_GPU_PLATFORM_DIAGNOSTIC_PRESENT ==
+                   RIN_GPU_DIAGNOSTIC_PRESENT,
+               "platform present diagnostic type drift");
+_Static_assert(RIN_GPU_PLATFORM_DIAGNOSTIC_RESET == RIN_GPU_DIAGNOSTIC_RESET,
+               "platform reset diagnostic type drift");
+_Static_assert(RIN_GPU_PLATFORM_DIAGNOSTIC_MAPPING ==
+                   RIN_GPU_DIAGNOSTIC_MAPPING,
+               "platform mapping diagnostic type drift");
+_Static_assert(RIN_GPU_PLATFORM_DIAGNOSTIC_DEVICE_LOST ==
+                   RIN_GPU_DIAGNOSTIC_DEVICE_LOST,
+               "platform device-lost diagnostic type drift");
+_Static_assert(RIN_GPU_PLATFORM_DIAGNOSTIC_MEMORY_PRESSURE ==
+                   RIN_GPU_DIAGNOSTIC_MEMORY_PRESSURE,
+               "platform memory diagnostic type drift");
+_Static_assert(RIN_GPU_PLATFORM_DIAGNOSTIC_QUEUE_WAIT ==
+                   RIN_GPU_DIAGNOSTIC_QUEUE_WAIT,
+               "platform queue-wait diagnostic type drift");
+_Static_assert(RIN_GPU_PLATFORM_DIAGNOSTIC_PRESENT_MISS ==
+                   RIN_GPU_DIAGNOSTIC_PRESENT_MISS,
+               "platform present-miss diagnostic type drift");
+_Static_assert(RIN_GPU_PLATFORM_DIAGNOSTIC_TYPE_COUNT ==
+                   RIN_GPU_DIAGNOSTIC_EVENT_TYPE_COUNT,
+               "platform diagnostic type count drift");
+
 int ringpu_core_ready(const RinGpuCore* core) {
     if (!core || !core->initialized) return RIN_GPU_ERROR_INVALID_ARGUMENT;
     if (core->device_lost) return RIN_GPU_ERROR_DEVICE_LOST;
@@ -44,10 +80,15 @@ void ringpu_core_diagnostic(RinGpuCore* core, uint32_t type,
                             uint64_t resource_cookie,
                             uint64_t queue_cookie, uint64_t value0,
                             uint64_t value1, int status) {
-    if (!core || !core->diagnostics) return;
-    (void)rin_gpu_diagnostics_record_simple(
-        core->diagnostics, type, 0u, resource_cookie, queue_cookie, value0,
-        value1, (uint32_t)status);
+    if (!core) return;
+    if (core->diagnostics)
+        (void)rin_gpu_diagnostics_record_simple(
+            core->diagnostics, type, 0u, resource_cookie, queue_cookie,
+            value0, value1, (uint32_t)status);
+    if (core->platform_diagnostic_callback)
+        core->platform_diagnostic_callback(
+            core->platform_diagnostic_context, type, resource_cookie,
+            queue_cookie, value0, value1, (int32_t)status);
 }
 
 static int ringpu_core_diagnostics_valid(
@@ -259,6 +300,10 @@ int ringpu_core_init(RinGpuCore* core, const RinGpuCoreConfigV1* config) {
     core->diagnostics = config->diagnostics;
     core->platform_yield_thread = config->platform_yield_thread;
     core->platform_scheduler_context = config->platform_scheduler_context;
+    core->platform_diagnostic_callback =
+        config->platform_diagnostic_callback;
+    core->platform_diagnostic_context =
+        config->platform_diagnostic_context;
     core->device_generation =
         ringpu_core_device_generation(config->diagnostics);
     core->backend_family = config->backend_family;

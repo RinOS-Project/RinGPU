@@ -21,6 +21,19 @@ static uint32_t external_fail_next_create_memory;
 static uint32_t external_bind_buffer_memory_calls;
 static uint32_t external_fail_next_bind_buffer_memory;
 
+typedef struct PlatformDiagnosticState {
+    uint32_t event_count;
+    uint32_t last_type;
+    uint64_t last_resource_cookie;
+    uint64_t last_queue_cookie;
+    uint64_t last_value0;
+    uint64_t last_value1;
+    int32_t last_status;
+    uint32_t submission_count;
+    uint32_t present_count;
+    uint32_t device_lost_count;
+} PlatformDiagnosticState;
+
 static int external_create_buffer(
     void* context, const RinGpuBufferDescV1* desc, uint64_t* cookie_out)
 {
@@ -141,6 +154,27 @@ static void platform_yield(void* context)
     if (context != NULL) ++*(uint32_t*)context;
 }
 
+static void platform_diagnostic(
+    void* context, uint32_t type, uint64_t resource_cookie,
+    uint64_t queue_cookie, uint64_t value0, uint64_t value1, int32_t status)
+{
+    PlatformDiagnosticState* state = (PlatformDiagnosticState*)context;
+    if (state == NULL) return;
+    ++state->event_count;
+    state->last_type = type;
+    state->last_resource_cookie = resource_cookie;
+    state->last_queue_cookie = queue_cookie;
+    state->last_value0 = value0;
+    state->last_value1 = value1;
+    state->last_status = status;
+    if (type == RIN_GPU_PLATFORM_DIAGNOSTIC_SUBMISSION)
+        ++state->submission_count;
+    else if (type == RIN_GPU_PLATFORM_DIAGNOSTIC_PRESENT)
+        ++state->present_count;
+    else if (type == RIN_GPU_PLATFORM_DIAGNOSTIC_DEVICE_LOST)
+        ++state->device_lost_count;
+}
+
 int main(void)
 {
     RinGpuRuntimeSoftwareSurfaceDescV1 desc = {0};
@@ -166,6 +200,7 @@ int main(void)
     RinGpuBackendOpsV1 missing_ops;
     RinGpuRuntime* external_runtime = NULL;
     RinGpuRuntime* rejected_runtime = NULL;
+    RinGpuPlatformServicesV1 invalid_platform_services = {0};
     RinGpuMemoryDescV1 memory_desc = {0};
     RinGpuResourceMemoryBindingV1 memory_binding = {0};
     RinGpuQueueDescV1 headless_queue_desc = {0};
@@ -198,6 +233,8 @@ int main(void)
     uint32_t present_count = 0u;
     uint32_t platform_yield_count = 0u;
     RinGpuPlatformThreadSchedulerV1 platform_scheduler = {0};
+    RinGpuPlatformServicesV1 platform_services = {0};
+    PlatformDiagnosticState platform_diagnostics = {0};
     uint8_t upload_bytes[8] = {0x52u, 0x69u, 0x6eu, 0x47u,
                                0x50u, 0x55u, 0x01u, 0xa5u};
     uint8_t readback_bytes[sizeof(upload_bytes)] = {0u};
@@ -239,17 +276,39 @@ int main(void)
         RIN_GPU_PLATFORM_THREAD_SCHEDULER_VERSION;
     platform_scheduler.yield_thread = platform_yield;
     platform_scheduler.context = &platform_yield_count;
-    if (ringpu_runtime_create_with_platform(
-            &desc, &platform_scheduler, &runtime) != RIN_GPU_OK)
+    platform_services.struct_size = sizeof(platform_services);
+    platform_services.version = RIN_GPU_PLATFORM_SERVICES_VERSION;
+    platform_services.thread_scheduler = platform_scheduler;
+    platform_services.diagnostic_callback = platform_diagnostic;
+    platform_services.diagnostic_context = &platform_diagnostics;
+    invalid_platform_services = platform_services;
+    ++invalid_platform_services.version;
+    if (ringpu_runtime_create_with_platform_services(
+            &desc, &invalid_platform_services, &rejected_runtime) !=
+            RIN_GPU_ERROR_INVALID_ARGUMENT ||
+        rejected_runtime != NULL)
+        return 43;
+    if (ringpu_runtime_create_with_platform_services(
+            &desc, &platform_services, &runtime) != RIN_GPU_OK)
         return 1;
     memory_desc.abi_version = RIN_GPU_ABI_VERSION;
     memory_desc.struct_size = sizeof(memory_desc);
     memory_desc.size_bytes = UINT64_C(4096);
     memory_desc.alignment = UINT64_C(4096);
     if (ringpu_runtime_create_memory(runtime, &memory_desc,
-                                     &headless_source_memory) != RIN_GPU_OK ||
-        ringpu_runtime_destroy_object(runtime, headless_source_memory) !=
-            RIN_GPU_OK)
+                                     &headless_source_memory) != RIN_GPU_OK)
+        return 41;
+    if (platform_diagnostics.event_count != 1u ||
+        platform_diagnostics.last_type !=
+            RIN_GPU_PLATFORM_DIAGNOSTIC_RESOURCE_CREATE ||
+        platform_diagnostics.last_resource_cookie == 0u ||
+        platform_diagnostics.last_queue_cookie != 0u ||
+        platform_diagnostics.last_value0 != RIN_GPU_OBJECT_MEMORY ||
+        platform_diagnostics.last_value1 != memory_desc.size_bytes ||
+        platform_diagnostics.last_status != RIN_GPU_OK)
+        return 42;
+    if (ringpu_runtime_destroy_object(runtime, headless_source_memory) !=
+        RIN_GPU_OK)
         return 41;
     headless_source_memory = 0u;
     if (ringpu_runtime_get_device_generation(runtime, &generation) !=
@@ -359,11 +418,16 @@ int main(void)
         ringpu_runtime_command_list_close(runtime, present_list) != RIN_GPU_OK ||
         ringpu_runtime_queue_submit(runtime, present_queue, &submit) !=
             RIN_GPU_OK ||
-        present_count != 1u)
+        present_count != 1u || platform_diagnostics.submission_count == 0u ||
+        platform_diagnostics.present_count == 0u)
         return 14;
 
     ringpu_runtime_mark_device_lost(runtime);
-    if (!ringpu_runtime_device_lost(runtime))
+    if (!ringpu_runtime_device_lost(runtime) ||
+        platform_diagnostics.device_lost_count != 1u ||
+        platform_diagnostics.last_type !=
+            RIN_GPU_PLATFORM_DIAGNOSTIC_DEVICE_LOST ||
+        platform_diagnostics.last_status != RIN_GPU_ERROR_DEVICE_LOST)
         return 7;
     ringpu_runtime_destroy(runtime);
 

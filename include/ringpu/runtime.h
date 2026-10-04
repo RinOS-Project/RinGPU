@@ -83,6 +83,13 @@ int ringpu_runtime_create_with_platform(
     const RinGpuPlatformThreadSchedulerV1* scheduler,
     RinGpuRuntime** runtime_out);
 
+/* Creates a runtime with optional OS-core scheduling and diagnostics
+ * callbacks. Diagnostics are delivered synchronously at the event source. */
+int ringpu_runtime_create_with_platform_services(
+    const RinGpuRuntimeDescV1* desc,
+    const RinGpuPlatformServicesV1* services,
+    RinGpuRuntime** runtime_out);
+
 int ringpu_runtime_software_surface_create(
     const RinGpuRuntimeSoftwareSurfaceDescV1* desc,
     RinGpuRuntime** runtime_out);
