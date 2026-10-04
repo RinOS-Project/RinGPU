@@ -22,6 +22,12 @@ _Static_assert(sizeof(RinGpuPlatformServicesV1) == 48u,
                "RinGPU platform services ABI drift");
 _Static_assert(sizeof(RinGpuPlatformServicesV2) == 64u,
                "RinGPU platform services V2 ABI drift");
+_Static_assert(sizeof(RinGpuPlatformServicesV3) == 80u,
+               "RinGPU platform services V3 ABI drift");
+_Static_assert(sizeof(RinGpuPlatformBackendBridgeV1) == 56u,
+               "RinGPU backend bridge ABI drift");
+_Static_assert(sizeof(RinGpuBackendCommandRecordV1) == 872u,
+               "RinGPU canonical command record ABI drift");
 #else
 _Static_assert(sizeof(RinGpuPlatformThreadSchedulerV1) == 16u,
                "RinGPU platform scheduler ABI drift");
@@ -29,6 +35,12 @@ _Static_assert(sizeof(RinGpuPlatformServicesV1) == 32u,
                "RinGPU platform services ABI drift");
 _Static_assert(sizeof(RinGpuPlatformServicesV2) == 40u,
                "RinGPU platform services V2 ABI drift");
+_Static_assert(sizeof(RinGpuPlatformServicesV3) == 56u,
+               "RinGPU platform services V3 ABI drift");
+_Static_assert(sizeof(RinGpuPlatformBackendBridgeV1) == 52u,
+               "RinGPU backend bridge ABI drift");
+_Static_assert(sizeof(RinGpuBackendCommandRecordV1) == 872u,
+               "RinGPU canonical command record ABI drift");
 #endif
 
 int main(void) {

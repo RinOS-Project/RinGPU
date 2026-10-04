@@ -2,6 +2,7 @@
 #include <ringpu/runtime.h>
 
 #include "core/core.h"
+#include "platform/backend_bridge.h"
 #ifndef RINGPU_BUILD_SOFTWARE_BACKEND
 #define RINGPU_BUILD_SOFTWARE_BACKEND 1
 #endif
@@ -19,6 +20,7 @@ struct RinGpuRuntime {
     RinGpuPlatformThreadSchedulerV1 platform_scheduler;
     RinGpuPlatformDiagnosticCallbackV1 platform_diagnostic_callback;
     void* platform_diagnostic_context;
+    RinGpuPlatformBackendAdapterV1 platform_backend_adapter;
 #if RINGPU_BUILD_SOFTWARE_BACKEND
     RinGpuSoftwareBackend* software_backend;
 #endif
@@ -99,6 +101,8 @@ static int runtime_create_internal(
     void* platform_diagnostic_context,
     RinGpuPlatformResolveBackendCallbackV1 backend_resolver,
     void* backend_resolver_context,
+    const RinGpuPlatformBackendBridgeV1* backend_bridge,
+    void* backend_bridge_context,
     RinGpuRuntime** runtime_out)
 {
     RinGpuRuntime* runtime;
@@ -116,25 +120,30 @@ static int runtime_create_internal(
 
     if (runtime_out == NULL) return RIN_GPU_ERROR_INVALID_ARGUMENT;
     *runtime_out = NULL;
-    if (!runtime_desc_valid(desc, backend_resolver != NULL))
+    if (!runtime_desc_valid(desc, backend_resolver != NULL ||
+                                      backend_bridge != NULL))
         return RIN_GPU_ERROR_INVALID_ARGUMENT;
     if (desc->backend_ops == NULL &&
         desc->backend_family >= RIN_GPU_RUNTIME_BACKEND_FAMILY_INTEL &&
         desc->backend_family <= RIN_GPU_RUNTIME_BACKEND_FAMILY_VIRTIO) {
-        const RinGpuBackendOpsV1* resolved_ops = NULL;
-        result = backend_resolver(backend_resolver_context,
-                                  desc->backend_family, &resolved_ops,
-                                  &resolved_backend_context);
-        if (result != RIN_GPU_OK)
-            return result < RIN_GPU_OK ? result : RIN_GPU_ERROR_BACKEND;
-        if (resolved_ops == NULL || resolved_backend_context == NULL)
-            return RIN_GPU_ERROR_BACKEND;
         resolved_desc = *desc;
-        resolved_desc.backend_ops = resolved_ops;
-        resolved_desc.backend_context = resolved_backend_context;
-        desc = &resolved_desc;
-        if (!runtime_desc_valid(desc, 0))
+        if (backend_resolver != NULL) {
+            const RinGpuBackendOpsV1* resolved_ops = NULL;
+            result = backend_resolver(backend_resolver_context,
+                                      desc->backend_family, &resolved_ops,
+                                      &resolved_backend_context);
+            if (result != RIN_GPU_OK)
+                return result < RIN_GPU_OK ? result : RIN_GPU_ERROR_BACKEND;
+            if (resolved_ops == NULL || resolved_backend_context == NULL)
+                return RIN_GPU_ERROR_BACKEND;
+            resolved_desc.backend_ops = resolved_ops;
+            resolved_desc.backend_context = resolved_backend_context;
+            desc = &resolved_desc;
+            if (!runtime_desc_valid(desc, 0))
+                return RIN_GPU_ERROR_INVALID_ARGUMENT;
+        } else if (backend_bridge == NULL || backend_bridge_context == NULL) {
             return RIN_GPU_ERROR_INVALID_ARGUMENT;
+        }
     }
     if (platform_scheduler != NULL &&
         (platform_scheduler->struct_size != sizeof(*platform_scheduler) ||
@@ -148,6 +157,22 @@ static int runtime_create_internal(
         runtime->platform_scheduler = *platform_scheduler;
     runtime->platform_diagnostic_callback = platform_diagnostic_callback;
     runtime->platform_diagnostic_context = platform_diagnostic_context;
+
+    if (backend_bridge != NULL) {
+        result = ringpu_platform_backend_adapter_init(
+            &runtime->platform_backend_adapter, backend_bridge,
+            backend_bridge_context, desc->backend_family);
+        if (result != RIN_GPU_OK) goto fail;
+        resolved_desc = *desc;
+        resolved_desc.backend_ops =
+            &runtime->platform_backend_adapter.backend_ops;
+        resolved_desc.backend_context = &runtime->platform_backend_adapter;
+        desc = &resolved_desc;
+        if (!runtime_desc_valid(desc, 0)) {
+            result = RIN_GPU_ERROR_INVALID_ARGUMENT;
+            goto fail;
+        }
+    }
 
     external_ops = (const RinGpuBackendOpsV1*)desc->backend_ops;
     if (external_ops != NULL) {
@@ -288,7 +313,7 @@ int ringpu_runtime_create(const RinGpuRuntimeDescV1* desc,
                           RinGpuRuntime** runtime_out)
 {
     return runtime_create_internal(desc, NULL, NULL, NULL, NULL, NULL,
-                                   runtime_out);
+                                   NULL, NULL, runtime_out);
 }
 
 int ringpu_runtime_create_with_platform(
@@ -300,7 +325,7 @@ int ringpu_runtime_create_with_platform(
     *runtime_out = NULL;
     if (scheduler == NULL) return RIN_GPU_ERROR_INVALID_ARGUMENT;
     return runtime_create_internal(desc, scheduler, NULL, NULL, NULL, NULL,
-                                   runtime_out);
+                                   NULL, NULL, runtime_out);
 }
 
 int ringpu_runtime_create_with_platform_services(
@@ -336,7 +361,7 @@ int ringpu_runtime_create_with_platform_services(
     return runtime_create_internal(desc, scheduler,
                                    services->diagnostic_callback,
                                    services->diagnostic_context, NULL, NULL,
-                                   runtime_out);
+                                   NULL, NULL, runtime_out);
 }
 
 int ringpu_runtime_create_with_platform_services_v2(
@@ -376,7 +401,67 @@ int ringpu_runtime_create_with_platform_services_v2(
                                    services->diagnostic_context,
                                    services->resolve_backend,
                                    services->backend_resolver_context,
-                                   runtime_out);
+                                   NULL, NULL, runtime_out);
+}
+
+int ringpu_runtime_create_with_platform_services_v3(
+    const RinGpuRuntimeDescV1* desc,
+    const RinGpuPlatformServicesV3* services,
+    RinGpuRuntime** runtime_out)
+{
+    const RinGpuPlatformThreadSchedulerV1* scheduler;
+    const RinGpuPlatformBackendBridgeV1* bridge = NULL;
+    void* bridge_context = NULL;
+    int scheduler_is_zero;
+    int result;
+    if (runtime_out == NULL) return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    *runtime_out = NULL;
+    if (services == NULL ||
+        services->struct_size != sizeof(*services) ||
+        services->version != RIN_GPU_PLATFORM_SERVICES_V3_VERSION ||
+        (services->diagnostic_callback == NULL &&
+         services->diagnostic_context != NULL) ||
+        (services->resolve_backend == NULL &&
+         services->backend_resolver_context != NULL) ||
+        (services->resolve_backend_bridge == NULL &&
+         services->backend_bridge_resolver_context != NULL) ||
+        (services->resolve_backend != NULL &&
+         services->resolve_backend_bridge != NULL))
+        return RIN_GPU_ERROR_INVALID_ARGUMENT;
+
+    scheduler_is_zero =
+        services->thread_scheduler.struct_size == 0u &&
+        services->thread_scheduler.version == 0u &&
+        services->thread_scheduler.yield_thread == NULL &&
+        services->thread_scheduler.context == NULL;
+    scheduler = scheduler_is_zero ? NULL : &services->thread_scheduler;
+    if (!scheduler_is_zero &&
+        (services->thread_scheduler.struct_size !=
+             sizeof(services->thread_scheduler) ||
+         services->thread_scheduler.version !=
+             RIN_GPU_PLATFORM_THREAD_SCHEDULER_VERSION ||
+         services->thread_scheduler.yield_thread == NULL))
+        return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    if (!runtime_desc_valid(desc, 1))
+        return RIN_GPU_ERROR_INVALID_ARGUMENT;
+
+    if (services->resolve_backend_bridge != NULL && desc->backend_ops == NULL &&
+        desc->backend_family >= RIN_GPU_RUNTIME_BACKEND_FAMILY_INTEL &&
+        desc->backend_family <= RIN_GPU_RUNTIME_BACKEND_FAMILY_VIRTIO) {
+        result = services->resolve_backend_bridge(
+            services->backend_bridge_resolver_context, desc->backend_family,
+            &bridge, &bridge_context);
+        if (result != RIN_GPU_OK)
+            return result < RIN_GPU_OK ? result : RIN_GPU_ERROR_BACKEND;
+        if (bridge == NULL || bridge_context == NULL)
+            return RIN_GPU_ERROR_BACKEND;
+    }
+
+    return runtime_create_internal(
+        desc, scheduler, services->diagnostic_callback,
+        services->diagnostic_context, services->resolve_backend,
+        services->backend_resolver_context, bridge, bridge_context,
+        runtime_out);
 }
 
 int ringpu_runtime_software_surface_create(

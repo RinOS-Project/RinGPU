@@ -4,6 +4,8 @@
 
 #include <stdint.h>
 
+#include "platform_bridge.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -11,6 +13,7 @@ extern "C" {
 #define RIN_GPU_PLATFORM_THREAD_SCHEDULER_VERSION 1u
 #define RIN_GPU_PLATFORM_SERVICES_VERSION 1u
 #define RIN_GPU_PLATFORM_SERVICES_V2_VERSION 2u
+#define RIN_GPU_PLATFORM_SERVICES_V3_VERSION 3u
 
 /* Event type values delivered to RinGpuPlatformDiagnosticCallbackV1. */
 #define RIN_GPU_PLATFORM_DIAGNOSTIC_RESOURCE_CREATE 1u
@@ -86,6 +89,23 @@ typedef struct RinGpuPlatformServicesV2 {
     RinGpuPlatformResolveBackendCallbackV1 resolve_backend;
     void* backend_resolver_context;
 } RinGpuPlatformServicesV2;
+
+/* V3 preserves the V2 prefix and resolves a versioned API-neutral bridge.
+ * The bridge context remains caller-owned until the runtime is destroyed.
+ * Set at most one resolver: a legacy public operation table or a bridge.
+ * The bridge path performs explicit record and command conversion and never
+ * aliases either private backend table. */
+typedef struct RinGpuPlatformServicesV3 {
+    uint32_t struct_size;
+    uint32_t version;
+    RinGpuPlatformThreadSchedulerV1 thread_scheduler;
+    RinGpuPlatformDiagnosticCallbackV1 diagnostic_callback;
+    void* diagnostic_context;
+    RinGpuPlatformResolveBackendCallbackV1 resolve_backend;
+    void* backend_resolver_context;
+    RinGpuPlatformResolveBackendBridgeCallbackV1 resolve_backend_bridge;
+    void* backend_bridge_resolver_context;
+} RinGpuPlatformServicesV3;
 
 #ifdef __cplusplus
 }

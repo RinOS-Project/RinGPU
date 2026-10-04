@@ -98,6 +98,13 @@ int ringpu_runtime_create_with_platform_services_v2(
     const RinGpuPlatformServicesV2* services,
     RinGpuRuntime** runtime_out);
 
+/* V3 adds an explicitly versioned API-neutral backend bridge. Existing V1/V2
+ * constructors and their ABIs are unchanged. */
+int ringpu_runtime_create_with_platform_services_v3(
+    const RinGpuRuntimeDescV1* desc,
+    const RinGpuPlatformServicesV3* services,
+    RinGpuRuntime** runtime_out);
+
 int ringpu_runtime_software_surface_create(
     const RinGpuRuntimeSoftwareSurfaceDescV1* desc,
     RinGpuRuntime** runtime_out);

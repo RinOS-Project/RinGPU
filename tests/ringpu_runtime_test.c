@@ -55,6 +55,184 @@ typedef struct PlatformBackendResolverState {
     int result;
 } PlatformBackendResolverState;
 
+typedef struct PlatformBackendBridgeMock {
+    uint8_t bytes[64];
+    uint32_t create_count;
+    uint32_t destroy_count;
+    uint32_t upload_count;
+    uint32_t readback_count;
+    uint32_t fail_next_upload;
+} PlatformBackendBridgeMock;
+
+typedef struct PlatformBackendBridgeResolverState {
+    const RinGpuPlatformBackendBridgeV1* bridge;
+    void* bridge_context;
+    uint32_t expected_family;
+    uint32_t call_count;
+} PlatformBackendBridgeResolverState;
+
+static int platform_backend_bridge_invoke(
+    void* context, const RinGpuPlatformBackendBridgeCallV1* call,
+    RinGpuPlatformBackendBridgeResponseV1* response)
+{
+    PlatformBackendBridgeMock* mock = (PlatformBackendBridgeMock*)context;
+    if (mock == NULL || call == NULL || response == NULL ||
+        call->struct_size != sizeof(*call) ||
+        call->version != RIN_GPU_PLATFORM_BACKEND_BRIDGE_VERSION ||
+        call->reserved != 0u)
+        return RIN_GPU_ERROR_PROTOCOL;
+    switch (call->operation) {
+    case RIN_GPU_PLATFORM_BACKEND_BRIDGE_OP_CREATE_BUFFER: {
+        const RinGpuBufferDescV1* desc =
+            (const RinGpuBufferDescV1*)call->records[0];
+        if (desc == NULL || call->record_sizes[0] != sizeof(*desc) ||
+            desc->struct_size != sizeof(*desc) ||
+            desc->abi_version != RIN_GPU_ABI_VERSION ||
+            desc->size_bytes > sizeof(mock->bytes))
+            return RIN_GPU_ERROR_PROTOCOL;
+        ++mock->create_count;
+        response->values[0] = UINT64_C(0x4252494447450001);
+        return RIN_GPU_OK;
+    }
+    case RIN_GPU_PLATFORM_BACKEND_BRIDGE_OP_DESTROY_BUFFER:
+        if (call->values[0] != UINT64_C(0x4252494447450001))
+            return RIN_GPU_ERROR_INVALID_HANDLE;
+        ++mock->destroy_count;
+        return RIN_GPU_OK;
+    case RIN_GPU_PLATFORM_BACKEND_BRIDGE_OP_UPLOAD_BUFFER:
+        if (call->values[0] != UINT64_C(0x4252494447450001) ||
+            call->values[1] > sizeof(mock->bytes) ||
+            call->values[2] > sizeof(mock->bytes) - call->values[1] ||
+            call->data[0] == NULL || call->data_sizes[0] != call->values[2])
+            return RIN_GPU_ERROR_BOUNDS;
+        ++mock->upload_count;
+        if (mock->fail_next_upload != 0u) {
+            --mock->fail_next_upload;
+            return RIN_GPU_ERROR_BACKEND;
+        }
+        memcpy(mock->bytes + call->values[1], call->data[0],
+               (size_t)call->values[2]);
+        return RIN_GPU_OK;
+    case RIN_GPU_PLATFORM_BACKEND_BRIDGE_OP_READBACK_BUFFER:
+        if (call->values[0] != UINT64_C(0x4252494447450001) ||
+            call->values[1] > sizeof(mock->bytes) ||
+            call->values[2] > sizeof(mock->bytes) - call->values[1] ||
+            call->outputs[0] == NULL ||
+            call->output_sizes[0] != call->values[2])
+            return RIN_GPU_ERROR_BOUNDS;
+        ++mock->readback_count;
+        memcpy(call->outputs[0], mock->bytes + call->values[1],
+               (size_t)call->values[2]);
+        return RIN_GPU_OK;
+    default:
+        return RIN_GPU_ERROR_UNSUPPORTED;
+    }
+}
+
+static int platform_resolve_backend_bridge(
+    void* context, uint32_t backend_family,
+    const RinGpuPlatformBackendBridgeV1** bridge_out,
+    void** bridge_context_out)
+{
+    PlatformBackendBridgeResolverState* resolver =
+        (PlatformBackendBridgeResolverState*)context;
+    if (bridge_out == NULL || bridge_context_out == NULL)
+        return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    *bridge_out = NULL;
+    *bridge_context_out = NULL;
+    if (resolver == NULL) return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    ++resolver->call_count;
+    if (backend_family != resolver->expected_family)
+        return RIN_GPU_ERROR_UNSUPPORTED;
+    *bridge_out = resolver->bridge;
+    *bridge_context_out = resolver->bridge_context;
+    return RIN_GPU_OK;
+}
+
+static int test_platform_backend_bridge(
+    const RinGpuRuntimeDescV1* template_desc)
+{
+    RinGpuRuntimeDescV1 desc;
+    RinGpuPlatformServicesV3 services = {0};
+    RinGpuPlatformBackendBridgeV1 bridge = {0};
+    PlatformBackendBridgeMock mock = {0};
+    PlatformBackendBridgeResolverState resolver = {0};
+    RinGpuRuntime* runtime = NULL;
+    RinGpuBufferDescV1 buffer_desc = {0};
+    RinGpuHandle buffer = 0u;
+    uint8_t source[8] = {0x52u, 0x69u, 0x6eu, 0x47u,
+                         0x50u, 0x55u, 0x31u, 0xa5u};
+    uint8_t destination[sizeof(source)] = {0};
+
+    if (template_desc == NULL) return 60;
+    desc = *template_desc;
+    desc.flags = RIN_GPU_RUNTIME_FLAG_HEADLESS;
+    desc.backend_ops = NULL;
+    desc.backend_context = NULL;
+    desc.backend_family = RIN_GPU_RUNTIME_BACKEND_FAMILY_INTEL;
+    desc.present_callback = NULL;
+    desc.present_context = NULL;
+    desc.acquire_image = NULL;
+    desc.image_context = NULL;
+    memset(&desc.display, 0, sizeof(desc.display));
+
+    bridge.struct_size = sizeof(bridge);
+    bridge.version = RIN_GPU_PLATFORM_BACKEND_BRIDGE_VERSION;
+    bridge.backend_family = desc.backend_family;
+    bridge.contract_version = RIN_GPU_BACKEND_CONTRACT_VERSION;
+    bridge.adapter_version = RIN_GPU_OS_CORE_BACKEND_ADAPTER_VERSION;
+    bridge.command_abi_version = RIN_GPU_BACKEND_COMMAND_ABI_VERSION;
+    bridge.command_record_size = sizeof(RinGpuBackendCommandRecordV1);
+    bridge.callback_mask =
+        RIN_GPU_PLATFORM_BACKEND_BRIDGE_HAS_UPLOAD_BUFFER |
+        RIN_GPU_PLATFORM_BACKEND_BRIDGE_HAS_READBACK_BUFFER;
+    bridge.invoke = platform_backend_bridge_invoke;
+    resolver.bridge = &bridge;
+    resolver.bridge_context = &mock;
+    resolver.expected_family = desc.backend_family;
+    services.struct_size = sizeof(services);
+    services.version = RIN_GPU_PLATFORM_SERVICES_V3_VERSION;
+    services.resolve_backend_bridge = platform_resolve_backend_bridge;
+    services.backend_bridge_resolver_context = &resolver;
+
+    bridge.command_record_size--;
+    if (ringpu_runtime_create_with_platform_services_v3(
+            &desc, &services, &runtime) != RIN_GPU_ERROR_PROTOCOL ||
+        runtime != NULL || resolver.call_count != 1u ||
+        mock.create_count != 0u)
+        return 61;
+    bridge.command_record_size++;
+
+    if (ringpu_runtime_create_with_platform_services_v3(
+            &desc, &services, &runtime) != RIN_GPU_OK || runtime == NULL ||
+        resolver.call_count != 2u)
+        return 62;
+    buffer_desc.abi_version = RIN_GPU_ABI_VERSION;
+    buffer_desc.struct_size = sizeof(buffer_desc);
+    buffer_desc.size_bytes = sizeof(source);
+    buffer_desc.usage = RIN_GPU_BUFFER_COPY_SOURCE |
+                        RIN_GPU_BUFFER_COPY_DESTINATION;
+    buffer_desc.flags = RIN_GPU_BUFFER_CPU_VISIBLE;
+    if (ringpu_runtime_create_buffer(runtime, &buffer_desc, &buffer) !=
+            RIN_GPU_OK || buffer == 0u || mock.create_count != 1u)
+        return 63;
+    mock.fail_next_upload = 1u;
+    if (ringpu_runtime_upload_buffer(runtime, buffer, 0u, source,
+                                     sizeof(source)) !=
+            RIN_GPU_ERROR_BACKEND || mock.upload_count != 1u)
+        return 64;
+    if (ringpu_runtime_upload_buffer(runtime, buffer, 0u, source,
+                                     sizeof(source)) != RIN_GPU_OK ||
+        ringpu_runtime_readback_buffer(runtime, buffer, 0u, destination,
+                                       sizeof(destination)) != RIN_GPU_OK ||
+        memcmp(source, destination, sizeof(source)) != 0 ||
+        mock.upload_count != 2u || mock.readback_count != 1u)
+        return 65;
+    ringpu_runtime_destroy(runtime);
+    if (mock.destroy_count != 1u) return 66;
+    return 0;
+}
+
 static int external_create_buffer(
     void* context, const RinGpuBufferDescV1* desc, uint64_t* cookie_out)
 {
@@ -914,5 +1092,10 @@ int main(void)
         return 32;
     }
     ringpu_software_backend_destroy(external_backend);
+    {
+        const int bridge_result =
+            test_platform_backend_bridge(&headless_desc);
+        if (bridge_result != 0) return bridge_result;
+    }
     return 0;
 }
