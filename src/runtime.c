@@ -833,6 +833,36 @@ int ringpu_runtime_command_reset_query(RinGpuRuntime* runtime,
     return ringpu_command_reset_query(&runtime->core, command_list, query);
 }
 
+int ringpu_runtime_command_compute_barrier_v2(
+    RinGpuRuntime* runtime, RinGpuHandle command_list,
+    const RinGpuComputeBarrierV2* barrier)
+{
+    if (runtime == NULL || runtime->initialized != RIN_GPU_RUNTIME_VERSION)
+        return RIN_GPU_ERROR_STATE;
+    return ringpu_command_compute_barrier_v2(&runtime->core, command_list,
+                                             barrier);
+}
+
+int ringpu_runtime_command_graphics_barrier_v2(
+    RinGpuRuntime* runtime, RinGpuHandle command_list,
+    const RinGpuGraphicsBarrierV2* barrier)
+{
+    if (runtime == NULL || runtime->initialized != RIN_GPU_RUNTIME_VERSION)
+        return RIN_GPU_ERROR_STATE;
+    return ringpu_command_graphics_barrier_v2(&runtime->core, command_list,
+                                              barrier);
+}
+
+int ringpu_runtime_command_set_push_constants(
+    RinGpuRuntime* runtime, RinGpuHandle command_list,
+    const RinGpuPushConstantsV1* constants)
+{
+    if (runtime == NULL || runtime->initialized != RIN_GPU_RUNTIME_VERSION)
+        return RIN_GPU_ERROR_STATE;
+    return ringpu_command_set_push_constants(&runtime->core, command_list,
+                                             constants);
+}
+
 int ringpu_runtime_command_copy_buffer(
     RinGpuRuntime* runtime, RinGpuHandle command_list,
     RinGpuHandle destination, uint64_t destination_offset,

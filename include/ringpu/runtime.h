@@ -227,6 +227,15 @@ int ringpu_runtime_command_end_query(RinGpuRuntime* runtime,
 int ringpu_runtime_command_reset_query(RinGpuRuntime* runtime,
                                        RinGpuHandle command_list,
                                        RinGpuHandle query);
+int ringpu_runtime_command_compute_barrier_v2(
+    RinGpuRuntime* runtime, RinGpuHandle command_list,
+    const RinGpuComputeBarrierV2* barrier);
+int ringpu_runtime_command_graphics_barrier_v2(
+    RinGpuRuntime* runtime, RinGpuHandle command_list,
+    const RinGpuGraphicsBarrierV2* barrier);
+int ringpu_runtime_command_set_push_constants(
+    RinGpuRuntime* runtime, RinGpuHandle command_list,
+    const RinGpuPushConstantsV1* constants);
 int ringpu_runtime_command_copy_buffer(
     RinGpuRuntime* runtime, RinGpuHandle command_list,
     RinGpuHandle destination, uint64_t destination_offset,
