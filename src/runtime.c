@@ -35,7 +35,8 @@ static int runtime_display_is_zero(const RinGpuDisplayInfoV1* display)
     return 1;
 }
 
-static int runtime_desc_valid(const RinGpuRuntimeDescV1* desc)
+static int runtime_desc_valid(const RinGpuRuntimeDescV1* desc,
+                              int allow_backend_resolution)
 {
     int headless;
     if (desc == NULL) return 0;
@@ -61,8 +62,14 @@ static int runtime_desc_valid(const RinGpuRuntimeDescV1* desc)
         return 0;
     }
     if (desc->backend_ops == NULL) {
+        if (desc->backend_context != NULL) return 0;
         if (desc->backend_family != RIN_GPU_RUNTIME_BACKEND_FAMILY_UNKNOWN &&
-            desc->backend_family != RIN_GPU_RUNTIME_BACKEND_FAMILY_SOFTWARE)
+            desc->backend_family != RIN_GPU_RUNTIME_BACKEND_FAMILY_SOFTWARE &&
+            !(allow_backend_resolution &&
+              desc->backend_family >=
+                  RIN_GPU_RUNTIME_BACKEND_FAMILY_INTEL &&
+              desc->backend_family <=
+                  RIN_GPU_RUNTIME_BACKEND_FAMILY_VIRTIO))
             return 0;
         if (headless) {
             if (desc->present_callback != NULL ||
@@ -90,9 +97,12 @@ static int runtime_create_internal(
     const RinGpuPlatformThreadSchedulerV1* platform_scheduler,
     RinGpuPlatformDiagnosticCallbackV1 platform_diagnostic_callback,
     void* platform_diagnostic_context,
+    RinGpuPlatformResolveBackendCallbackV1 backend_resolver,
+    void* backend_resolver_context,
     RinGpuRuntime** runtime_out)
 {
     RinGpuRuntime* runtime;
+    RinGpuRuntimeDescV1 resolved_desc;
 #if RINGPU_BUILD_SOFTWARE_BACKEND
     RinGpuSoftwareBackendDescV3 software_desc;
     RinGpuSoftwareBackendDescV4 headless_software_desc;
@@ -101,11 +111,31 @@ static int runtime_create_internal(
     RinGpuCoreConfigV1 config;
     const RinGpuBackendOpsV1* backend_ops;
     const RinGpuBackendOpsV1* external_ops;
+    void* resolved_backend_context = NULL;
     int result;
 
     if (runtime_out == NULL) return RIN_GPU_ERROR_INVALID_ARGUMENT;
     *runtime_out = NULL;
-    if (!runtime_desc_valid(desc)) return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    if (!runtime_desc_valid(desc, backend_resolver != NULL))
+        return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    if (desc->backend_ops == NULL &&
+        desc->backend_family >= RIN_GPU_RUNTIME_BACKEND_FAMILY_INTEL &&
+        desc->backend_family <= RIN_GPU_RUNTIME_BACKEND_FAMILY_VIRTIO) {
+        const RinGpuBackendOpsV1* resolved_ops = NULL;
+        result = backend_resolver(backend_resolver_context,
+                                  desc->backend_family, &resolved_ops,
+                                  &resolved_backend_context);
+        if (result != RIN_GPU_OK)
+            return result < RIN_GPU_OK ? result : RIN_GPU_ERROR_BACKEND;
+        if (resolved_ops == NULL || resolved_backend_context == NULL)
+            return RIN_GPU_ERROR_BACKEND;
+        resolved_desc = *desc;
+        resolved_desc.backend_ops = resolved_ops;
+        resolved_desc.backend_context = resolved_backend_context;
+        desc = &resolved_desc;
+        if (!runtime_desc_valid(desc, 0))
+            return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    }
     if (platform_scheduler != NULL &&
         (platform_scheduler->struct_size != sizeof(*platform_scheduler) ||
          platform_scheduler->version !=
@@ -257,7 +287,8 @@ fail:
 int ringpu_runtime_create(const RinGpuRuntimeDescV1* desc,
                           RinGpuRuntime** runtime_out)
 {
-    return runtime_create_internal(desc, NULL, NULL, NULL, runtime_out);
+    return runtime_create_internal(desc, NULL, NULL, NULL, NULL, NULL,
+                                   runtime_out);
 }
 
 int ringpu_runtime_create_with_platform(
@@ -268,7 +299,8 @@ int ringpu_runtime_create_with_platform(
     if (runtime_out == NULL) return RIN_GPU_ERROR_INVALID_ARGUMENT;
     *runtime_out = NULL;
     if (scheduler == NULL) return RIN_GPU_ERROR_INVALID_ARGUMENT;
-    return runtime_create_internal(desc, scheduler, NULL, NULL, runtime_out);
+    return runtime_create_internal(desc, scheduler, NULL, NULL, NULL, NULL,
+                                   runtime_out);
 }
 
 int ringpu_runtime_create_with_platform_services(
@@ -303,7 +335,48 @@ int ringpu_runtime_create_with_platform_services(
 
     return runtime_create_internal(desc, scheduler,
                                    services->diagnostic_callback,
-                                   services->diagnostic_context, runtime_out);
+                                   services->diagnostic_context, NULL, NULL,
+                                   runtime_out);
+}
+
+int ringpu_runtime_create_with_platform_services_v2(
+    const RinGpuRuntimeDescV1* desc,
+    const RinGpuPlatformServicesV2* services,
+    RinGpuRuntime** runtime_out)
+{
+    const RinGpuPlatformThreadSchedulerV1* scheduler;
+    int scheduler_is_zero;
+    if (runtime_out == NULL) return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    *runtime_out = NULL;
+    if (services == NULL ||
+        services->struct_size != sizeof(*services) ||
+        services->version != RIN_GPU_PLATFORM_SERVICES_V2_VERSION ||
+        (services->diagnostic_callback == NULL &&
+         services->diagnostic_context != NULL) ||
+        (services->resolve_backend == NULL &&
+         services->backend_resolver_context != NULL))
+        return RIN_GPU_ERROR_INVALID_ARGUMENT;
+
+    scheduler_is_zero =
+        services->thread_scheduler.struct_size == 0u &&
+        services->thread_scheduler.version == 0u &&
+        services->thread_scheduler.yield_thread == NULL &&
+        services->thread_scheduler.context == NULL;
+    scheduler = scheduler_is_zero ? NULL : &services->thread_scheduler;
+    if (!scheduler_is_zero &&
+        (services->thread_scheduler.struct_size !=
+             sizeof(services->thread_scheduler) ||
+         services->thread_scheduler.version !=
+             RIN_GPU_PLATFORM_THREAD_SCHEDULER_VERSION ||
+         services->thread_scheduler.yield_thread == NULL))
+        return RIN_GPU_ERROR_INVALID_ARGUMENT;
+
+    return runtime_create_internal(desc, scheduler,
+                                   services->diagnostic_callback,
+                                   services->diagnostic_context,
+                                   services->resolve_backend,
+                                   services->backend_resolver_context,
+                                   runtime_out);
 }
 
 int ringpu_runtime_software_surface_create(

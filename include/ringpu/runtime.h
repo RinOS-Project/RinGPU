@@ -90,6 +90,14 @@ int ringpu_runtime_create_with_platform_services(
     const RinGpuPlatformServicesV1* services,
     RinGpuRuntime** runtime_out);
 
+/* V2 additionally lets OS-Core resolve a physical backend operation table
+ * for the family requested in the descriptor. Resolution is synchronous and
+ * has no software fallback. */
+int ringpu_runtime_create_with_platform_services_v2(
+    const RinGpuRuntimeDescV1* desc,
+    const RinGpuPlatformServicesV2* services,
+    RinGpuRuntime** runtime_out);
+
 int ringpu_runtime_software_surface_create(
     const RinGpuRuntimeSoftwareSurfaceDescV1* desc,
     RinGpuRuntime** runtime_out);

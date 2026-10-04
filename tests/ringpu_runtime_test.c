@@ -34,6 +34,14 @@ typedef struct PlatformDiagnosticState {
     uint32_t device_lost_count;
 } PlatformDiagnosticState;
 
+typedef struct PlatformBackendResolverState {
+    const RinGpuBackendOpsV1* backend_ops;
+    void* backend_context;
+    uint32_t expected_family;
+    uint32_t call_count;
+    int result;
+} PlatformBackendResolverState;
+
 static int external_create_buffer(
     void* context, const RinGpuBufferDescV1* desc, uint64_t* cookie_out)
 {
@@ -175,6 +183,27 @@ static void platform_diagnostic(
         ++state->device_lost_count;
 }
 
+static int platform_resolve_backend(
+    void* context, uint32_t backend_family,
+    const struct RinGpuBackendOpsV1** backend_ops_out,
+    void** backend_context_out)
+{
+    PlatformBackendResolverState* state =
+        (PlatformBackendResolverState*)context;
+    if (state == NULL || backend_ops_out == NULL ||
+        backend_context_out == NULL)
+        return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    ++state->call_count;
+    *backend_ops_out = NULL;
+    *backend_context_out = NULL;
+    if (backend_family != state->expected_family)
+        return RIN_GPU_ERROR_UNSUPPORTED;
+    if (state->result != RIN_GPU_OK) return state->result;
+    *backend_ops_out = state->backend_ops;
+    *backend_context_out = state->backend_context;
+    return RIN_GPU_OK;
+}
+
 int main(void)
 {
     RinGpuRuntimeSoftwareSurfaceDescV1 desc = {0};
@@ -198,6 +227,8 @@ int main(void)
     RinGpuSoftwareBackend* external_backend = NULL;
     RinGpuBackendOpsV1 external_ops;
     RinGpuBackendOpsV1 missing_ops;
+    RinGpuPlatformServicesV2 external_services = {0};
+    PlatformBackendResolverState backend_resolver = {0};
     RinGpuRuntime* external_runtime = NULL;
     RinGpuRuntime* rejected_runtime = NULL;
     RinGpuPlatformServicesV1 invalid_platform_services = {0};
@@ -557,12 +588,41 @@ int main(void)
             RIN_GPU_ERROR_INVALID_ARGUMENT || rejected_runtime != NULL)
         return 42;
     external_desc.flags = RIN_GPU_RUNTIME_FLAG_HEADLESS;
-    if (ringpu_runtime_create(&external_desc, &external_runtime) !=
-            RIN_GPU_OK ||
-        ringpu_runtime_create_buffer(external_runtime, &buffer_desc,
+    external_desc.backend_ops = NULL;
+    external_desc.backend_context = NULL;
+    external_services.struct_size = sizeof(external_services);
+    external_services.version = RIN_GPU_PLATFORM_SERVICES_V2_VERSION;
+    external_services.resolve_backend = platform_resolve_backend;
+    external_services.backend_resolver_context = &backend_resolver;
+    backend_resolver.backend_ops = &external_ops;
+    backend_resolver.backend_context = external_backend;
+    backend_resolver.expected_family = RIN_GPU_RUNTIME_BACKEND_FAMILY_VIRTIO;
+    backend_resolver.backend_ops = NULL;
+    backend_resolver.backend_context = external_backend;
+    backend_resolver.result = RIN_GPU_OK;
+    if (ringpu_runtime_create_with_platform_services_v2(
+            &external_desc, &external_services, &rejected_runtime) !=
+            RIN_GPU_ERROR_BACKEND || rejected_runtime != NULL ||
+        external_create_buffer_calls != 0u)
+        return 45;
+    backend_resolver.backend_ops = &external_ops;
+    backend_resolver.result = RIN_GPU_ERROR_BACKEND;
+    if (ringpu_runtime_create_with_platform_services_v2(
+            &external_desc, &external_services, &rejected_runtime) !=
+            RIN_GPU_ERROR_BACKEND || rejected_runtime != NULL ||
+        external_create_buffer_calls != 0u)
+        return 44;
+    backend_resolver.result = RIN_GPU_OK;
+    if (ringpu_runtime_create_with_platform_services_v2(
+            &external_desc, &external_services, &external_runtime) !=
+            RIN_GPU_OK || backend_resolver.call_count != 3u)
+        return 25;
+    external_ops.create_buffer = NULL;
+    if (ringpu_runtime_create_buffer(external_runtime, &buffer_desc,
                                      &external_buffer) != RIN_GPU_OK ||
         external_create_buffer_calls != 1u || external_buffer == 0u)
         return 25;
+    external_ops.create_buffer = external_create_buffer;
 
     external_fail_next_create_buffer = 1u;
     if (ringpu_runtime_create_buffer(external_runtime, &buffer_desc,

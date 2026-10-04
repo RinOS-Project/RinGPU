@@ -20,11 +20,15 @@ _Static_assert(sizeof(RinGpuPlatformThreadSchedulerV1) == 24u,
                "RinGPU platform scheduler ABI drift");
 _Static_assert(sizeof(RinGpuPlatformServicesV1) == 48u,
                "RinGPU platform services ABI drift");
+_Static_assert(sizeof(RinGpuPlatformServicesV2) == 64u,
+               "RinGPU platform services V2 ABI drift");
 #else
 _Static_assert(sizeof(RinGpuPlatformThreadSchedulerV1) == 16u,
                "RinGPU platform scheduler ABI drift");
 _Static_assert(sizeof(RinGpuPlatformServicesV1) == 32u,
                "RinGPU platform services ABI drift");
+_Static_assert(sizeof(RinGpuPlatformServicesV2) == 40u,
+               "RinGPU platform services V2 ABI drift");
 #endif
 
 int main(void) {

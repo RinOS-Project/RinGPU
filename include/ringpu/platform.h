@@ -10,6 +10,7 @@ extern "C" {
 
 #define RIN_GPU_PLATFORM_THREAD_SCHEDULER_VERSION 1u
 #define RIN_GPU_PLATFORM_SERVICES_VERSION 1u
+#define RIN_GPU_PLATFORM_SERVICES_V2_VERSION 2u
 
 /* Event type values delivered to RinGpuPlatformDiagnosticCallbackV1. */
 #define RIN_GPU_PLATFORM_DIAGNOSTIC_RESOURCE_CREATE 1u
@@ -59,6 +60,32 @@ typedef struct RinGpuPlatformServicesV1 {
     RinGpuPlatformDiagnosticCallbackV1 diagnostic_callback;
     void* diagnostic_context;
 } RinGpuPlatformServicesV1;
+
+struct RinGpuBackendOpsV1;
+
+/* Resolves a physical backend's platform-owned operation table. Called only
+ * when a runtime descriptor requests a physical backend family without an
+ * explicit table. Return zero only when both outputs are valid; otherwise
+ * return a nonzero status. The runtime copies the table before this callback
+ * returns; backend_context remains caller-owned for the runtime's lifetime
+ * and must be cleaned up by its owner if runtime creation fails. */
+typedef int (*RinGpuPlatformResolveBackendCallbackV1)(
+    void* context, uint32_t backend_family,
+    const struct RinGpuBackendOpsV1** backend_ops_out,
+    void** backend_context_out);
+
+/* V2 adds OS-Core backend resolution while preserving the V1 services ABI.
+ * backend_resolver_context is used only during runtime construction. A
+ * resolver failure is returned to the caller and never selects software. */
+typedef struct RinGpuPlatformServicesV2 {
+    uint32_t struct_size;
+    uint32_t version;
+    RinGpuPlatformThreadSchedulerV1 thread_scheduler;
+    RinGpuPlatformDiagnosticCallbackV1 diagnostic_callback;
+    void* diagnostic_context;
+    RinGpuPlatformResolveBackendCallbackV1 resolve_backend;
+    void* backend_resolver_context;
+} RinGpuPlatformServicesV2;
 
 #ifdef __cplusplus
 }
