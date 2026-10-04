@@ -11,6 +11,7 @@ ringpu_sources = files(
   'src/core/core.c',
   'src/core/object_lifetime.c',
   'src/core/object_table.c',
+  'src/platform/thread.c',
   'src/runtime.c',
   'src/validation/diagnostics.c',
   'src/validation/graphics_layout.c',
