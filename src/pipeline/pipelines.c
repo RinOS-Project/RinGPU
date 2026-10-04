@@ -47,7 +47,12 @@ int ringpu_create_compute_pipeline(
     result = core->backend.create_compute_pipeline(
         core->backend_context, shader->value.shader_module.backend_cookie,
         &shader->value.shader_module.info, &cookie);
-    if (result != RIN_GPU_OK) return result;
+    if (result != RIN_GPU_OK) {
+        if (cookie != 0u)
+            core->backend.destroy_compute_pipeline(core->backend_context,
+                                                   cookie);
+        return result;
+    }
     result = ringpu_allocate(core, RIN_GPU_OBJECT_COMPUTE_PIPELINE,
                              pipeline, &slot);
     if (result != RIN_GPU_OK) {
@@ -150,7 +155,12 @@ int ringpu_create_compute_bind_group(
         core->backend_context,
         pipeline_slot->value.compute_pipeline.backend_cookie,
         backend_bindings, binding_count, &cookie);
-    if (result != RIN_GPU_OK) goto fail;
+    if (result != RIN_GPU_OK) {
+        if (cookie != 0u)
+            core->backend.destroy_compute_bind_group(core->backend_context,
+                                                     cookie);
+        goto fail;
+    }
     result = ringpu_allocate(core, RIN_GPU_OBJECT_COMPUTE_BIND_GROUP,
                              bind_group, &slot);
     if (result != RIN_GPU_OK) {

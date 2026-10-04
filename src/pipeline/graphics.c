@@ -216,7 +216,12 @@ static int ringpu_create_graphics_pipeline_internal(
         &vertex_shader->value.shader_module.info,
         fragment_shader->value.shader_module.backend_cookie,
         &fragment_shader->value.shader_module.info, &backend_desc, &cookie);
-    if (result != RIN_GPU_OK) return result;
+    if (result != RIN_GPU_OK) {
+        if (cookie != 0u)
+            core->backend.destroy_graphics_pipeline(core->backend_context,
+                                                    cookie);
+        return result;
+    }
     result = ringpu_allocate(core, RIN_GPU_OBJECT_GRAPHICS_PIPELINE,
                              pipeline, &slot);
     if (result != RIN_GPU_OK) {
@@ -1166,7 +1171,12 @@ int ringpu_create_graphics_bind_group_typed(
         core->backend_context,
         pipeline_slot->value.graphics_pipeline.backend_cookie,
         backend_bindings, binding_count, &cookie);
-    if (result != RIN_GPU_OK) goto fail;
+    if (result != RIN_GPU_OK) {
+        if (cookie != 0u)
+            core->backend.destroy_graphics_bind_group(core->backend_context,
+                                                     cookie);
+        goto fail;
+    }
     result = ringpu_allocate(core, RIN_GPU_OBJECT_GRAPHICS_BIND_GROUP,
                              bind_group, &slot);
     if (result != RIN_GPU_OK) {

@@ -602,6 +602,9 @@ typedef struct RinGpuBackendCommandV1 {
 typedef struct RinGpuBackendOpsV1 {
     uint32_t abi_version;
     uint32_t struct_size;
+    /* Factory callbacks start with an empty output. If one returns an error
+     * after publishing a cookie/allocation, the core invokes its matching
+     * destroy callback before returning the error. */
     int (*create_buffer)(void* context, const RinGpuBufferDescV1* desc,
                          uint64_t* cookie);
     void (*destroy_buffer)(void* context, uint64_t cookie);
@@ -677,7 +680,9 @@ typedef struct RinGpuBackendOpsV1 {
     /* Optional explicit memory ownership/binding profile. Supply all four
      * callbacks or none. create_memory returns an owned token on success;
      * bind callbacks return a non-zero replacement cookie without consuming
-     * the old cookie, which the core retires after the bind succeeds. */
+     * the old cookie, which the core retires after the bind succeeds. On bind
+     * error the core destroys any nonzero replacement cookie and keeps the
+     * original unbound resource intact. */
     int (*create_memory)(void* context, const RinGpuMemoryDescV1* desc,
                          void** allocation_out);
     void (*destroy_memory)(void* context, void* allocation,

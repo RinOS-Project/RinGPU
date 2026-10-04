@@ -174,6 +174,8 @@ int ringpu_create_shader_module(RinGpuCore* core, const void* rin_shader_ir,
     result = core->backend.create_shader_module(
         core->backend_context, snapshot, shader_size, &info, &cookie);
     if (result != RIN_GPU_OK) {
+        if (cookie != 0u)
+            core->backend.destroy_shader_module(core->backend_context, cookie);
         free(snapshot);
         return result;
     }

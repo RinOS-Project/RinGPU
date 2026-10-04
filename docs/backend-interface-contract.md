@@ -24,6 +24,8 @@ destroy callback before returning that error. Buffer/image memory-binding
 callbacks have the same rule for a nonzero replacement cookie; the original
 unbound resource remains live when binding fails. A callback that fails before
 creating a backend object should leave its output empty.
+Shader-module, graphics/compute-pipeline, and graphics/compute-bind-group
+creation callbacks follow the same nonzero-cookie cleanup rule.
 
 Each successful submission advances a core serial for the exact command-list
 reference graph. A successful `wait_for_completion` callback confirms all
