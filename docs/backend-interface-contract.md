@@ -17,6 +17,14 @@ Recorded commands use the common
 `RinGpuBackendCommandV1` representation and reach the device only through
 `submit_commands`; native API handles do not escape into common descriptors.
 
+Resource creation callbacks for buffers, images, samplers, and memory are
+failure-atomic at the core boundary: if a callback returns an error after
+publishing a nonzero cookie or non-null allocation, the core calls its matching
+destroy callback before returning that error. Buffer/image memory-binding
+callbacks have the same rule for a nonzero replacement cookie; the original
+unbound resource remains live when binding fails. A callback that fails before
+creating a backend object should leave its output empty.
+
 Each successful submission advances a core serial for the exact command-list
 reference graph. A successful `wait_for_completion` callback confirms all
 prior submissions are complete and allows deferred objects to retire. If that
