@@ -40,6 +40,16 @@ typedef struct BenchmarkRuntime {
     RinGpuHandle descriptor_buffer;
     RinGpuHandle descriptor_shader;
     RinGpuHandle descriptor_pipeline;
+    RinGpuHandle async_compute_queue;
+    RinGpuHandle async_compute_fence;
+    RinGpuHandle async_copy_source;
+    RinGpuHandle async_copy_destination;
+    RinGpuHandle async_compute_buffer;
+    RinGpuHandle async_compute_shader;
+    RinGpuHandle async_compute_pipeline;
+    RinGpuHandle async_compute_bind_group;
+    RinGpuHandle async_copy_command_list;
+    RinGpuHandle async_compute_command_list;
     RinGpuHandle pipeline_cache_shader;
     RinGpuHandle pipeline_cache_saturation_shaders[
         PIPELINE_CACHE_CAPACITY];
@@ -47,6 +57,10 @@ typedef struct BenchmarkRuntime {
         PIPELINE_CACHE_CAPACITY];
     uint32_t pipeline_cache_saturation_count;
     uint64_t submission_value;
+    uint64_t async_compute_fence_value;
+    uint32_t async_compute_value;
+    uint32_t async_iteration_count;
+    uint8_t async_copy_expected[BENCHMARK_BUFFER_BYTES];
     RinGpuRuntime* frame_runtime;
     RinGpuHandle frame_queue;
     RinGpuHandle frame_fence;
@@ -342,6 +356,7 @@ static int create_descriptor_resources(BenchmarkRuntime* state)
     buffer_desc.struct_size = sizeof(buffer_desc);
     buffer_desc.size_bytes = sizeof(initial_value);
     buffer_desc.usage = RIN_GPU_BUFFER_STORAGE |
+                        RIN_GPU_BUFFER_COPY_SOURCE |
                         RIN_GPU_BUFFER_COPY_DESTINATION;
     buffer_desc.flags = RIN_GPU_BUFFER_CPU_VISIBLE;
     result = ringpu_runtime_create_buffer(state->runtime, &buffer_desc,
@@ -350,6 +365,136 @@ static int create_descriptor_resources(BenchmarkRuntime* state)
     return ringpu_runtime_upload_buffer(
         state->runtime, state->descriptor_buffer, 0u, &initial_value,
         sizeof(initial_value));
+}
+
+static int create_async_transfer_compute_resources(BenchmarkRuntime* state)
+{
+    static const uint8_t zero_destination[BENCHMARK_BUFFER_BYTES] = {0u};
+    struct AsyncComputeShader {
+        RinShaderHeaderV1 header;
+        RinShaderInstructionV1 instructions[6];
+    } shader;
+    RinGpuQueueDescV1 queue_desc;
+    RinGpuCommandListDescV1 command_list_desc;
+    RinGpuBufferDescV1 buffer_desc;
+    RinGpuComputePipelineDescV1 pipeline_desc;
+    RinGpuBufferBindingV1 binding;
+    const uint32_t initial_compute_value = 0u;
+    int result;
+
+    memset(&queue_desc, 0, sizeof(queue_desc));
+    queue_desc.abi_version = RIN_GPU_ABI_VERSION;
+    queue_desc.struct_size = sizeof(queue_desc);
+    queue_desc.capabilities = RIN_GPU_QUEUE_COMPUTE;
+    result = ringpu_runtime_create_queue(state->runtime, &queue_desc,
+                                         &state->async_compute_queue);
+    if (result != RIN_GPU_OK) return result;
+    result = ringpu_runtime_create_fence(state->runtime, 0u,
+                                         &state->async_compute_fence);
+    if (result != RIN_GPU_OK) return result;
+
+    memset(&buffer_desc, 0, sizeof(buffer_desc));
+    buffer_desc.abi_version = RIN_GPU_ABI_VERSION;
+    buffer_desc.struct_size = sizeof(buffer_desc);
+    buffer_desc.size_bytes = BENCHMARK_BUFFER_BYTES;
+    buffer_desc.usage = RIN_GPU_BUFFER_COPY_SOURCE |
+                        RIN_GPU_BUFFER_COPY_DESTINATION;
+    buffer_desc.flags = RIN_GPU_BUFFER_CPU_VISIBLE;
+    result = ringpu_runtime_create_buffer(state->runtime, &buffer_desc,
+                                         &state->async_copy_source);
+    if (result != RIN_GPU_OK) return result;
+    result = ringpu_runtime_create_buffer(state->runtime, &buffer_desc,
+                                         &state->async_copy_destination);
+    if (result != RIN_GPU_OK) return result;
+    result = ringpu_runtime_upload_buffer(
+        state->runtime, state->async_copy_destination, 0u, zero_destination,
+        sizeof(zero_destination));
+    if (result != RIN_GPU_OK) return result;
+    for (uint32_t index = 0u; index < BENCHMARK_BUFFER_BYTES; ++index)
+        state->async_copy_expected[index] =
+            (uint8_t)((index * 131u + 17u) & 0xffu);
+    result = ringpu_runtime_upload_buffer(
+        state->runtime, state->async_copy_source, 0u,
+        state->async_copy_expected, sizeof(state->async_copy_expected));
+    if (result != RIN_GPU_OK) return result;
+
+    buffer_desc.size_bytes = sizeof(initial_compute_value);
+    buffer_desc.usage = RIN_GPU_BUFFER_STORAGE |
+                        RIN_GPU_BUFFER_COPY_SOURCE |
+                        RIN_GPU_BUFFER_COPY_DESTINATION;
+    result = ringpu_runtime_create_buffer(state->runtime, &buffer_desc,
+                                         &state->async_compute_buffer);
+    if (result != RIN_GPU_OK) return result;
+    result = ringpu_runtime_upload_buffer(
+        state->runtime, state->async_compute_buffer, 0u,
+        &initial_compute_value, sizeof(initial_compute_value));
+    if (result != RIN_GPU_OK) return result;
+
+    memset(&shader, 0, sizeof(shader));
+    shader.header.magic = RIN_SHADER_MAGIC;
+    shader.header.version = RIN_SHADER_IR_VERSION;
+    shader.header.header_size = sizeof(shader.header);
+    shader.header.total_size = sizeof(shader);
+    shader.header.stage = RIN_SHADER_STAGE_COMPUTE;
+    shader.header.instruction_count = 6u;
+    shader.header.register_count = 4u;
+    shader.header.resource_count = 1u;
+    shader.header.workgroup_x = 1u;
+    shader.header.workgroup_y = 1u;
+    shader.header.workgroup_z = 1u;
+    set_shader_instruction(&shader.instructions[0], RIN_SHADER_OP_CONST_I32,
+                           0u, RIN_SHADER_UNUSED, RIN_SHADER_UNUSED,
+                           RIN_SHADER_UNUSED, 0u);
+    set_shader_instruction(&shader.instructions[1],
+                           RIN_SHADER_OP_LOAD_RESOURCE_I32,
+                           1u, 0u, RIN_SHADER_UNUSED, 0u, 0u);
+    set_shader_instruction(&shader.instructions[2], RIN_SHADER_OP_CONST_I32,
+                           2u, RIN_SHADER_UNUSED, RIN_SHADER_UNUSED,
+                           RIN_SHADER_UNUSED, 1u);
+    set_shader_instruction(&shader.instructions[3], RIN_SHADER_OP_ADD_I32,
+                           3u, 1u, 2u, RIN_SHADER_UNUSED, 0u);
+    set_shader_instruction(&shader.instructions[4],
+                           RIN_SHADER_OP_STORE_RESOURCE_I32,
+                           RIN_SHADER_UNUSED, 0u, 3u, 0u, 0u);
+    set_shader_instruction(&shader.instructions[5], RIN_SHADER_OP_RETURN,
+                           RIN_SHADER_UNUSED, RIN_SHADER_UNUSED,
+                           RIN_SHADER_UNUSED, RIN_SHADER_UNUSED, 0u);
+    result = ringpu_runtime_create_shader_module(
+        state->runtime, &shader, sizeof(shader),
+        &state->async_compute_shader);
+    if (result != RIN_GPU_OK) return result;
+    memset(&pipeline_desc, 0, sizeof(pipeline_desc));
+    pipeline_desc.abi_version = RIN_GPU_ABI_VERSION;
+    pipeline_desc.struct_size = sizeof(pipeline_desc);
+    pipeline_desc.shader_module = state->async_compute_shader;
+    result = ringpu_runtime_create_compute_pipeline(
+        state->runtime, &pipeline_desc, &state->async_compute_pipeline);
+    if (result != RIN_GPU_OK) return result;
+
+    memset(&binding, 0, sizeof(binding));
+    binding.abi_version = RIN_GPU_ABI_VERSION;
+    binding.struct_size = sizeof(binding);
+    binding.binding = 0u;
+    binding.access = RIN_GPU_RESOURCE_READ | RIN_GPU_RESOURCE_WRITE;
+    binding.buffer = state->async_compute_buffer;
+    binding.size_bytes = sizeof(initial_compute_value);
+    result = ringpu_runtime_create_compute_bind_group(
+        state->runtime, state->async_compute_pipeline, &binding, 1u,
+        &state->async_compute_bind_group);
+    if (result != RIN_GPU_OK) return result;
+
+    memset(&command_list_desc, 0, sizeof(command_list_desc));
+    command_list_desc.abi_version = RIN_GPU_ABI_VERSION;
+    command_list_desc.struct_size = sizeof(command_list_desc);
+    command_list_desc.capabilities = RIN_GPU_QUEUE_COPY;
+    result = ringpu_runtime_create_command_list(
+        state->runtime, &command_list_desc,
+        &state->async_copy_command_list);
+    if (result != RIN_GPU_OK) return result;
+    command_list_desc.capabilities = RIN_GPU_QUEUE_COMPUTE;
+    return ringpu_runtime_create_command_list(
+        state->runtime, &command_list_desc,
+        &state->async_compute_command_list);
 }
 
 static int create_benchmark_runtime(BenchmarkRuntime* state)
@@ -499,6 +644,66 @@ static int destroy_benchmark_runtime(BenchmarkRuntime* state)
         ringpu_runtime_destroy(state->frame_runtime);
     if (state->suballocator_runtime != NULL)
         ringpu_runtime_destroy(state->suballocator_runtime);
+    if (state->runtime != NULL && state->async_copy_command_list != 0u) {
+        result = ringpu_runtime_destroy_object(
+            state->runtime, state->async_copy_command_list);
+        if (first_error == RIN_GPU_OK && result != RIN_GPU_OK)
+            first_error = result;
+    }
+    if (state->runtime != NULL && state->async_compute_command_list != 0u) {
+        result = ringpu_runtime_destroy_object(
+            state->runtime, state->async_compute_command_list);
+        if (first_error == RIN_GPU_OK && result != RIN_GPU_OK)
+            first_error = result;
+    }
+    if (state->runtime != NULL && state->async_compute_bind_group != 0u) {
+        result = ringpu_runtime_destroy_object(
+            state->runtime, state->async_compute_bind_group);
+        if (first_error == RIN_GPU_OK && result != RIN_GPU_OK)
+            first_error = result;
+    }
+    if (state->runtime != NULL && state->async_compute_pipeline != 0u) {
+        result = ringpu_runtime_destroy_object(
+            state->runtime, state->async_compute_pipeline);
+        if (first_error == RIN_GPU_OK && result != RIN_GPU_OK)
+            first_error = result;
+    }
+    if (state->runtime != NULL && state->async_compute_shader != 0u) {
+        result = ringpu_runtime_destroy_object(
+            state->runtime, state->async_compute_shader);
+        if (first_error == RIN_GPU_OK && result != RIN_GPU_OK)
+            first_error = result;
+    }
+    if (state->runtime != NULL && state->async_compute_buffer != 0u) {
+        result = ringpu_runtime_destroy_object(
+            state->runtime, state->async_compute_buffer);
+        if (first_error == RIN_GPU_OK && result != RIN_GPU_OK)
+            first_error = result;
+    }
+    if (state->runtime != NULL && state->async_copy_destination != 0u) {
+        result = ringpu_runtime_destroy_object(
+            state->runtime, state->async_copy_destination);
+        if (first_error == RIN_GPU_OK && result != RIN_GPU_OK)
+            first_error = result;
+    }
+    if (state->runtime != NULL && state->async_copy_source != 0u) {
+        result = ringpu_runtime_destroy_object(
+            state->runtime, state->async_copy_source);
+        if (first_error == RIN_GPU_OK && result != RIN_GPU_OK)
+            first_error = result;
+    }
+    if (state->runtime != NULL && state->async_compute_fence != 0u) {
+        result = ringpu_runtime_destroy_object(
+            state->runtime, state->async_compute_fence);
+        if (first_error == RIN_GPU_OK && result != RIN_GPU_OK)
+            first_error = result;
+    }
+    if (state->runtime != NULL && state->async_compute_queue != 0u) {
+        result = ringpu_runtime_destroy_object(
+            state->runtime, state->async_compute_queue);
+        if (first_error == RIN_GPU_OK && result != RIN_GPU_OK)
+            first_error = result;
+    }
     if (state->pipeline_cache_saturation_count != 0u) {
         result = destroy_pipeline_cache_saturation(state);
         if (first_error == RIN_GPU_OK && result != RIN_GPU_OK)
@@ -741,6 +946,182 @@ cleanup:
     if (result == RIN_GPU_OK && cleanup_result != RIN_GPU_OK)
         result = cleanup_result;
     return result;
+}
+
+static int run_async_transfer_compute_iteration(
+    BenchmarkRuntime* state, uint64_t iteration, uint64_t* checksum_out,
+    int wait_between_queues)
+{
+    RinGpuDispatchV1 dispatch;
+    RinGpuSubmitInfoV1 transfer_submit;
+    RinGpuSubmitInfoV1 compute_submit;
+    uint8_t copy_readback[BENCHMARK_BUFFER_BYTES];
+    uint32_t compute_readback = 0u;
+    uint64_t transfer_value;
+    uint64_t compute_value;
+    uint32_t index;
+    uint32_t expected_compute_value;
+    int transfer_submitted = 0;
+    int transfer_waited = 0;
+    int compute_submitted = 0;
+    const char* phase = "validation";
+    int result;
+
+    if (!state || !checksum_out || state->async_copy_command_list == 0u ||
+        state->async_compute_command_list == 0u ||
+        state->async_compute_value == UINT32_MAX ||
+        state->submission_value == UINT64_MAX ||
+        state->async_compute_fence_value == UINT64_MAX)
+        return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    if (state->async_iteration_count != 0u) {
+        phase = "copy command-list reset";
+        result = ringpu_runtime_command_list_reset(
+            state->runtime, state->async_copy_command_list);
+        if (result != RIN_GPU_OK) goto failed;
+        phase = "compute command-list reset";
+        result = ringpu_runtime_command_list_reset(
+            state->runtime, state->async_compute_command_list);
+        if (result != RIN_GPU_OK) goto failed;
+    }
+
+    phase = "copy buffer command recording";
+    result = ringpu_runtime_command_copy_buffer(
+        state->runtime, state->async_copy_command_list,
+        state->async_copy_destination, 0u, state->async_copy_source, 0u,
+        BENCHMARK_BUFFER_BYTES);
+    if (result != RIN_GPU_OK) goto failed;
+    phase = "copy command-list close";
+    result = ringpu_runtime_command_list_close(
+        state->runtime, state->async_copy_command_list);
+    if (result != RIN_GPU_OK) goto failed;
+    memset(&dispatch, 0, sizeof(dispatch));
+    dispatch.abi_version = RIN_GPU_ABI_VERSION;
+    dispatch.struct_size = sizeof(dispatch);
+    dispatch.pipeline = state->async_compute_pipeline;
+    dispatch.bind_group = state->async_compute_bind_group;
+    dispatch.group_count_x = 1u;
+    dispatch.group_count_y = 1u;
+    dispatch.group_count_z = 1u;
+    phase = "compute dispatch recording";
+    result = ringpu_runtime_command_dispatch(
+        state->runtime, state->async_compute_command_list, &dispatch);
+    if (result == RIN_GPU_OK) {
+        phase = "compute command-list close";
+        result = ringpu_runtime_command_list_close(
+            state->runtime, state->async_compute_command_list);
+    }
+    if (result != RIN_GPU_OK) goto failed;
+    state->async_iteration_count++;
+
+    transfer_value = state->submission_value + 1u;
+    memset(&transfer_submit, 0, sizeof(transfer_submit));
+    transfer_submit.abi_version = RIN_GPU_ABI_VERSION;
+    transfer_submit.struct_size = sizeof(transfer_submit);
+    transfer_submit.command_list = state->async_copy_command_list;
+    transfer_submit.signal_fence = state->fence;
+    transfer_submit.signal_value = transfer_value;
+    phase = "copy queue submission";
+    result = ringpu_runtime_queue_submit(
+        state->runtime, state->queue, &transfer_submit);
+    if (result == RIN_GPU_OK) {
+        state->submission_value = transfer_value;
+        transfer_submitted = 1;
+    }
+    if (result == RIN_GPU_OK && wait_between_queues) {
+        phase = "serial copy fence wait";
+        result = ringpu_runtime_wait_fence(
+            state->runtime, state->fence, transfer_value,
+            RIN_GPU_TIMEOUT_INFINITE);
+        if (result == RIN_GPU_OK) transfer_waited = 1;
+    }
+
+    compute_value = state->async_compute_fence_value + 1u;
+    memset(&compute_submit, 0, sizeof(compute_submit));
+    compute_submit.abi_version = RIN_GPU_ABI_VERSION;
+    compute_submit.struct_size = sizeof(compute_submit);
+    compute_submit.command_list = state->async_compute_command_list;
+    compute_submit.signal_fence = state->async_compute_fence;
+    compute_submit.signal_value = compute_value;
+    if (result == RIN_GPU_OK) {
+        phase = "compute queue submission";
+        result = ringpu_runtime_queue_submit(
+            state->runtime, state->async_compute_queue, &compute_submit);
+    }
+    if (result == RIN_GPU_OK) {
+        state->async_compute_fence_value = compute_value;
+        compute_submitted = 1;
+    }
+    if (transfer_submitted && !transfer_waited) {
+        phase = "copy fence wait";
+        const int wait_result = ringpu_runtime_wait_fence(
+            state->runtime, state->fence, transfer_value,
+            RIN_GPU_TIMEOUT_INFINITE);
+        if (wait_result == RIN_GPU_OK)
+            transfer_waited = 1;
+        else if (result == RIN_GPU_OK)
+            result = wait_result;
+    }
+    if (compute_submitted) {
+        phase = "compute fence wait";
+        const int wait_result = ringpu_runtime_wait_fence(
+            state->runtime, state->async_compute_fence, compute_value,
+            RIN_GPU_TIMEOUT_INFINITE);
+        if (result == RIN_GPU_OK && wait_result != RIN_GPU_OK)
+            result = wait_result;
+    }
+    if (result != RIN_GPU_OK) goto failed;
+
+    phase = "copy readback";
+    result = ringpu_runtime_readback_buffer(
+        state->runtime, state->async_copy_destination, 0u,
+        copy_readback, sizeof(copy_readback));
+    if (result != RIN_GPU_OK) goto failed;
+    for (index = 0u; index < BENCHMARK_BUFFER_BYTES; ++index) {
+        if (copy_readback[index] != state->async_copy_expected[index]) {
+            result = RIN_GPU_ERROR_STATE;
+            phase = "copy byte verification";
+            goto failed;
+        }
+    }
+    phase = "compute readback";
+    result = ringpu_runtime_readback_buffer(
+        state->runtime, state->async_compute_buffer, 0u,
+        &compute_readback, sizeof(compute_readback));
+    if (result != RIN_GPU_OK) goto failed;
+    expected_compute_value = state->async_compute_value + 1u;
+    if (compute_readback != expected_compute_value) {
+        result = RIN_GPU_ERROR_STATE;
+        phase = "compute increment verification";
+        goto failed;
+    }
+    state->async_compute_value = expected_compute_value;
+
+    for (index = 0u; index < BENCHMARK_BUFFER_BYTES; ++index)
+        *checksum_out = (*checksum_out * UINT64_C(1099511628211)) ^
+                        copy_readback[index];
+    *checksum_out = (*checksum_out * UINT64_C(1099511628211)) ^ iteration;
+    return RIN_GPU_OK;
+
+failed:
+    fprintf(stderr, "async transfer/compute %s failed: RinGPU status %d\n",
+            phase, result);
+    return result;
+}
+
+static int run_async_serial_iteration(BenchmarkRuntime* state,
+                                      uint64_t iteration,
+                                      uint64_t* checksum_out)
+{
+    return run_async_transfer_compute_iteration(
+        state, iteration, checksum_out, 1);
+}
+
+static int run_async_overlap_iteration(BenchmarkRuntime* state,
+                                       uint64_t iteration,
+                                       uint64_t* checksum_out)
+{
+    return run_async_transfer_compute_iteration(
+        state, iteration, checksum_out, 0);
 }
 
 static int run_memory_iteration(BenchmarkRuntime* state, uint64_t iteration,
@@ -1198,6 +1579,72 @@ static int measure_metric(BenchmarkRuntime* state, const char* metric,
     return report_metric(metric, iterations, warmup, samples, checksum);
 }
 
+static int measure_async_transfer_compute_pair(
+    BenchmarkRuntime* state, uint32_t iterations, uint32_t warmup,
+    uint64_t* serial_samples, uint64_t* overlap_samples)
+{
+    uint64_t serial_checksum = UINT64_C(1469598103934665603);
+    uint64_t overlap_checksum = UINT64_C(1469598103934665603);
+    for (uint32_t index = 0u; index < warmup; ++index) {
+        const uint64_t sequence = (uint64_t)index + 1u;
+        BenchmarkIterationFn first = (index & 1u) == 0u
+            ? run_async_serial_iteration : run_async_overlap_iteration;
+        BenchmarkIterationFn second = (index & 1u) == 0u
+            ? run_async_overlap_iteration : run_async_serial_iteration;
+        uint64_t* first_checksum = (index & 1u) == 0u
+            ? &serial_checksum : &overlap_checksum;
+        uint64_t* second_checksum = (index & 1u) == 0u
+            ? &overlap_checksum : &serial_checksum;
+        int result = first(state, sequence, first_checksum);
+        if (result == RIN_GPU_OK)
+            result = second(state, sequence, second_checksum);
+        if (result != RIN_GPU_OK) {
+            fprintf(stderr, "async transfer/compute warmup failed at %"
+                    PRIu32 ": RinGPU status %d\n", index, result);
+            return result;
+        }
+    }
+    for (uint32_t index = 0u; index < iterations; ++index) {
+        const uint64_t sequence = (uint64_t)warmup + index + 1u;
+        const int serial_first = (index & 1u) == 0u;
+        uint64_t* first_checksum = serial_first
+            ? &serial_checksum : &overlap_checksum;
+        uint64_t* second_checksum = serial_first
+            ? &overlap_checksum : &serial_checksum;
+        uint64_t first_elapsed;
+        uint64_t second_elapsed;
+        int result = time_iteration(
+            state, serial_first ? run_async_serial_iteration
+                                : run_async_overlap_iteration,
+            sequence, first_checksum, &first_elapsed);
+        if (result == RIN_GPU_OK)
+            result = time_iteration(
+                state, serial_first ? run_async_overlap_iteration
+                                    : run_async_serial_iteration,
+                sequence, second_checksum, &second_elapsed);
+        if (result != RIN_GPU_OK) {
+            fprintf(stderr, "async transfer/compute sample failed at %"
+                    PRIu32 ": RinGPU status %d\n", index, result);
+            return result;
+        }
+        serial_samples[index] = serial_first ? first_elapsed : second_elapsed;
+        overlap_samples[index] = serial_first ? second_elapsed : first_elapsed;
+    }
+    if (serial_checksum != overlap_checksum) {
+        fprintf(stderr, "async transfer/compute checksums differ\n");
+        return RIN_GPU_ERROR_STATE;
+    }
+    {
+        int result = report_metric("transfer_compute_serial_wait_each",
+                                   iterations, warmup, serial_samples,
+                                   serial_checksum);
+        if (result != RIN_GPU_OK) return result;
+    }
+    return report_metric("transfer_compute_submit_both_then_wait",
+                         iterations, warmup, overlap_samples,
+                         overlap_checksum);
+}
+
 static int measure_fragmentation_pair(BenchmarkRuntime* state,
                                       uint32_t iterations, uint32_t warmup,
                                       uint64_t* baseline_samples,
@@ -1366,6 +1813,8 @@ static int run_benchmark(uint32_t iterations, uint32_t warmup)
     if (result != RIN_GPU_OK) goto cleanup;
     result = create_descriptor_resources(&state);
     if (result != RIN_GPU_OK) goto cleanup;
+    result = create_async_transfer_compute_resources(&state);
+    if (result != RIN_GPU_OK) goto cleanup;
     result = create_suballocator_benchmark_runtime(&state);
     if (result != RIN_GPU_OK) goto cleanup;
     printf("benchmark,backend,compiler,iterations,warmup,min_ns,"
@@ -1380,6 +1829,9 @@ static int run_benchmark(uint32_t iterations, uint32_t warmup)
     result = measure_metric(&state, "queue_submit_wait",
                             run_submit_wait_iteration,
                             iterations, warmup, samples);
+    if (result != RIN_GPU_OK) goto cleanup;
+    result = measure_async_transfer_compute_pair(
+        &state, iterations, warmup, samples, samples + iterations);
     if (result != RIN_GPU_OK) goto cleanup;
     result = measure_metric(&state, "memory_buffer_bind_roundtrip",
                             run_memory_iteration, iterations, warmup, samples);
