@@ -10,6 +10,7 @@
 #define RIN_GPU_SHADER_CACHE_INDEX_NONE UINT32_MAX
 
 #include <ringpu/ringpu.h>
+#include <ringpu/platform.h>
 
 #include "../validation/diagnostics.h"
 
@@ -713,6 +714,8 @@ typedef struct RinGpuCoreConfigV1 {
     /* Optional caller-owned diagnostic ring. It is validated at init and
      * receives pointer-free resource/submission events from the core. */
     RinGpuDiagnosticsRuntime* diagnostics;
+    RinGpuPlatformYieldThreadCallbackV1 platform_yield_thread;
+    void* platform_scheduler_context;
     /* The cache never crosses a core instance, but this discriminator keeps
      * backend realizations explicit when a core is recreated. */
     uint32_t backend_family;
@@ -970,6 +973,8 @@ struct RinGpuCore {
     RinGpuBackendOpsV1 backend;
     void* backend_context;
     RinGpuDiagnosticsRuntime* diagnostics;
+    RinGpuPlatformYieldThreadCallbackV1 platform_yield_thread;
+    void* platform_scheduler_context;
     uint64_t device_generation;
     uint32_t backend_family;
     uint64_t submitted_serial;

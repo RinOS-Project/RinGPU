@@ -53,6 +53,12 @@ if get_option('build_rinos_ipc_adapter')
 endif
 
 if get_option('buildtype') != 'plain'
+  test('ringpu-platform-thread',
+       executable('ringpu-platform-thread-test',
+                  'tests/ringpu_platform_thread_test.c',
+                  'src/platform/thread.c',
+                  include_directories: include_directories('src/platform'),
+                  dependencies: dependency('threads')))
   test('ringpu-abi', executable('ringpu-abi-test', 'tests/ringpu_abi_test.c',
                                 dependencies: ringpu_dep))
   test('ringpu-shader', executable('ringpu-shader-test', 'tests/ringpu_shader_test.c',

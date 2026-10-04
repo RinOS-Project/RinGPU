@@ -131,6 +131,19 @@ if(RINGPU_BUILD_TESTS)
     endfunction()
 
     ringpu_add_test(ringpu-abi-test ringpu-abi tests/ringpu_abi_test.c)
+    add_executable(ringpu-platform-thread-test
+                   tests/ringpu_platform_thread_test.c
+                   src/platform/thread.c)
+    target_compile_features(ringpu-platform-thread-test PRIVATE c_std_11)
+    target_include_directories(ringpu-platform-thread-test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/platform)
+    if(NOT WIN32)
+        target_link_libraries(ringpu-platform-thread-test PRIVATE
+                              Threads::Threads)
+    endif()
+    add_test(NAME ringpu-platform-thread
+             COMMAND ringpu-platform-thread-test)
     ringpu_add_test(ringpu-shader-test ringpu-shader
                     tests/ringpu_shader_test.c)
     ringpu_add_test(ringpu-shader-resource-test ringpu-shader-resource

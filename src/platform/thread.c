@@ -16,14 +16,25 @@
 #error "RinGPU platform resource locking requires MSVC, GCC, or Clang atomics"
 #endif
 
-void ringpu_platform_resource_lock_acquire(volatile long* lock) {
+void ringpu_platform_resource_lock_acquire(
+        volatile long* lock,
+        RinGpuPlatformYieldThreadCallbackV1 yield_thread,
+        void* context) {
     if (!lock) return;
 #if defined(_MSC_VER)
-    while (_InterlockedExchange(lock, 1L) != 0L)
-        (void)SwitchToThread();
+    while (_InterlockedExchange(lock, 1L) != 0L) {
+        if (yield_thread)
+            yield_thread(context);
+        else
+            (void)SwitchToThread();
+    }
 #else
-    while (__atomic_exchange_n(lock, 1L, __ATOMIC_ACQUIRE) != 0L)
-        (void)sched_yield();
+    while (__atomic_exchange_n(lock, 1L, __ATOMIC_ACQUIRE) != 0L) {
+        if (yield_thread)
+            yield_thread(context);
+        else
+            (void)sched_yield();
+    }
 #endif
 }
 

@@ -29,7 +29,9 @@ int ringpu_core_ready(const RinGpuCore* core) {
 void ringpu_core_resource_lock(RinGpuCore* core)
 {
     if (!core) return;
-    ringpu_platform_resource_lock_acquire(&core->object_operation_lock);
+    ringpu_platform_resource_lock_acquire(
+        &core->object_operation_lock, core->platform_yield_thread,
+        core->platform_scheduler_context);
 }
 
 void ringpu_core_resource_unlock(RinGpuCore* core)
@@ -255,6 +257,8 @@ int ringpu_core_init(RinGpuCore* core, const RinGpuCoreConfigV1* config) {
     core->backend = config->backend;
     core->backend_context = config->backend_context;
     core->diagnostics = config->diagnostics;
+    core->platform_yield_thread = config->platform_yield_thread;
+    core->platform_scheduler_context = config->platform_scheduler_context;
     core->device_generation =
         ringpu_core_device_generation(config->diagnostics);
     core->backend_family = config->backend_family;

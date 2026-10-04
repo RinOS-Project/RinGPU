@@ -136,6 +136,11 @@ static int acquire(void* context, const RinGpuImageDescV1* descriptor,
     return RIN_GPU_OK;
 }
 
+static void platform_yield(void* context)
+{
+    if (context != NULL) ++*(uint32_t*)context;
+}
+
 int main(void)
 {
     RinGpuRuntimeSoftwareSurfaceDescV1 desc = {0};
@@ -191,6 +196,8 @@ int main(void)
     RinGpuHandle failed_external_memory = UINT64_C(1);
     uint64_t generation = 0u;
     uint32_t present_count = 0u;
+    uint32_t platform_yield_count = 0u;
+    RinGpuPlatformThreadSchedulerV1 platform_scheduler = {0};
     uint8_t upload_bytes[8] = {0x52u, 0x69u, 0x6eu, 0x47u,
                                0x50u, 0x55u, 0x01u, 0xa5u};
     uint8_t readback_bytes[sizeof(upload_bytes)] = {0u};
@@ -227,7 +234,13 @@ int main(void)
     desc.present_callback = present;
     desc.present_context = &present_count;
     desc.acquire_image = acquire;
-    if (ringpu_runtime_software_surface_create(&desc, &runtime) != RIN_GPU_OK)
+    platform_scheduler.struct_size = sizeof(platform_scheduler);
+    platform_scheduler.version =
+        RIN_GPU_PLATFORM_THREAD_SCHEDULER_VERSION;
+    platform_scheduler.yield_thread = platform_yield;
+    platform_scheduler.context = &platform_yield_count;
+    if (ringpu_runtime_create_with_platform(
+            &desc, &platform_scheduler, &runtime) != RIN_GPU_OK)
         return 1;
     memory_desc.abi_version = RIN_GPU_ABI_VERSION;
     memory_desc.struct_size = sizeof(memory_desc);

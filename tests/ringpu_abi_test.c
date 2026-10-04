@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: MIT */
 #include <ringpu/ringpu.h>
 #include <ringpu/rin_shader.h>
+#include <ringpu/platform.h>
 
 #include <stddef.h>
 
@@ -14,6 +15,13 @@ _Static_assert(sizeof(RinGpuMemoryBackendV1) == 192u,
                "RinGPU public memory backend drift");
 _Static_assert(sizeof(RinGpuMemoryStatusV1) == 128u,
                "RinGPU public memory status drift");
+#if UINTPTR_MAX == UINT64_MAX
+_Static_assert(sizeof(RinGpuPlatformThreadSchedulerV1) == 24u,
+               "RinGPU platform scheduler ABI drift");
+#else
+_Static_assert(sizeof(RinGpuPlatformThreadSchedulerV1) == 16u,
+               "RinGPU platform scheduler ABI drift");
+#endif
 
 int main(void) {
     return offsetof(RinGpuBufferDescV1, size_bytes) == 8u ? 0 : 1;

@@ -5,6 +5,7 @@
 #include <stdint.h>
 
 #include "ringpu.h"
+#include "platform.h"
 #include "software.h"
 
 #ifdef __cplusplus
@@ -73,6 +74,14 @@ typedef RinGpuRuntimeDescV1 RinGpuRuntimeSoftwareSurfaceDescV1;
 
 int ringpu_runtime_create(const RinGpuRuntimeDescV1* desc,
                           RinGpuRuntime** runtime_out);
+
+/* Creates a runtime whose contended shared-resource lock yields through the
+ * caller-owned OS-core scheduler. This is an additive entry point; the
+ * existing constructor continues to use the host platform scheduler. */
+int ringpu_runtime_create_with_platform(
+    const RinGpuRuntimeDescV1* desc,
+    const RinGpuPlatformThreadSchedulerV1* scheduler,
+    RinGpuRuntime** runtime_out);
 
 int ringpu_runtime_software_surface_create(
     const RinGpuRuntimeSoftwareSurfaceDescV1* desc,

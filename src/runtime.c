@@ -16,6 +16,7 @@
 struct RinGpuRuntime {
     RinGpuCore core;
     RinGpuDiagnosticsRuntime diagnostics;
+    RinGpuPlatformThreadSchedulerV1 platform_scheduler;
 #if RINGPU_BUILD_SOFTWARE_BACKEND
     RinGpuSoftwareBackend* software_backend;
 #endif
@@ -82,7 +83,9 @@ static int runtime_desc_valid(const RinGpuRuntimeDescV1* desc)
     return 1;
 }
 
-int ringpu_runtime_create(const RinGpuRuntimeDescV1* desc,
+static int runtime_create_internal(
+    const RinGpuRuntimeDescV1* desc,
+    const RinGpuPlatformThreadSchedulerV1* platform_scheduler,
     RinGpuRuntime** runtime_out)
 {
     RinGpuRuntime* runtime;
@@ -99,8 +102,16 @@ int ringpu_runtime_create(const RinGpuRuntimeDescV1* desc,
     if (runtime_out == NULL) return RIN_GPU_ERROR_INVALID_ARGUMENT;
     *runtime_out = NULL;
     if (!runtime_desc_valid(desc)) return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    if (platform_scheduler != NULL &&
+        (platform_scheduler->struct_size != sizeof(*platform_scheduler) ||
+         platform_scheduler->version !=
+             RIN_GPU_PLATFORM_THREAD_SCHEDULER_VERSION ||
+         platform_scheduler->yield_thread == NULL))
+        return RIN_GPU_ERROR_INVALID_ARGUMENT;
     runtime = calloc(1u, sizeof(*runtime));
     if (runtime == NULL) return RIN_GPU_ERROR_NO_MEMORY;
+    if (platform_scheduler != NULL)
+        runtime->platform_scheduler = *platform_scheduler;
 
     external_ops = (const RinGpuBackendOpsV1*)desc->backend_ops;
     if (external_ops != NULL) {
@@ -207,6 +218,9 @@ int ringpu_runtime_create(const RinGpuRuntimeDescV1* desc,
         goto fail;
     }
     config.diagnostics = &runtime->diagnostics;
+    config.platform_yield_thread =
+        runtime->platform_scheduler.yield_thread;
+    config.platform_scheduler_context = runtime->platform_scheduler.context;
     config.displays = (desc->flags & RIN_GPU_RUNTIME_FLAG_HEADLESS) != 0u
                           ? NULL
                           : &desc->display;
@@ -228,6 +242,23 @@ fail:
 #endif
     free(runtime);
     return result;
+}
+
+int ringpu_runtime_create(const RinGpuRuntimeDescV1* desc,
+                          RinGpuRuntime** runtime_out)
+{
+    return runtime_create_internal(desc, NULL, runtime_out);
+}
+
+int ringpu_runtime_create_with_platform(
+    const RinGpuRuntimeDescV1* desc,
+    const RinGpuPlatformThreadSchedulerV1* scheduler,
+    RinGpuRuntime** runtime_out)
+{
+    if (runtime_out == NULL) return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    *runtime_out = NULL;
+    if (scheduler == NULL) return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    return runtime_create_internal(desc, scheduler, runtime_out);
 }
 
 int ringpu_runtime_software_surface_create(
