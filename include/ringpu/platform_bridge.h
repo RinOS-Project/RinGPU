@@ -58,21 +58,6 @@ typedef enum RinGpuBackendCommandTypeV1 {
         RIN_GPU_BACKEND_COMMAND_DISPATCH_INDIRECT
 } RinGpuBackendCommandTypeV1;
 
-/* Canonical API-neutral command envelope. The tagged payload uses the V1
- * command schema; adapters copy only the active operation payload when an
- * OS-Core internal record has a different size or layout. */
-typedef struct RinGpuBackendCommandRecordV1 {
-    uint32_t type;
-    uint32_t reserved;
-    uint8_t payload[RIN_GPU_BACKEND_COMMAND_PAYLOAD_BYTES_V1];
-} RinGpuBackendCommandRecordV1;
-
-#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
-_Static_assert(sizeof(RinGpuBackendCommandRecordV1) ==
-                   RIN_GPU_BACKEND_COMMAND_RECORD_SIZE_V1,
-               "RinGPU backend command-record ABI drift");
-#endif
-
 typedef struct RinGpuBackendBlendTargetRecordV1 {
     uint32_t blend_enabled;
     uint32_t source_color_factor;
@@ -141,7 +126,8 @@ typedef struct RinGpuPlatformBackendBridgeV1 {
     uint32_t contract_version;
     uint32_t adapter_version;
     uint32_t command_abi_version;
-    uint32_t command_record_size;
+    /* Fixed size of the single typed RinGpuBackendCommandV1 contract. */
+    uint32_t command_record_size; /* sizeof(RinGpuBackendCommandV1) */
     uint32_t reserved[2];
     uint64_t callback_mask;
     RinGpuPlatformBackendBridgeInvokeCallbackV1 invoke;

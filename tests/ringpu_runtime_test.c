@@ -165,33 +165,35 @@ static int platform_backend_bridge_invoke(
         return RIN_GPU_ERROR_PROTOCOL;
     switch (call->operation) {
     case RIN_GPU_PLATFORM_BACKEND_BRIDGE_OP_SUBMIT_COMMANDS: {
-        const RinGpuBackendCommandRecordV1* records =
-            (const RinGpuBackendCommandRecordV1*)call->records[0];
+        const RinGpuBackendCommandV1* commands =
+            (const RinGpuBackendCommandV1*)call->records[0];
         uint32_t count = mock->expected_command_count;
         if ((count == 0u &&
-             (mock->expected_commands != NULL || records != NULL)) ||
+             (mock->expected_commands != NULL || commands != NULL)) ||
             (count != 0u &&
-             (mock->expected_commands == NULL || records == NULL)) ||
+             (mock->expected_commands == NULL || commands == NULL)) ||
             call->values[0] != count ||
-            call->values[1] != sizeof(RinGpuBackendCommandRecordV1) ||
+            call->values[1] != sizeof(RinGpuBackendCommandV1) ||
             call->values[2] != RIN_GPU_BACKEND_COMMAND_ABI_VERSION ||
             call->record_sizes[0] !=
-                sizeof(RinGpuBackendCommandRecordV1))
+                sizeof(RinGpuBackendCommandV1))
             return RIN_GPU_ERROR_PROTOCOL;
         for (uint32_t index = 0u; index < count; ++index) {
             uint32_t payload_size = platform_backend_command_payload_size(
                 mock->expected_commands[index].type);
+            const uint8_t* payload =
+                (const uint8_t*)&commands[index].value;
             if (payload_size == UINT32_MAX ||
-                records[index].type != mock->expected_commands[index].type ||
-                records[index].reserved != 0u ||
-                payload_size > sizeof(records[index].payload) ||
-                memcmp(records[index].payload,
+                commands[index].type != mock->expected_commands[index].type ||
+                commands[index].reserved != 0u ||
+                payload_size > sizeof(commands[index].value) ||
+                memcmp(payload,
                        &mock->expected_commands[index].value,
                        payload_size) != 0)
                 return RIN_GPU_ERROR_PROTOCOL;
             for (uint32_t byte = payload_size;
-                 byte < sizeof(records[index].payload); ++byte) {
-                if (records[index].payload[byte] != 0u)
+                 byte < sizeof(commands[index].value); ++byte) {
+                if (payload[byte] != 0u)
                     return RIN_GPU_ERROR_PROTOCOL;
             }
         }
@@ -265,7 +267,7 @@ static int platform_resolve_backend_bridge(
     return RIN_GPU_OK;
 }
 
-static int test_platform_backend_command_record_translation(void)
+static int test_platform_backend_command_canonicalization(void)
 {
     RinGpuPlatformBackendBridgeV1 bridge = {0};
     RinGpuPlatformBackendAdapterV1 adapter = {0};
@@ -278,7 +280,7 @@ static int test_platform_backend_command_record_translation(void)
     bridge.contract_version = RIN_GPU_BACKEND_CONTRACT_VERSION;
     bridge.adapter_version = RIN_GPU_OS_CORE_BACKEND_ADAPTER_VERSION;
     bridge.command_abi_version = RIN_GPU_BACKEND_COMMAND_ABI_VERSION;
-    bridge.command_record_size = sizeof(RinGpuBackendCommandRecordV1);
+    bridge.command_record_size = sizeof(RinGpuBackendCommandV1);
     bridge.invoke = platform_backend_bridge_invoke;
     mock.expected_commands = commands;
     mock.expected_command_count =
@@ -359,7 +361,7 @@ static int test_platform_backend_bridge(
     bridge.contract_version = RIN_GPU_BACKEND_CONTRACT_VERSION;
     bridge.adapter_version = RIN_GPU_OS_CORE_BACKEND_ADAPTER_VERSION;
     bridge.command_abi_version = RIN_GPU_BACKEND_COMMAND_ABI_VERSION;
-    bridge.command_record_size = sizeof(RinGpuBackendCommandRecordV1);
+    bridge.command_record_size = sizeof(RinGpuBackendCommandV1);
     bridge.callback_mask =
         RIN_GPU_PLATFORM_BACKEND_BRIDGE_HAS_UPLOAD_BUFFER |
         RIN_GPU_PLATFORM_BACKEND_BRIDGE_HAS_READBACK_BUFFER;
@@ -1276,7 +1278,7 @@ int main(void)
     }
     {
         const int command_translation_result =
-            test_platform_backend_command_record_translation();
+            test_platform_backend_command_canonicalization();
         if (command_translation_result != 0)
             return command_translation_result;
     }

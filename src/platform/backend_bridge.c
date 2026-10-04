@@ -7,10 +7,7 @@
 
 _Static_assert(sizeof(RinGpuBackendCommandV1) ==
                    RIN_GPU_BACKEND_COMMAND_RECORD_SIZE_V1,
-               "common backend command ABI changed; revise the contract");
-_Static_assert(sizeof(RinGpuBackendCommandRecordV1) ==
-                   RIN_GPU_BACKEND_COMMAND_RECORD_SIZE_V1,
-               "canonical command record ABI changed; revise the contract");
+               "canonical backend command ABI changed; revise the contract");
 
 static void bridge_call_init(RinGpuPlatformBackendBridgeCallV1* call,
                              uint32_t operation)
@@ -447,20 +444,20 @@ static int bridge_create_graphics_bind_group(
 BRIDGE_COOKIE_DESTROY(graphics_bind_group,
     RIN_GPU_PLATFORM_BACKEND_BRIDGE_OP_DESTROY_GRAPHICS_BIND_GROUP)
 
-static int bridge_command_record_from_common(
+static int bridge_canonicalize_command(
     const RinGpuBackendCommandV1* command,
-    RinGpuBackendCommandRecordV1* record)
+    RinGpuBackendCommandV1* canonical)
 {
-    if (command == NULL || record == NULL || command->reserved != 0u)
+    if (command == NULL || canonical == NULL || command->reserved != 0u)
         return RIN_GPU_ERROR_PROTOCOL;
-    memset(record, 0, sizeof(*record));
-    record->type = command->type;
+    memset(canonical, 0, sizeof(*canonical));
+    canonical->type = command->type;
 #define BRIDGE_COPY_COMMAND_PAYLOAD(command_type, member)                    \
     case command_type: {                                                     \
         _Static_assert(sizeof(command->value.member) <=                     \
-                           RIN_GPU_BACKEND_COMMAND_PAYLOAD_BYTES_V1,          \
-                       "command payload exceeds canonical record");         \
-        memcpy(record->payload, &command->value.member,                      \
+                           sizeof(canonical->value),                         \
+                       "command payload exceeds canonical command");         \
+        memcpy(&canonical->value.member, &command->value.member,             \
                sizeof(command->value.member));                               \
         break;                                                               \
     }
@@ -545,35 +542,35 @@ static int bridge_submit_commands(void* context,
         (RinGpuPlatformBackendAdapterV1*)context;
     RinGpuPlatformBackendBridgeCallV1 call;
     RinGpuPlatformBackendBridgeResponseV1 response;
-    RinGpuBackendCommandRecordV1* records;
+    RinGpuBackendCommandV1* canonical_commands;
     uint32_t index;
     int result;
     if ((command_count != 0u && commands == NULL) ||
         command_count > RIN_GPU_CORE_MAX_COMMANDS)
         return RIN_GPU_ERROR_INVALID_ARGUMENT;
-    records = command_count != 0u
-                  ? (RinGpuBackendCommandRecordV1*)calloc(
-                        command_count, sizeof(*records))
+    canonical_commands = command_count != 0u
+                  ? (RinGpuBackendCommandV1*)calloc(
+                        command_count, sizeof(*canonical_commands))
                   : NULL;
-    if (command_count != 0u && records == NULL)
+    if (command_count != 0u && canonical_commands == NULL)
         return RIN_GPU_ERROR_NO_MEMORY;
     for (index = 0u; index < command_count; ++index) {
-        result = bridge_command_record_from_common(&commands[index],
-                                                  &records[index]);
+        result = bridge_canonicalize_command(
+            &commands[index], &canonical_commands[index]);
         if (result != RIN_GPU_OK) {
-            free(records);
+            free(canonical_commands);
             return result;
         }
     }
     bridge_call_init(&call,
                      RIN_GPU_PLATFORM_BACKEND_BRIDGE_OP_SUBMIT_COMMANDS);
     call.values[0] = command_count;
-    call.values[1] = sizeof(RinGpuBackendCommandRecordV1);
+    call.values[1] = sizeof(RinGpuBackendCommandV1);
     call.values[2] = RIN_GPU_BACKEND_COMMAND_ABI_VERSION;
-    call.records[0] = records;
-    call.record_sizes[0] = sizeof(RinGpuBackendCommandRecordV1);
+    call.records[0] = canonical_commands;
+    call.record_sizes[0] = sizeof(RinGpuBackendCommandV1);
     result = bridge_invoke(adapter, &call, &response);
-    free(records);
+    free(canonical_commands);
     return result;
 }
 
@@ -644,7 +641,7 @@ int ringpu_platform_backend_adapter_init(
         bridge->adapter_version != RIN_GPU_OS_CORE_BACKEND_ADAPTER_VERSION ||
         bridge->command_abi_version != RIN_GPU_BACKEND_COMMAND_ABI_VERSION ||
         bridge->command_record_size !=
-            sizeof(RinGpuBackendCommandRecordV1) ||
+            sizeof(RinGpuBackendCommandV1) ||
         bridge->reserved[0] != 0u || bridge->reserved[1] != 0u ||
         bridge->invoke == NULL ||
         (bridge->callback_mask &

@@ -2,6 +2,7 @@
 #ifndef RINGPU_PUBLIC_BACKEND_COMMAND_V1_H
 #define RINGPU_PUBLIC_BACKEND_COMMAND_V1_H
 
+#include <stddef.h>
 #include <stdint.h>
 
 #include "platform_bridge.h"
@@ -640,9 +641,14 @@ typedef struct RinGpuBackendCommandV1 {
 } RinGpuBackendCommandV1;
 
 #if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(offsetof(RinGpuBackendCommandV1, value) == 8u,
+               "RinGPU backend command header layout drift");
+_Static_assert(sizeof(((RinGpuBackendCommandV1*)0)->value) ==
+                   RIN_GPU_BACKEND_COMMAND_PAYLOAD_BYTES_V1,
+               "RinGPU backend command payload layout drift");
 _Static_assert(sizeof(RinGpuBackendCommandV1) ==
                    RIN_GPU_BACKEND_COMMAND_RECORD_SIZE_V1,
-               "RinGPU common backend-command ABI drift");
+               "RinGPU canonical backend-command ABI drift");
 #endif
 
 #endif /* RINGPU_PUBLIC_BACKEND_COMMAND_V1_H */
