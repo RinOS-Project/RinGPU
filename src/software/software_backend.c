@@ -11011,17 +11011,10 @@ static int sw_submit(void* opaque, const RinGpuBackendCommandV1* commands,
 
             if (active_pass.color != NULL)
                 return RIN_GPU_ERROR_STATE;
-            /* Preserve V1's legacy no-op PRESENT behavior for direct executor
-             * tests and embeddings that did not opt into publication. An
-             * explicitly headless V4 backend, however, has no scanout target. */
-            if (!backend)
-                break;
-            if (backend->present_callback == NULL) {
-                if ((backend->flags &
-                     RIN_GPU_SOFTWARE_BACKEND_FLAG_HEADLESS) != 0u)
-                    return RIN_GPU_ERROR_UNSUPPORTED;
-                break;
-            }
+            /* A missing publication target is not a successful presentation:
+             * never consume PRESENT as a silent no-op. */
+            if (backend == NULL || backend->present_callback == NULL)
+                return RIN_GPU_ERROR_UNSUPPORTED;
             /* Publishing is a submission boundary. Reject a trailing command
              * before exposing the completed image to an embedder. */
             if (index + 1u != command_count)

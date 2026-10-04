@@ -20,8 +20,8 @@ extern "C" {
  * dependent on host addresses or wall-clock state. The flags are deliberately
  * opt-in so older callers retain their exact V1--V3 admission contract.
  * HEADLESS requires all presentation/acquire callbacks and contexts to be
- * NULL; resource and command execution remain available, while PRESENT has
- * no target and returns UNSUPPORTED. */
+ * NULL. Any backend without a present callback has no publication target, so
+ * PRESENT returns UNSUPPORTED rather than succeeding as a no-op. */
 #define RIN_GPU_SOFTWARE_BACKEND_FLAG_DETERMINISTIC UINT32_C(0x00000001)
 #define RIN_GPU_SOFTWARE_BACKEND_FLAG_COLLECT_STATS UINT32_C(0x00000002)
 #define RIN_GPU_SOFTWARE_BACKEND_FLAG_HEADLESS UINT32_C(0x00000004)

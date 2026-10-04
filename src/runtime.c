@@ -41,8 +41,13 @@ static int runtime_desc_valid(const RinGpuRuntimeDescV1* desc,
                               int allow_backend_resolution)
 {
     int headless;
+    int backend_resolution;
     if (desc == NULL) return 0;
     headless = (desc->flags & RIN_GPU_RUNTIME_FLAG_HEADLESS) != 0u;
+    backend_resolution =
+        allow_backend_resolution &&
+        desc->backend_family >= RIN_GPU_RUNTIME_BACKEND_FAMILY_INTEL &&
+        desc->backend_family <= RIN_GPU_RUNTIME_BACKEND_FAMILY_VIRTIO;
     if (desc->struct_size != sizeof(*desc) ||
         desc->version != RIN_GPU_RUNTIME_VERSION ||
         desc->device_generation == 0u || desc->handle_secret == 0u ||
@@ -67,19 +72,18 @@ static int runtime_desc_valid(const RinGpuRuntimeDescV1* desc,
         if (desc->backend_context != NULL) return 0;
         if (desc->backend_family != RIN_GPU_RUNTIME_BACKEND_FAMILY_UNKNOWN &&
             desc->backend_family != RIN_GPU_RUNTIME_BACKEND_FAMILY_SOFTWARE &&
-            !(allow_backend_resolution &&
-              desc->backend_family >=
-                  RIN_GPU_RUNTIME_BACKEND_FAMILY_INTEL &&
-              desc->backend_family <=
-                  RIN_GPU_RUNTIME_BACKEND_FAMILY_VIRTIO))
+            !backend_resolution)
             return 0;
+        /* Platform-resolved backends own presentation/acquisition; these
+         * callbacks configure only a runtime-created software backend. */
         if (headless) {
             if (desc->present_callback != NULL ||
                 desc->present_context != NULL || desc->acquire_image != NULL ||
                 desc->image_context != NULL)
                 return 0;
-        } else if (desc->present_callback == NULL ||
-                   desc->acquire_image == NULL) {
+        } else if (!backend_resolution &&
+                   (desc->present_callback == NULL ||
+                    desc->acquire_image == NULL)) {
             return 0;
         }
     } else if (desc->backend_context == NULL ||
@@ -442,7 +446,9 @@ int ringpu_runtime_create_with_platform_services_v3(
              RIN_GPU_PLATFORM_THREAD_SCHEDULER_VERSION ||
          services->thread_scheduler.yield_thread == NULL))
         return RIN_GPU_ERROR_INVALID_ARGUMENT;
-    if (!runtime_desc_valid(desc, 1))
+    if (!runtime_desc_valid(
+            desc, services->resolve_backend != NULL ||
+                      services->resolve_backend_bridge != NULL))
         return RIN_GPU_ERROR_INVALID_ARGUMENT;
 
     if (services->resolve_backend_bridge != NULL && desc->backend_ops == NULL &&
