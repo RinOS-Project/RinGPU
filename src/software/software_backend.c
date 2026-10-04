@@ -7298,7 +7298,8 @@ static int sw_blend_state_valid(const SwPipeline* pipeline)
             return RIN_GPU_ERROR_UNSUPPORTED;
         for (uint32_t target = 0u; target < RIN_GPU_MAX_COLOR_TARGETS;
              ++target) {
-            const RinGpuBlendTargetV1* state = &desc->blend_targets[target];
+            const RinGpuBackendBlendTargetRecordV1* state =
+                &desc->blend_targets[target];
 
             if (state->blend_enabled > 1u ||
                 (state->color_write_mask & ~RIN_GPU_COLOR_WRITE_ALL) != 0u ||
@@ -7768,7 +7769,7 @@ static void sw_put_pixel_with_raster(const SwPipeline* pipeline, SwImage* image,
     alpha_operation = pipeline->desc.alpha_operation;
     write_mask = pipeline->desc.color_write_mask;
     if (pipeline->desc.independent_blend_enabled != 0u) {
-        const RinGpuBlendTargetV1* target =
+        const RinGpuBackendBlendTargetRecordV1* target =
             &pipeline->desc.blend_targets[color_index];
 
         blend_enabled = target->blend_enabled;

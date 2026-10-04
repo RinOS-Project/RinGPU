@@ -207,8 +207,26 @@ static int ringpu_create_graphics_pipeline_internal(
     if (blend_targets != NULL) {
         backend_desc.independent_blend_enabled = 1u;
         backend_desc.independent_blend_mask = blend_target_mask;
-        memcpy(backend_desc.blend_targets, blend_targets,
-               sizeof(backend_desc.blend_targets));
+        for (uint32_t index = 0u; index < RIN_GPU_MAX_COLOR_TARGETS; ++index) {
+            backend_desc.blend_targets[index].blend_enabled =
+                blend_targets[index].blend_enabled;
+            backend_desc.blend_targets[index].source_color_factor =
+                blend_targets[index].source_color_factor;
+            backend_desc.blend_targets[index].destination_color_factor =
+                blend_targets[index].destination_color_factor;
+            backend_desc.blend_targets[index].color_operation =
+                blend_targets[index].color_operation;
+            backend_desc.blend_targets[index].source_alpha_factor =
+                blend_targets[index].source_alpha_factor;
+            backend_desc.blend_targets[index].destination_alpha_factor =
+                blend_targets[index].destination_alpha_factor;
+            backend_desc.blend_targets[index].alpha_operation =
+                blend_targets[index].alpha_operation;
+            backend_desc.blend_targets[index].color_write_mask =
+                blend_targets[index].color_write_mask;
+            backend_desc.blend_targets[index].reserved =
+                blend_targets[index].reserved;
+        }
     }
     result = core->backend.create_graphics_pipeline(
         core->backend_context,

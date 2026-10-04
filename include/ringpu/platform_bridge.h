@@ -67,6 +67,12 @@ typedef struct RinGpuBackendCommandRecordV1 {
     uint8_t payload[RIN_GPU_BACKEND_COMMAND_PAYLOAD_BYTES_V1];
 } RinGpuBackendCommandRecordV1;
 
+#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(sizeof(RinGpuBackendCommandRecordV1) ==
+                   RIN_GPU_BACKEND_COMMAND_RECORD_SIZE_V1,
+               "RinGPU backend command-record ABI drift");
+#endif
+
 typedef struct RinGpuBackendBlendTargetRecordV1 {
     uint32_t blend_enabled;
     uint32_t source_color_factor;

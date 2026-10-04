@@ -424,7 +424,25 @@ static int ringpu_queue_submit_internal(
             backend_blit->destination_cookie =
                 destination->value.image.backend_cookie;
             backend_blit->source_cookie = source->value.image.backend_cookie;
-            backend_blit->blit = *blit;
+            backend_blit->blit.abi_version = blit->abi_version;
+            backend_blit->blit.struct_size = blit->struct_size;
+            backend_blit->blit.source_mip_level = blit->source_mip_level;
+            backend_blit->blit.source_array_layer = blit->source_array_layer;
+            backend_blit->blit.source_x = blit->source_x;
+            backend_blit->blit.source_y = blit->source_y;
+            backend_blit->blit.source_width = blit->source_width;
+            backend_blit->blit.source_height = blit->source_height;
+            backend_blit->blit.destination_mip_level =
+                blit->destination_mip_level;
+            backend_blit->blit.destination_array_layer =
+                blit->destination_array_layer;
+            backend_blit->blit.destination_x = blit->destination_x;
+            backend_blit->blit.destination_y = blit->destination_y;
+            backend_blit->blit.destination_width = blit->destination_width;
+            backend_blit->blit.destination_height = blit->destination_height;
+            backend_blit->blit.filter = blit->filter;
+            backend_blit->blit.flags = blit->flags;
+            backend_blit->blit.reserved = blit->reserved;
         } else if (command->type == RIN_GPU_BACKEND_COMMAND_RESOLVE_IMAGE) {
             const RinGpuImageResolveV1* resolve =
                 &command->value.image_resolve;
@@ -484,7 +502,24 @@ static int ringpu_queue_submit_internal(
             backend_resolve->destination_cookie =
                 destination->value.image.backend_cookie;
             backend_resolve->source_cookie = source->value.image.backend_cookie;
-            backend_resolve->resolve = *resolve;
+            backend_resolve->resolve.abi_version = resolve->abi_version;
+            backend_resolve->resolve.struct_size = resolve->struct_size;
+            backend_resolve->resolve.source_mip_level =
+                resolve->source_mip_level;
+            backend_resolve->resolve.source_array_layer =
+                resolve->source_array_layer;
+            backend_resolve->resolve.destination_mip_level =
+                resolve->destination_mip_level;
+            backend_resolve->resolve.destination_array_layer =
+                resolve->destination_array_layer;
+            backend_resolve->resolve.source_x = resolve->source_x;
+            backend_resolve->resolve.source_y = resolve->source_y;
+            backend_resolve->resolve.destination_x = resolve->destination_x;
+            backend_resolve->resolve.destination_y = resolve->destination_y;
+            backend_resolve->resolve.width = resolve->width;
+            backend_resolve->resolve.height = resolve->height;
+            backend_resolve->resolve.flags = resolve->flags;
+            backend_resolve->resolve.reserved = resolve->reserved;
         } else if (command->type == RIN_GPU_BACKEND_COMMAND_CLEAR_IMAGE) {
             const RinGpuImageClearV1* clear = &command->value.image_clear;
             RinGpuBackendImageClearV1* backend_clear =
@@ -575,7 +610,26 @@ static int ringpu_queue_submit_internal(
             }
             commands[index].value.image_transition.image_cookie =
                 destination->value.image.backend_cookie;
-            commands[index].value.image_transition.transition = *transition;
+            commands[index].value.image_transition.transition.abi_version =
+                transition->abi_version;
+            commands[index].value.image_transition.transition.struct_size =
+                transition->struct_size;
+            commands[index].value.image_transition.transition.base_mip_level =
+                transition->base_mip_level;
+            commands[index].value.image_transition.transition.mip_level_count =
+                transition->mip_level_count;
+            commands[index].value.image_transition.transition.base_array_layer =
+                transition->base_array_layer;
+            commands[index].value.image_transition.transition.array_layer_count =
+                transition->array_layer_count;
+            commands[index].value.image_transition.transition.before_state =
+                transition->before_state;
+            commands[index].value.image_transition.transition.after_state =
+                transition->after_state;
+            commands[index].value.image_transition.transition.flags =
+                transition->flags;
+            commands[index].value.image_transition.transition.aspect_mask =
+                transition->aspect_mask;
         } else if (command->type ==
                    RIN_GPU_BACKEND_COMMAND_TRANSFER_IMAGE_OWNERSHIP) {
             const RinGpuImageOwnershipTransferV1* transfer =
@@ -640,7 +694,34 @@ static int ringpu_queue_submit_internal(
                 transfer->destination_engine_index;
             commands[index].value.image_ownership_transfer.image_cookie =
                 destination->value.image.backend_cookie;
-            commands[index].value.image_ownership_transfer.transfer = *transfer;
+            commands[index].value.image_ownership_transfer.transfer.abi_version =
+                transfer->abi_version;
+            commands[index].value.image_ownership_transfer.transfer.struct_size =
+                transfer->struct_size;
+            commands[index].value.image_ownership_transfer.transfer.base_mip_level =
+                transfer->base_mip_level;
+            commands[index].value.image_ownership_transfer.transfer.mip_level_count =
+                transfer->mip_level_count;
+            commands[index].value.image_ownership_transfer.transfer.base_array_layer =
+                transfer->base_array_layer;
+            commands[index].value.image_ownership_transfer.transfer.array_layer_count =
+                transfer->array_layer_count;
+            commands[index].value.image_ownership_transfer.transfer.source_family_index =
+                transfer->source_family_index;
+            commands[index].value.image_ownership_transfer.transfer.source_engine_index =
+                transfer->source_engine_index;
+            commands[index].value.image_ownership_transfer.transfer.destination_family_index =
+                transfer->destination_family_index;
+            commands[index].value.image_ownership_transfer.transfer.destination_engine_index =
+                transfer->destination_engine_index;
+            commands[index].value.image_ownership_transfer.transfer.before_state =
+                transfer->before_state;
+            commands[index].value.image_ownership_transfer.transfer.after_state =
+                transfer->after_state;
+            commands[index].value.image_ownership_transfer.transfer.flags =
+                transfer->flags;
+            commands[index].value.image_ownership_transfer.transfer.reserved =
+                transfer->reserved;
         } else if (command->type == RIN_GPU_BACKEND_COMMAND_DISPATCH) {
             result = ringpu_slot(core, command->destination,
                                  RIN_GPU_OBJECT_COMPUTE_PIPELINE, NULL,
