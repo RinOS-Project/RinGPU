@@ -519,6 +519,7 @@ int ringpu_readback_buffer(RinGpuCore* core, RinGpuHandle buffer,
                            uint64_t size_bytes)
 {
     RinGpuObjectSlot* slot;
+    uint8_t* staging;
     int result = ringpu_core_ready(core);
 
     if (result != RIN_GPU_OK) return result;
@@ -534,9 +535,17 @@ int ringpu_readback_buffer(RinGpuCore* core, RinGpuHandle buffer,
     if (!ringpu_range(source_offset, size_bytes,
                       slot->value.buffer.size_bytes))
         return RIN_GPU_ERROR_BOUNDS;
-    return core->backend.readback_buffer(
+    if ((uint64_t)(size_t)size_bytes != size_bytes)
+        return RIN_GPU_ERROR_LIMIT;
+    staging = (uint8_t*)malloc((size_t)size_bytes);
+    if (!staging) return RIN_GPU_ERROR_NO_MEMORY;
+    result = core->backend.readback_buffer(
         core->backend_context, slot->value.buffer.backend_cookie,
-        source_offset, destination, size_bytes);
+        source_offset, staging, size_bytes);
+    if (result == RIN_GPU_OK)
+        memcpy(destination, staging, (size_t)size_bytes);
+    free(staging);
+    return result;
 }
 
 int ringpu_create_image(RinGpuCore* core, const RinGpuImageDescV1* desc,
@@ -788,6 +797,7 @@ int ringpu_readback_image(RinGpuCore* core, RinGpuHandle image,
 {
     RinGpuObjectSlot* slot;
     RinGpuImageReadbackV1 canonical_readback;
+    uint8_t* staging;
     uint32_t state;
     int result = ringpu_core_ready(core);
 
@@ -812,7 +822,16 @@ int ringpu_readback_image(RinGpuCore* core, RinGpuHandle image,
             slot->value.image.descriptor.mip_levels +
         canonical_readback.mip_level];
     if (state != RIN_GPU_IMAGE_STATE_COPY_SOURCE) return RIN_GPU_ERROR_STATE;
-    return core->backend.readback_image(
+    if ((uint64_t)(size_t)destination_size != destination_size)
+        return RIN_GPU_ERROR_LIMIT;
+    staging = (uint8_t*)malloc((size_t)destination_size);
+    if (!staging) return RIN_GPU_ERROR_NO_MEMORY;
+    memcpy(staging, destination, (size_t)destination_size);
+    result = core->backend.readback_image(
         core->backend_context, slot->value.image.backend_cookie,
-        &canonical_readback, destination, destination_size);
+        &canonical_readback, staging, destination_size);
+    if (result == RIN_GPU_OK)
+        memcpy(destination, staging, (size_t)destination_size);
+    free(staging);
+    return result;
 }
