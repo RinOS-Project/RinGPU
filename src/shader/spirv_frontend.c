@@ -66,6 +66,8 @@ enum {
 
 enum {
     SPV_DECORATION_SPEC_ID = 1,
+    SPV_DECORATION_BLOCK = 2,
+    SPV_DECORATION_BUFFER_BLOCK = 3,
     SPV_DECORATION_BUILT_IN = 11,
     SPV_DECORATION_LOCATION = 30,
     SPV_DECORATION_BINDING = 33,
@@ -87,6 +89,7 @@ enum {
     SPV_EXEC_VERTEX = 0,
     SPV_EXEC_FRAGMENT = 4,
     SPV_EXEC_COMPUTE = 5,
+    SPV_EXECUTION_MODE_LOCAL_SIZE = 17,
     SPV_ADDRESSING_LOGICAL = 0,
     SPV_MEMORY_GLSL450 = 1,
     SPV_MEMORY_VULKAN = 3,
@@ -148,6 +151,9 @@ typedef struct SpvVariable {
     uint32_t type_id;
     uint32_t storage_class;
     uint32_t defined;
+    uint32_t pointer_defined;
+    uint32_t pointer_base_id;
+    uint32_t pointer_offset;
 } SpvVariable;
 
 typedef struct SpvInstruction {
@@ -162,6 +168,7 @@ typedef struct SpvBuilder {
     uint16_t registers[65536];
     uint8_t register_defined[65536];
     uint16_t next_register;
+    uint32_t resource_count;
 } SpvBuilder;
 
 static void diag(RinSpirvTranslationInfoV1* info, const char* format, ...)
@@ -508,6 +515,129 @@ static int collect_descriptor(RinSpirvTranslationInfoV1* info,
     return 1;
 }
 
+static int resource_pointer_info(const RinSpirvTranslationInfoV1* info,
+                                 const SpvVariable* variables,
+                                 uint32_t bound, uint32_t pointer_id,
+                                 uint32_t* resource_index_out,
+                                 uint32_t* byte_offset_out)
+{
+    uint32_t base_id;
+    uint32_t index;
+
+    if (!info || !variables || !resource_index_out || !byte_offset_out ||
+        !id_valid(pointer_id, bound))
+        return 0;
+    if (variables[pointer_id].pointer_defined) {
+        base_id = variables[pointer_id].pointer_base_id;
+        *byte_offset_out = variables[pointer_id].pointer_offset;
+    } else if (variables[pointer_id].defined &&
+               variables[pointer_id].storage_class ==
+                   SPV_STORAGE_STORAGE_BUFFER) {
+        base_id = pointer_id;
+        *byte_offset_out = 0u;
+    } else {
+        return 0;
+    }
+    for (index = 0u; index < info->descriptor_count; ++index) {
+        if (info->descriptors[index].id == base_id &&
+            info->descriptors[index].resource_kind ==
+                RIN_SHADER_RESOURCE_STORAGE_BUFFER &&
+            info->descriptors[index].resource_index <
+                RIN_SHADER_MAX_RESOURCES) {
+            *resource_index_out =
+                info->descriptors[index].resource_index;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int collect_storage_access_chain(
+    const uint32_t* instruction_words, uint16_t word_count,
+    const SpvType* types, const SpvValue* values, SpvVariable* variables,
+    uint32_t bound)
+{
+    uint32_t result_type_id;
+    uint32_t result_id;
+    uint32_t base_id;
+    uint32_t root_id;
+    uint32_t current_type_id;
+    uint32_t byte_offset;
+    uint32_t index;
+    const SpvType* pointer_type;
+
+    if (!instruction_words || !types || !values || !variables ||
+        word_count < 5u)
+        return 0;
+    result_type_id = instruction_words[1];
+    result_id = instruction_words[2];
+    base_id = instruction_words[3];
+    if (!id_valid(result_type_id, bound) || !id_valid(result_id, bound) ||
+        !id_valid(base_id, bound) || variables[result_id].defined ||
+        variables[result_id].pointer_defined)
+        return 0;
+    pointer_type = &types[result_type_id];
+    if (pointer_type->kind != SPV_TYPE_POINTER_KIND ||
+        pointer_type->storage_class != SPV_STORAGE_STORAGE_BUFFER)
+        return 0;
+    if (variables[base_id].pointer_defined) {
+        root_id = variables[base_id].pointer_base_id;
+        byte_offset = variables[base_id].pointer_offset;
+        if (!id_valid(variables[base_id].type_id, bound) ||
+            types[variables[base_id].type_id].kind != SPV_TYPE_POINTER_KIND)
+            return 0;
+        current_type_id = types[variables[base_id].type_id].element;
+    } else if (variables[base_id].defined &&
+               variables[base_id].storage_class ==
+                   SPV_STORAGE_STORAGE_BUFFER) {
+        root_id = base_id;
+        byte_offset = 0u;
+        if (!id_valid(variables[base_id].type_id, bound) ||
+            types[variables[base_id].type_id].kind != SPV_TYPE_POINTER_KIND ||
+            types[variables[base_id].type_id].storage_class !=
+                SPV_STORAGE_STORAGE_BUFFER)
+            return 0;
+        current_type_id = types[variables[base_id].type_id].element;
+    } else {
+        return 0;
+    }
+    if (!id_valid(root_id, bound)) return 0;
+
+    for (index = 4u; index < word_count; ++index) {
+        uint32_t member_index;
+        const SpvType* aggregate;
+        uint32_t member_offset;
+        if (!id_valid(instruction_words[index], bound) ||
+            !values[instruction_words[index]].defined ||
+            values[instruction_words[index]].specialization ||
+            !id_valid(values[instruction_words[index]].type_id, bound) ||
+            types[values[instruction_words[index]].type_id].kind !=
+                SPV_TYPE_INT_KIND ||
+            types[values[instruction_words[index]].type_id].width != 32u)
+            return 0;
+        member_index = values[instruction_words[index]].bits;
+        if (!id_valid(current_type_id, bound)) return 0;
+        aggregate = &types[current_type_id];
+        if (aggregate->kind != SPV_TYPE_STRUCT_KIND ||
+            member_index >= aggregate->member_count || member_index >= 16u ||
+            (aggregate->member_offsets_set &
+             (UINT32_C(1) << member_index)) == 0u)
+            return 0;
+        member_offset = aggregate->member_offsets[member_index];
+        if (byte_offset > UINT32_MAX - member_offset) return 0;
+        byte_offset += member_offset;
+        current_type_id = aggregate->members[member_index];
+    }
+    if (current_type_id != pointer_type->element) return 0;
+
+    variables[result_id].type_id = result_type_id;
+    variables[result_id].storage_class = SPV_STORAGE_STORAGE_BUFFER;
+    variables[result_id].pointer_defined = 1u;
+    variables[result_id].pointer_base_id = root_id;
+    variables[result_id].pointer_offset = byte_offset;
+    return 1;
+}
+
 static int collect_push_constant(RinSpirvTranslationInfoV1* info,
                                  const SpvType* types, uint32_t bound,
                                  uint32_t id, const SpvVariable* variable,
@@ -572,7 +702,8 @@ static int translate_function_instruction(
     if (opcode == SPV_OP_CONSTANT || opcode == SPV_OP_SPEC_CONSTANT)
         return current->word_count == 4u;
     if (opcode == SPV_OP_LABEL || opcode == SPV_OP_FUNCTION ||
-        opcode == SPV_OP_FUNCTION_END || opcode == SPV_OP_VARIABLE)
+        opcode == SPV_OP_FUNCTION_END || opcode == SPV_OP_ACCESS_CHAIN ||
+        opcode == SPV_OP_VARIABLE)
         return opcode != SPV_OP_VARIABLE;
     if (opcode == SPV_OP_RETURN) {
         if (current->word_count != 1u || !append_instruction(
@@ -605,6 +736,39 @@ static int translate_function_instruction(
             return 0;
         pointer_id = words[3];
         variable = &variables[pointer_id];
+        if ((variable->pointer_defined ||
+             (variable->defined &&
+              variable->storage_class == SPV_STORAGE_STORAGE_BUFFER))) {
+            uint32_t resource_index;
+            uint32_t byte_offset;
+            uint32_t value_type;
+            uint16_t address_register;
+            if (!resource_pointer_info(info, variables, bound, pointer_id,
+                                       &resource_index, &byte_offset) ||
+                !type_scalar(types, bound, words[1], &value_type) ||
+                !id_valid(variable->type_id, bound) ||
+                types[variable->type_id].kind != SPV_TYPE_POINTER_KIND ||
+                types[variable->type_id].element != words[1] ||
+                byte_offset > INT32_MAX ||
+                !alloc_register(builder, words[2], &dst))
+                return 0;
+            if (builder->next_register >= RIN_SHADER_MAX_REGISTERS)
+                return 0;
+            address_register = builder->next_register++;
+            if (!append_instruction(
+                    builder, instruction(RIN_SHADER_OP_CONST_I32,
+                                         address_register, RIN_SHADER_UNUSED,
+                                         RIN_SHADER_UNUSED, byte_offset)))
+                return 0;
+            emitted = instruction(value_type == 2u
+                                      ? RIN_SHADER_OP_LOAD_RESOURCE_F32
+                                      : RIN_SHADER_OP_LOAD_RESOURCE_I32,
+                                  dst, address_register, RIN_SHADER_UNUSED, 0u);
+            emitted.resource = (uint16_t)resource_index;
+            if (builder->resource_count <= resource_index)
+                builder->resource_count = resource_index + 1u;
+            return append_instruction(builder, emitted);
+        }
         if (!variable->defined || variable->storage_class != SPV_STORAGE_INPUT ||
             !find_io_location(info, SPV_STORAGE_INPUT, pointer_id, &location) ||
             !type_scalar(types, bound, words[1], &base) ||
@@ -623,6 +787,40 @@ static int translate_function_instruction(
             !id_valid(words[2], bound))
             return 0;
         variable = &variables[words[1]];
+        if (variable->pointer_defined ||
+            (variable->defined &&
+             variable->storage_class == SPV_STORAGE_STORAGE_BUFFER)) {
+            uint32_t resource_index;
+            uint32_t byte_offset;
+            uint32_t value_type;
+            uint16_t address_register;
+            uint32_t pointer_type_id = variable->type_id;
+            if (!resource_pointer_info(info, variables, bound, words[1],
+                                       &resource_index, &byte_offset) ||
+                !id_valid(pointer_type_id, bound) ||
+                types[pointer_type_id].kind != SPV_TYPE_POINTER_KIND ||
+                !type_scalar(types, bound,
+                             types[pointer_type_id].element, &value_type) ||
+                !source_register(builder, words[2], &source0) ||
+                byte_offset > INT32_MAX ||
+                builder->next_register >= RIN_SHADER_MAX_REGISTERS)
+                return 0;
+            address_register = builder->next_register++;
+            if (!append_instruction(
+                    builder, instruction(RIN_SHADER_OP_CONST_I32,
+                                         address_register, RIN_SHADER_UNUSED,
+                                         RIN_SHADER_UNUSED, byte_offset)))
+                return 0;
+            emitted = instruction(value_type == 2u
+                                      ? RIN_SHADER_OP_STORE_RESOURCE_F32
+                                      : RIN_SHADER_OP_STORE_RESOURCE_I32,
+                                  RIN_SHADER_UNUSED, address_register, source0,
+                                  0u);
+            emitted.resource = (uint16_t)resource_index;
+            if (builder->resource_count <= resource_index)
+                builder->resource_count = resource_index + 1u;
+            return append_instruction(builder, emitted);
+        }
         if (!variable->defined || variable->storage_class != SPV_STORAGE_OUTPUT ||
             !find_io_location(info, SPV_STORAGE_OUTPUT, words[1], &location) ||
             !source_register(builder, words[2], &source0) ||
@@ -710,6 +908,11 @@ int ringpu_spirv_translate(const uint32_t* words, size_t word_count,
     uint32_t memory_model = UINT32_MAX;
     uint32_t addressing_model = UINT32_MAX;
     uint32_t capability_shader = 0u;
+    uint32_t execution_mode_entry = 0u;
+    uint32_t workgroup_x = 0u;
+    uint32_t workgroup_y = 0u;
+    uint32_t workgroup_z = 0u;
+    uint32_t local_size_seen = 0u;
     uint32_t stage;
     int in_selected_function = 0;
     int saw_function_end = 0;
@@ -877,6 +1080,10 @@ int ringpu_spirv_translate(const uint32_t* words, size_t word_count,
                         decorations[id].spec_id = instruction_words[3];
                         decorations[id].has_spec_id = 1u;
                         break;
+                    case SPV_DECORATION_BLOCK:
+                    case SPV_DECORATION_BUFFER_BLOCK:
+                        if (word_count_instruction != 3u) goto bad_decor;
+                        break;
                     default:
                         diag(info, "SPIR-V decoration %u is unsupported",
                              instruction_words[2]);
@@ -1041,10 +1248,46 @@ bad_type:
                     selected_function = current_function;
                 break;
             case SPV_OP_EXECUTION_MODE:
-                /* LocalSize is deliberately not accepted here: the RSH1
-                 * profile has no workgroup metadata in this frontend yet. */
                 if (word_count_instruction < 3u) {
                     diag(info, "SPIR-V execution mode is malformed");
+                    goto done;
+                }
+                if (instruction_words[2] ==
+                    SPV_EXECUTION_MODE_LOCAL_SIZE) {
+                    if (word_count_instruction != 6u || local_size_seen ||
+                        !id_valid(instruction_words[1], bound)) {
+                        diag(info, "SPIR-V LocalSize mode is malformed or duplicated");
+                        goto done;
+                    }
+                    execution_mode_entry = instruction_words[1];
+                    workgroup_x = instruction_words[3];
+                    workgroup_y = instruction_words[4];
+                    workgroup_z = instruction_words[5];
+                    if (workgroup_x == 0u || workgroup_y == 0u ||
+                        workgroup_z == 0u || workgroup_x > 1024u ||
+                        workgroup_y > 1024u || workgroup_z > 64u ||
+                        (uint64_t)workgroup_x * workgroup_y * workgroup_z >
+                            1024u) {
+                        diag(info, "SPIR-V LocalSize is outside the RSH1 profile");
+                        result = RIN_SPIRV_ERROR_UNSUPPORTED;
+                        goto done;
+                    }
+                    local_size_seen = 1u;
+                }
+                break;
+            case SPV_OP_ACCESS_CHAIN:
+                if (word_count_instruction < 5u ||
+                    !id_valid(instruction_words[1], bound) ||
+                    !id_valid(instruction_words[2], bound) ||
+                    !id_valid(instruction_words[3], bound)) {
+                    diag(info, "SPIR-V storage access chain is malformed");
+                    goto done;
+                }
+                if (!collect_storage_access_chain(
+                        instruction_words, word_count_instruction, types,
+                        values, variables, bound)) {
+                    diag(info, "SPIR-V access chain is outside the bounded storage-buffer profile");
+                    result = RIN_SPIRV_ERROR_UNSUPPORTED;
                     goto done;
                 }
                 break;
@@ -1053,7 +1296,6 @@ bad_type:
             case SPV_OP_SPEC_CONSTANT_TRUE:
             case SPV_OP_SPEC_CONSTANT_FALSE:
             case SPV_OP_FUNCTION_PARAMETER:
-            case SPV_OP_ACCESS_CHAIN:
             case SPV_OP_VECTOR_SHUFFLE:
             case SPV_OP_COMPOSITE_CONSTRUCT:
             case SPV_OP_IMAGE_SAMPLE_IMPLICIT_LOD:
@@ -1080,6 +1322,13 @@ bad_type:
     stage = stage_from_execution_model(execution_model);
     if (stage == 0u || (expected_stage != 0u && expected_stage != stage)) {
         diag(info, "SPIR-V execution model does not match requested stage");
+        result = RIN_SPIRV_ERROR_UNSUPPORTED;
+        goto done;
+    }
+    if ((stage == RIN_SHADER_STAGE_COMPUTE &&
+         (!local_size_seen || execution_mode_entry != entry_id)) ||
+        (stage != RIN_SHADER_STAGE_COMPUTE && local_size_seen)) {
+        diag(info, "SPIR-V stage requires a matching supported LocalSize mode");
         result = RIN_SPIRV_ERROR_UNSUPPORTED;
         goto done;
     }
@@ -1227,7 +1476,12 @@ metadata_done:
      * are not referenced by the lowered entry function remain in the SPIR-V
      * reflection record but are intentionally not forced into the executable
      * bind group. */
-    header.resource_count = 0u;
+    header.resource_count = builder.resource_count;
+    if (stage == RIN_SHADER_STAGE_COMPUTE) {
+        header.workgroup_x = workgroup_x;
+        header.workgroup_y = workgroup_y;
+        header.workgroup_z = workgroup_z;
+    }
     if (header.total_size > sizeof(candidate) ||
         rin_shader_capacity < header.total_size)
         goto translate_bounds;
