@@ -599,6 +599,31 @@ typedef struct RinGpuBackendRenderPassDepthStencilBeginV1 {
     RinGpuClearRegionV1 clear_region;
 } RinGpuBackendRenderPassDepthStencilBeginV1;
 
+/* Payload members shared by the canonical runtime record and OS-Core's
+ * compact private record. The transition type is the only field whose
+ * internal representation differs; the versioned adapter maps it explicitly.
+ * Keeping this list here prevents the common command schema from drifting. */
+#define RIN_GPU_BACKEND_COMMAND_SHARED_PAYLOAD_FIELDS_V1(transition_type)    \
+    RinGpuBackendBufferCopyV1 buffer_copy;                                   \
+    RinGpuBackendImageCopyV1 image_copy;                                     \
+    transition_type image_transition;                                        \
+    RinGpuBackendDispatchV1 dispatch;                                        \
+    RinGpuBackendComputeBarrierV1 compute_barrier;                           \
+    RinGpuBackendGraphicsBarrierV1 graphics_barrier;                         \
+    RinGpuBackendDrawV1 draw;                                                \
+    RinGpuBackendRenderPassBeginV1 render_pass_begin;                        \
+    RinGpuBackendRenderPassMrtBeginV1 render_pass_mrt_begin;                 \
+    RinGpuBackendPresentV1 present;                                          \
+    RinGpuBackendDrawVerticesV1 draw_vertices;                               \
+    RinGpuBackendDrawVerticesV2 draw_vertices_v2;                            \
+    RinGpuBackendDrawIndexedV1 draw_indexed;                                 \
+    RinGpuBackendDrawIndexedV2 draw_indexed_v2;                              \
+    RinGpuBackendDrawIndexedBaseVertexV1 draw_indexed_base_vertex;           \
+    RinGpuBackendRenderPassDepthBeginV1 render_pass_depth_begin;             \
+    RinGpuBackendRenderPassDepthStencilBeginV1                              \
+        render_pass_depth_stencil_begin;                                    \
+    RinGpuBackendRasterStateV1 raster_state
+
 /* The single typed V1 command contract shared by the public runtime and all
  * backend adapters. Adapters with private command layouts translate at their
  * versioned boundary and never cast a private command array to this type. */
@@ -606,37 +631,20 @@ typedef struct RinGpuBackendCommandV1 {
     uint32_t type;
     uint32_t reserved;
     union {
-        RinGpuBackendBufferCopyV1 buffer_copy;
-        RinGpuBackendImageCopyV1 image_copy;
+        RIN_GPU_BACKEND_COMMAND_SHARED_PAYLOAD_FIELDS_V1(
+            RinGpuBackendImageTransitionV1);
         RinGpuBackendImageBlitV1 image_blit;
         RinGpuBackendImageResolveV1 image_resolve;
         RinGpuBackendBufferClearV1 buffer_clear;
         RinGpuBackendImageClearV1 image_clear;
-        RinGpuBackendImageTransitionV1 image_transition;
         RinGpuBackendImageOwnershipTransferV1 image_ownership_transfer;
-        RinGpuBackendDispatchV1 dispatch;
         RinGpuBackendDispatchIndirectV1 dispatch_indirect;
-        RinGpuBackendComputeBarrierV1 compute_barrier;
-        RinGpuBackendGraphicsBarrierV1 graphics_barrier;
         RinGpuBackendComputeBarrierV2 compute_barrier_v2;
         RinGpuBackendGraphicsBarrierV2 graphics_barrier_v2;
         RinGpuBackendPushConstantsV1 push_constants;
         RinGpuBackendQueryV1 query;
-        RinGpuBackendDrawV1 draw;
-        RinGpuBackendRenderPassBeginV1 render_pass_begin;
-        RinGpuBackendRenderPassMrtBeginV1 render_pass_mrt_begin;
-        RinGpuBackendPresentV1 present;
-        RinGpuBackendDrawVerticesV1 draw_vertices;
-        RinGpuBackendDrawVerticesV2 draw_vertices_v2;
-        RinGpuBackendDrawIndexedV1 draw_indexed;
-        RinGpuBackendDrawIndexedV2 draw_indexed_v2;
         RinGpuBackendDrawIndirectV1 draw_indirect;
         RinGpuBackendDrawIndexedIndirectV1 draw_indexed_indirect;
-        RinGpuBackendDrawIndexedBaseVertexV1 draw_indexed_base_vertex;
-        RinGpuBackendRenderPassDepthBeginV1 render_pass_depth_begin;
-        RinGpuBackendRenderPassDepthStencilBeginV1
-            render_pass_depth_stencil_begin;
-        RinGpuBackendRasterStateV1 raster_state;
     } value;
 } RinGpuBackendCommandV1;
 
