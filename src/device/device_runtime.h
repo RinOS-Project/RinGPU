@@ -98,6 +98,11 @@ typedef struct RinGpuDeviceCompletionV1 {
 } RinGpuDeviceCompletionV1;
 
 typedef uint64_t (*RinGpuDeviceNowNsFn)(void* context);
+/* A submit callback returns zero only after the device accepted the
+ * submission.  Any other failure result must guarantee it was not accepted,
+ * except OUTCOME_UNKNOWN: that means it may have been accepted, so the runtime
+ * marks the device lost and callers quarantine the command cookie. */
+#define RIN_GPU_DEVICE_BACKEND_SUBMIT_OUTCOME_UNKNOWN (-2)
 typedef int (*RinGpuDeviceSubmitFn)(
     void* context, const RinGpuDeviceSubmissionV1* submission);
 typedef int (*RinGpuDevicePollFn)(

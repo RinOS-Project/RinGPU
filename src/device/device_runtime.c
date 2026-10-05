@@ -537,6 +537,11 @@ int rin_gpu_device_runtime_submit(
         result = RIN_GPU_DEVICE_PROTOCOL;
         goto done;
     }
+    if (backend_result == RIN_GPU_DEVICE_BACKEND_SUBMIT_OUTCOME_UNKNOWN) {
+        ringpu_device_mark_lost(state);
+        result = RIN_GPU_DEVICE_LOST;
+        goto done;
+    }
     if (backend_result != 0) {
         result = RIN_GPU_DEVICE_BACKEND_FAILED;
         goto done;
