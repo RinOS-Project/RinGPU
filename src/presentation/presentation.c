@@ -125,6 +125,8 @@ static int mode_supported(const PresentationState* state,
         flag = RIN_GPU_PRESENTATION_OUTPUT_MAILBOX;
     else if (mode == RIN_GPU_PRESENTATION_MODE_IMMEDIATE)
         flag = RIN_GPU_PRESENTATION_OUTPUT_IMMEDIATE;
+    else if (mode == RIN_GPU_PRESENTATION_MODE_FIFO_RELAXED)
+        flag = RIN_GPU_PRESENTATION_OUTPUT_FIFO_RELAXED;
     else
         return 0;
     if ((output->descriptor.flags & flag) == 0u) return 0;
@@ -334,7 +336,8 @@ int rin_gpu_presentation_begin_frame(
         return RIN_GPU_PRESENTATION_UNSUPPORTED;
     if (image->state != RIN_GPU_PRESENTATION_IMAGE_AVAILABLE)
         return RIN_GPU_PRESENTATION_BUSY;
-    if (acquire->mode == RIN_GPU_PRESENTATION_MODE_FIFO &&
+    if ((acquire->mode == RIN_GPU_PRESENTATION_MODE_FIFO ||
+         acquire->mode == RIN_GPU_PRESENTATION_MODE_FIFO_RELAXED) &&
         output->pending_image != 0u)
         return RIN_GPU_PRESENTATION_BUSY;
     if (acquire->mode == RIN_GPU_PRESENTATION_MODE_MAILBOX &&
