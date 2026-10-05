@@ -45,6 +45,7 @@ enum {
     SPV_OP_MEMBER_DECORATE = 72,
     SPV_OP_VECTOR_SHUFFLE = 79,
     SPV_OP_COMPOSITE_CONSTRUCT = 80,
+    SPV_OP_COMPOSITE_EXTRACT = 81,
     SPV_OP_COPY_OBJECT = 83,
     SPV_OP_IMAGE_SAMPLE_IMPLICIT_LOD = 87,
     SPV_OP_F_NEGATE = 127,
@@ -96,6 +97,10 @@ enum {
     SPV_CAPABILITY_SHADER = 1
 };
 
+enum {
+    SPV_BUILTIN_POSITION = 0
+};
+
 enum SpvTypeKind {
     SPV_TYPE_NONE = 0,
     SPV_TYPE_VOID_KIND,
@@ -145,6 +150,8 @@ typedef struct SpvValue {
     uint32_t bits;
     uint32_t defined;
     uint32_t specialization;
+    uint32_t component_count;
+    uint16_t component_registers[4];
 } SpvValue;
 
 typedef struct SpvVariable {
@@ -399,6 +406,15 @@ static int source_register(const SpvBuilder* builder, uint32_t id,
     return 1;
 }
 
+static int alloc_temporary_register(SpvBuilder* builder, uint16_t* output)
+{
+    if (!builder || !output ||
+        builder->next_register >= RIN_SHADER_MAX_REGISTERS)
+        return 0;
+    *output = builder->next_register++;
+    return 1;
+}
+
 static RinShaderInstructionV1 instruction(uint16_t opcode, uint16_t dst,
                                           uint16_t source0, uint16_t source1,
                                           uint32_t immediate)
@@ -424,10 +440,13 @@ static int record_io(RinSpirvTranslationInfoV1* info, const SpvDecorations* dec,
     uint32_t base;
     uint32_t width;
 
-    if (!info || !dec || !dec->has_location || dec->location >= RIN_SPIRV_MAX_IO ||
+    if (!info || !dec || !dec->has_location ||
+        dec->location >= RIN_SPIRV_MAX_IO ||
         !type_scalar_or_vector(types, bound, type_id, &base, &width)) {
         return 0;
     }
+    if (width > RIN_SPIRV_MAX_IO - dec->location)
+        return 0;
     if (storage == SPV_STORAGE_INPUT) {
         if (info->input_count >= RIN_SPIRV_MAX_IO)
             return 0;
@@ -451,6 +470,16 @@ static int record_io(RinSpirvTranslationInfoV1* info, const SpvDecorations* dec,
     if (name)
         (void)snprintf(io->name, sizeof(io->name), "%s", name);
     return 1;
+}
+
+static uint32_t io_slot_count(const RinSpirvIoV1* io, uint32_t count)
+{
+    uint32_t slots = 0u;
+    for (uint32_t index = 0u; index < count; ++index) {
+        uint32_t end = io[index].location + io[index].width;
+        if (end > slots) slots = end;
+    }
+    return slots;
 }
 
 static int find_io_location(const RinSpirvTranslationInfoV1* info,
@@ -687,13 +716,15 @@ static int collect_specialization(RinSpirvTranslationInfoV1* info,
 
 static int translate_function_instruction(
     SpvBuilder* builder, RinSpirvTranslationInfoV1* info,
-    const SpvType* types, const SpvVariable* variables, uint32_t bound,
+    const SpvType* types, const SpvDecorations* decorations,
+    SpvValue* values, const SpvVariable* variables, uint32_t bound,
     const SpvInstruction* current, int* saw_return)
 {
     const uint32_t* words = current->words;
     uint16_t opcode = current->opcode;
     uint32_t location;
     uint32_t base;
+    uint32_t width;
     uint16_t dst;
     uint16_t source0;
     uint16_t source1;
@@ -716,16 +747,100 @@ static int translate_function_instruction(
     if (opcode == SPV_OP_RETURN_VALUE || opcode == SPV_OP_UNREACHABLE ||
         opcode == SPV_OP_BRANCH || opcode == SPV_OP_BRANCH_CONDITIONAL)
         return 0;
+    if (opcode == SPV_OP_COMPOSITE_CONSTRUCT) {
+        uint32_t result_type;
+        uint32_t element_type;
+        uint32_t expected_width;
+        uint32_t component_count = 0u;
+        uint32_t base_type;
+        if (current->word_count < 5u || !id_valid(words[1], bound) ||
+            !id_valid(words[2], bound) ||
+            types[words[1]].kind != SPV_TYPE_VECTOR_KIND ||
+            !type_scalar(types, bound, types[words[1]].element, &base_type))
+            return 0;
+        result_type = words[1];
+        element_type = types[result_type].element;
+        expected_width = types[result_type].length;
+        if (expected_width < 2u || expected_width > 4u ||
+            values[words[2]].component_count != 0u)
+            return 0;
+        for (uint32_t operand = 3u; operand < current->word_count;
+             ++operand) {
+            const uint32_t source_id = words[operand];
+            uint32_t source_width = 1u;
+            if (!id_valid(source_id, bound) ||
+                values[source_id].type_id == 0u)
+                return 0;
+            if (values[source_id].component_count != 0u) {
+                if (!id_valid(values[source_id].type_id, bound) ||
+                    types[values[source_id].type_id].kind !=
+                        SPV_TYPE_VECTOR_KIND ||
+                    types[values[source_id].type_id].element != element_type)
+                    return 0;
+                source_width = values[source_id].component_count;
+            } else if (values[source_id].type_id != element_type) {
+                return 0;
+            }
+            if (source_width > expected_width - component_count)
+                return 0;
+            for (uint32_t component = 0u; component < source_width;
+                 ++component) {
+                uint16_t source_register_value;
+                if (values[source_id].component_count != 0u) {
+                    source_register_value =
+                        values[source_id].component_registers[component];
+                } else if (!source_register(builder, source_id,
+                                             &source_register_value)) {
+                    return 0;
+                }
+                values[words[2]].component_registers[component_count++] =
+                    source_register_value;
+            }
+        }
+        if (component_count != expected_width)
+            return 0;
+        values[words[2]].type_id = result_type;
+        values[words[2]].component_count = component_count;
+        return 1;
+    }
+    if (opcode == SPV_OP_COMPOSITE_EXTRACT) {
+        uint32_t composite_id;
+        uint32_t component;
+        if (current->word_count != 5u || !id_valid(words[1], bound) ||
+            !id_valid(words[2], bound) || !id_valid(words[3], bound) ||
+            values[words[3]].component_count == 0u ||
+            words[4] >= values[words[3]].component_count ||
+            values[words[2]].component_count != 0u ||
+            !id_valid(values[words[3]].type_id, bound) ||
+            types[values[words[3]].type_id].kind != SPV_TYPE_VECTOR_KIND ||
+            types[values[words[3]].type_id].element != words[1])
+            return 0;
+        composite_id = words[3];
+        component = words[4];
+        if (!alloc_register(builder, words[2], &dst) ||
+            !append_instruction(
+                builder, instruction(RIN_SHADER_OP_MOV, dst,
+                                     values[composite_id]
+                                         .component_registers[component],
+                                     RIN_SHADER_UNUSED, 0u)))
+            return 0;
+        values[words[2]].type_id = words[1];
+        return 1;
+    }
     if (opcode == SPV_OP_COPY_OBJECT) {
         if (current->word_count != 4u || !id_valid(words[1], bound) ||
             !id_valid(words[2], bound) ||
-            !source_register(builder, words[2], &source0) ||
-            !alloc_register(builder, words[2], &source0) ||
-            !alloc_register(builder, words[1], &dst))
+            !id_valid(words[3], bound) ||
+            values[words[3]].type_id != words[1] ||
+            !source_register(builder, words[3], &source0) ||
+            !alloc_register(builder, words[2], &dst))
             return 0;
-        return append_instruction(builder,
-                                  instruction(RIN_SHADER_OP_MOV, dst, source0,
-                                              RIN_SHADER_UNUSED, 0u));
+        if (!append_instruction(builder,
+                                instruction(RIN_SHADER_OP_MOV, dst, source0,
+                                            RIN_SHADER_UNUSED, 0u)))
+            return 0;
+        values[words[2]].type_id = words[1];
+        return 1;
     }
     if (opcode == SPV_OP_LOAD) {
         const SpvVariable* variable;
@@ -767,18 +882,41 @@ static int translate_function_instruction(
             emitted.resource = (uint16_t)resource_index;
             if (builder->resource_count <= resource_index)
                 builder->resource_count = resource_index + 1u;
-            return append_instruction(builder, emitted);
+            if (!append_instruction(builder, emitted)) return 0;
+            values[words[2]].type_id = words[1];
+            return 1;
         }
         if (!variable->defined || variable->storage_class != SPV_STORAGE_INPUT ||
             !find_io_location(info, SPV_STORAGE_INPUT, pointer_id, &location) ||
-            !type_scalar(types, bound, words[1], &base) ||
-            !alloc_register(builder, words[2], &dst))
+            !id_valid(variable->type_id, bound) ||
+            types[variable->type_id].kind != SPV_TYPE_POINTER_KIND ||
+            types[variable->type_id].element != words[1] ||
+            !type_scalar_or_vector(types, bound, words[1], &base, &width))
             return 0;
-        emitted = instruction(base == 2u ? RIN_SHADER_OP_LOAD_INPUT_F32
-                                        : RIN_SHADER_OP_LOAD_INPUT,
-                              dst, RIN_SHADER_UNUSED, RIN_SHADER_UNUSED,
-                              location);
-        return append_instruction(builder, emitted);
+        if (width > RIN_SHADER_MAX_IO - location ||
+            values[words[2]].type_id != 0u ||
+            values[words[2]].component_count != 0u)
+            return 0;
+        values[words[2]].type_id = words[1];
+        if (width == 1u) {
+            if (!alloc_register(builder, words[2], &dst)) return 0;
+            emitted = instruction(base == 2u ? RIN_SHADER_OP_LOAD_INPUT_F32
+                                            : RIN_SHADER_OP_LOAD_INPUT,
+                                  dst, RIN_SHADER_UNUSED, RIN_SHADER_UNUSED,
+                                  location);
+            return append_instruction(builder, emitted);
+        }
+        values[words[2]].component_count = width;
+        for (uint32_t component = 0u; component < width; ++component) {
+            if (!alloc_temporary_register(builder, &dst)) return 0;
+            values[words[2]].component_registers[component] = dst;
+            emitted = instruction(base == 2u ? RIN_SHADER_OP_LOAD_INPUT_F32
+                                            : RIN_SHADER_OP_LOAD_INPUT,
+                                  dst, RIN_SHADER_UNUSED, RIN_SHADER_UNUSED,
+                                  location + component);
+            if (!append_instruction(builder, emitted)) return 0;
+        }
+        return 1;
     }
     if (opcode == SPV_OP_STORE) {
         const SpvVariable* variable;
@@ -821,19 +959,65 @@ static int translate_function_instruction(
                 builder->resource_count = resource_index + 1u;
             return append_instruction(builder, emitted);
         }
-        if (!variable->defined || variable->storage_class != SPV_STORAGE_OUTPUT ||
-            !find_io_location(info, SPV_STORAGE_OUTPUT, words[1], &location) ||
-            !source_register(builder, words[2], &source0) ||
-            !id_valid(variable->type_id, bound) ||
-            types[variable->type_id].kind != SPV_TYPE_POINTER_KIND ||
-            !type_scalar(types, bound, types[variable->type_id].element,
-                         &base))
+        if (!variable->defined ||
+            variable->storage_class != SPV_STORAGE_OUTPUT) {
+            diag(info, "SPIR-V output store targets a non-output variable");
             return 0;
-        emitted = instruction(base == 2u ? RIN_SHADER_OP_STORE_OUTPUT_F32
-                                        : RIN_SHADER_OP_STORE_OUTPUT,
-                              RIN_SHADER_UNUSED, source0, RIN_SHADER_UNUSED,
-                              location);
-        return append_instruction(builder, emitted);
+        }
+        if (!id_valid(variable->type_id, bound) ||
+            types[variable->type_id].kind != SPV_TYPE_POINTER_KIND) {
+            diag(info, "SPIR-V output store pointer type is invalid");
+            return 0;
+        }
+        if (values[words[2]].type_id != types[variable->type_id].element) {
+            diag(info,
+                 "SPIR-V output store type mismatch: value=%u output=%u",
+                 values[words[2]].type_id,
+                 types[variable->type_id].element);
+            return 0;
+        }
+        if (!type_scalar_or_vector(types, bound,
+                                   types[variable->type_id].element, &base,
+                                   &width)) {
+            diag(info, "SPIR-V output type is outside scalar/vector profile");
+            return 0;
+        }
+        if (decorations[words[1]].has_builtin) {
+            if (variable->storage_class != SPV_STORAGE_OUTPUT ||
+                decorations[words[1]].builtin != SPV_BUILTIN_POSITION ||
+                base != 2u || width != 4u)
+                return 0;
+            location = 0u;
+        } else if (!find_io_location(info, SPV_STORAGE_OUTPUT, words[1],
+                                     &location)) {
+            diag(info, "SPIR-V output store has no reflected location");
+            return 0;
+        }
+        if (width > RIN_SHADER_MAX_IO - location) {
+            diag(info, "SPIR-V output store exceeds the RSH1 location range");
+            return 0;
+        }
+        if (width == 1u) {
+            if (!source_register(builder, words[2], &source0)) return 0;
+            emitted = instruction(base == 2u ? RIN_SHADER_OP_STORE_OUTPUT_F32
+                                            : RIN_SHADER_OP_STORE_OUTPUT,
+                                  RIN_SHADER_UNUSED, source0,
+                                  RIN_SHADER_UNUSED, location);
+            return append_instruction(builder, emitted);
+        }
+        if (values[words[2]].component_count != width) {
+            diag(info, "SPIR-V vector output store lacks scalar components");
+            return 0;
+        }
+        for (uint32_t component = 0u; component < width; ++component) {
+            emitted = instruction(base == 2u ? RIN_SHADER_OP_STORE_OUTPUT_F32
+                                            : RIN_SHADER_OP_STORE_OUTPUT,
+                                  RIN_SHADER_UNUSED,
+                                  values[words[2]].component_registers[component],
+                                  RIN_SHADER_UNUSED, location + component);
+            if (!append_instruction(builder, emitted)) return 0;
+        }
+        return 1;
     }
     if (opcode == SPV_OP_F_NEGATE) {
         uint16_t zero;
@@ -850,8 +1034,11 @@ static int translate_function_instruction(
                                                      zero, RIN_SHADER_UNUSED,
                                                      RIN_SHADER_UNUSED, 0u)))
             return 0;
-        return append_instruction(builder, instruction(RIN_SHADER_OP_SUB_F32,
-                                                       dst, zero, source0, 0u));
+        if (!append_instruction(builder, instruction(RIN_SHADER_OP_SUB_F32,
+                                                     dst, zero, source0, 0u)))
+            return 0;
+        values[words[2]].type_id = words[1];
+        return 1;
     }
     if (current->word_count != 5u || !id_valid(words[1], bound) ||
         !id_valid(words[2], bound) || !id_valid(words[3], bound) ||
@@ -882,7 +1069,9 @@ static int translate_function_instruction(
         (base == 2u && (opcode == SPV_OP_I_ADD || opcode == SPV_OP_I_SUB ||
                         opcode == SPV_OP_I_MUL)))
         return 0;
-    return append_instruction(builder, emitted);
+    if (!append_instruction(builder, emitted)) return 0;
+    values[words[2]].type_id = words[1];
+    return 1;
 }
 
 int ringpu_spirv_translate(const uint32_t* words, size_t word_count,
@@ -913,6 +1102,7 @@ int ringpu_spirv_translate(const uint32_t* words, size_t word_count,
     uint32_t workgroup_y = 0u;
     uint32_t workgroup_z = 0u;
     uint32_t local_size_seen = 0u;
+    uint32_t builtin_position_output = 0u;
     uint32_t stage;
     int in_selected_function = 0;
     int saw_function_end = 0;
@@ -1297,7 +1487,6 @@ bad_type:
             case SPV_OP_SPEC_CONSTANT_FALSE:
             case SPV_OP_FUNCTION_PARAMETER:
             case SPV_OP_VECTOR_SHUFFLE:
-            case SPV_OP_COMPOSITE_CONSTRUCT:
             case SPV_OP_IMAGE_SAMPLE_IMPLICIT_LOD:
             case SPV_OP_UNREACHABLE:
                 diag(info, "SPIR-V instruction %u is outside the bounded profile",
@@ -1347,8 +1536,19 @@ bad_type:
                 goto bad_interface;
             pointed = types[pointed].element;
             if (!decorations[index].has_location) {
-                /* BuiltIn variables are reflected but are not synthesized as
-                 * a hidden RSH1 location. Code using one is rejected below. */
+                if (stage == RIN_SHADER_STAGE_VERTEX &&
+                    variables[index].storage_class == SPV_STORAGE_OUTPUT &&
+                    decorations[index].has_builtin &&
+                    decorations[index].builtin == SPV_BUILTIN_POSITION) {
+                    uint32_t base_type;
+                    uint32_t width;
+                    if (builtin_position_output ||
+                        !type_scalar_or_vector(types, bound, pointed,
+                                              &base_type, &width) ||
+                        base_type != 2u || width != 4u)
+                        goto bad_interface;
+                    builtin_position_output = 1u;
+                }
                 continue;
             }
             if (!record_io(info, &decorations[index], types, bound, index,
@@ -1447,10 +1647,13 @@ metadata_done:
                 saw_function_end = 1;
             in_selected_function = 0;
         } else if (in_selected_function) {
-            if (!translate_function_instruction(&builder, info, types, variables,
-                                                bound, &current, &saw_return)) {
-                diag(info, "SPIR-V instruction %u cannot be lowered to RSH1",
-                     opcode);
+            if (!translate_function_instruction(
+                    &builder, info, types, decorations, values, variables,
+                    bound, &current, &saw_return)) {
+                if (info->diagnostic[0] == '\0')
+                    diag(info,
+                         "SPIR-V instruction %u cannot be lowered to RSH1",
+                         opcode);
                 result = RIN_SPIRV_ERROR_UNSUPPORTED;
                 goto done;
             }
@@ -1470,8 +1673,10 @@ metadata_done:
     header.stage = stage;
     header.instruction_count = builder.count;
     header.register_count = builder.next_register == 0u ? 1u : builder.next_register;
-    header.input_count = info->input_count;
-    header.output_count = info->output_count;
+    header.input_count = io_slot_count(info->inputs, info->input_count);
+    header.output_count = io_slot_count(info->outputs, info->output_count);
+    if (builtin_position_output && header.output_count < 4u)
+        header.output_count = 4u;
     /* The RSH1 resource count is the active binding count. Declarations that
      * are not referenced by the lowered entry function remain in the SPIR-V
      * reflection record but are intentionally not forced into the executable
