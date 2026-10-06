@@ -125,6 +125,9 @@ install(FILES ${CMAKE_CURRENT_BINARY_DIR}/ringpu.pc
         DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig)
 
 if(RINGPU_BUILD_TESTS)
+    if(NOT WIN32)
+        find_package(Threads REQUIRED)
+    endif()
     enable_testing()
     function(ringpu_add_test target test_name source)
         add_executable(${target} ${source})
