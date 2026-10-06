@@ -41,7 +41,8 @@ are never process pointers or physical addresses.
 `ringpu_shader_validate_resource()` is the bounded public resource-catalog
 adapter for RSH1 shader blobs. It copies a `TYPE_SHADER` entry into
 caller-owned storage and validates it without filesystem access or hidden
-allocation; the catalog/path authority remains with the application.
+allocation; null or zero-capacity storage is rejected before a path callback,
+and the catalog/path authority remains with the application.
 
 `ringpu/runtime.h` is the supported host integration seam for a software
 surface.  It keeps `RinGpuCore`, diagnostics, and software-backend records

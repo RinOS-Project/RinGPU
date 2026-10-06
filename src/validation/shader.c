@@ -1216,8 +1216,8 @@ int ringpu_shader_validate_resource(
     }
     *storage_size = 0u;
     memset(info, 0, sizeof(*info));
-    if (storage_capacity > SIZE_MAX ||
-        (storage_capacity != 0u && storage == NULL))
+    if (storage_capacity > SIZE_MAX || storage == NULL ||
+        storage_capacity == 0u)
         return RIN_SHADER_ERROR_INVALID_ARGUMENT;
     if (load_capacity > (uint64_t)RIN_SHADER_MAX_SOURCE_BYTES)
         load_capacity = (uint64_t)RIN_SHADER_MAX_SOURCE_BYTES;

@@ -100,6 +100,14 @@ int main(void) {
                &storage_size, &info) == RIN_SHADER_OK);
     assert(storage_size == sizeof(shader) && source.calls == 1u);
 
+    /* Do not pass an absent or empty caller buffer to a path owner. */
+    storage_size = UINT64_MAX;
+    memset(&info, 0xa5, sizeof(info));
+    assert(ringpu_shader_validate_resource(
+               &catalog, 12u, read_path, &source, NULL, 0u,
+               &storage_size, &info) == RIN_SHADER_ERROR_INVALID_ARGUMENT);
+    assert(storage_size == 0u && info.struct_size == 0u && source.calls == 1u);
+
     storage_size = UINT64_MAX;
     assert(ringpu_shader_validate_resource(
                &catalog, 12u, read_path, &source, oversized_storage,
