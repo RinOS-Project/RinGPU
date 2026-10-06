@@ -67,7 +67,8 @@ typedef enum RinGpuMemoryRuntimeResult {
     RIN_GPU_MEMORY_PROTOCOL = -6,
     RIN_GPU_MEMORY_LOST = -7,
     RIN_GPU_MEMORY_STALE = -8,
-    RIN_GPU_MEMORY_LIMIT = -9
+    RIN_GPU_MEMORY_LIMIT = -9,
+    RIN_GPU_MEMORY_UNSUPPORTED = -10
 } RinGpuMemoryRuntimeResult;
 
 /* Preserve the detailed memory result for callers that need it while
@@ -191,6 +192,38 @@ typedef struct RinGpuMemoryBackendV1 {
     uint64_t reserved[RIN_GPU_MEMORY_BACKEND_RESERVED_QWORDS];
 } RinGpuMemoryBackendV1;
 
+/* Optional CPU readback is a separate, versioned extension so V1 backend
+ * layout and its CPU-upload contract remain unchanged. The caller must wait
+ * for device writes to complete before requesting readback. The runtime
+ * performs DEVICE_TO_CPU synchronization before invoking this callback. */
+typedef int (*RinGpuMemoryCpuReadbackFn)(
+    void* context, uint64_t backing_cookie, uint64_t offset,
+    void* destination, uint64_t length);
+
+typedef struct RinGpuMemoryCpuReadbackOpsV1 {
+    uint32_t struct_size;
+    uint32_t version;
+    /* Context is independent of the V1 backend context so an OS-Core memory
+     * owner can be adapted without changing a generation-bound GPUVA V1
+     * wrapper. It must remain live until the memory runtime is destroyed. */
+    void* context;
+    RinGpuMemoryCpuReadbackFn readback;
+    uint64_t reserved[2];
+} RinGpuMemoryCpuReadbackOpsV1;
+
+#define RIN_GPU_MEMORY_CPU_READBACK_OPS_VERSION 1u
+#define RIN_GPU_MEMORY_BACKEND_V2_VERSION 2u
+
+typedef struct RinGpuMemoryBackendV2 {
+    uint32_t struct_size;
+    uint32_t version;
+    RinGpuMemoryBackendV1 v1;
+    /* Required by V2. The callback table is copied during init and may be
+     * released after init returns; its context must outlive the runtime. */
+    const RinGpuMemoryCpuReadbackOpsV1* cpu_readback_ops;
+    uint64_t reserved[2];
+} RinGpuMemoryBackendV2;
+
 typedef struct RinGpuMemoryStatusV1 {
     uint32_t struct_size;
     uint32_t version;
@@ -219,6 +252,8 @@ typedef struct RinGpuMemoryRuntime {
 
 int rin_gpu_memory_runtime_init(RinGpuMemoryRuntime* runtime,
                                 const RinGpuMemoryBackendV1* backend);
+int rin_gpu_memory_runtime_init_v2(RinGpuMemoryRuntime* runtime,
+                                   const RinGpuMemoryBackendV2* backend);
 int rin_gpu_memory_allocate(RinGpuMemoryRuntime* runtime,
                             const RinGpuMemoryAllocationDescV1* descriptor,
                             uint64_t* allocation_handle_out);
@@ -242,6 +277,9 @@ int rin_gpu_memory_sync(RinGpuMemoryRuntime* runtime,
 int rin_gpu_memory_upload(RinGpuMemoryRuntime* runtime,
                           uint64_t allocation_handle, uint64_t offset,
                           const void* source, uint64_t length);
+int rin_gpu_memory_readback(RinGpuMemoryRuntime* runtime,
+                            uint64_t allocation_handle, uint64_t offset,
+                            void* destination, uint64_t length);
 int rin_gpu_memory_destroy_allocation(RinGpuMemoryRuntime* runtime,
                                       uint64_t allocation_handle);
 /* Revokes every allocation and GPU lease owned by the runtime.  The caller
@@ -266,6 +304,12 @@ static_assert(sizeof(RinGpuMemoryRebindV1) == 64u,
               "RinGPU memory rebind drift");
 static_assert(sizeof(RinGpuMemoryBackendV1) == 192u,
               "RinGPU memory backend drift");
+static_assert(sizeof(RinGpuMemoryCpuReadbackOpsV1) == 40u,
+              "RinGPU memory readback ops drift");
+static_assert(offsetof(RinGpuMemoryBackendV2, cpu_readback_ops) == 200u,
+              "RinGPU memory backend V2 extension offset drift");
+static_assert(sizeof(RinGpuMemoryBackendV2) == 224u,
+              "RinGPU memory backend V2 drift");
 static_assert(sizeof(RinGpuMemoryStatusV1) == 128u,
               "RinGPU memory status drift");
 #else
@@ -277,6 +321,12 @@ _Static_assert(sizeof(RinGpuMemoryRebindV1) == 64u,
                "RinGPU memory rebind drift");
 _Static_assert(sizeof(RinGpuMemoryBackendV1) == 192u,
                "RinGPU memory backend drift");
+_Static_assert(sizeof(RinGpuMemoryCpuReadbackOpsV1) == 40u,
+               "RinGPU memory readback ops drift");
+_Static_assert(offsetof(RinGpuMemoryBackendV2, cpu_readback_ops) == 200u,
+               "RinGPU memory backend V2 extension offset drift");
+_Static_assert(sizeof(RinGpuMemoryBackendV2) == 224u,
+               "RinGPU memory backend V2 drift");
 _Static_assert(sizeof(RinGpuMemoryStatusV1) == 128u,
                "RinGPU memory status drift");
 #endif

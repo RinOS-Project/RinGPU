@@ -76,6 +76,10 @@ typedef struct RinGpuMemoryRuntimeState {
     RinGpuMemoryBackendV1 backend;
     RinGpuMemoryBackendV1 admitted_backend;
     RinGpuMemoryCpuUploadFn cpu_upload;
+    RinGpuMemoryCpuReadbackOpsV1 cpu_readback_ops;
+    RinGpuMemoryCpuReadbackOpsV1 admitted_cpu_readback_ops;
+    void* cpu_readback_context;
+    RinGpuMemoryCpuReadbackFn cpu_readback;
     uint64_t iommu_map_generation;
     uint64_t device_epoch;
     uint64_t next_allocation_serial;
@@ -349,7 +353,30 @@ static int ringpu_memory_binding_valid(
            state->cpu_upload ==
                (state->admitted_backend.cpu_upload_ops
                     ? state->admitted_backend.cpu_upload_ops->upload
-                    : NULL);
+                    : NULL) &&
+           state->cpu_readback ==
+               state->admitted_cpu_readback_ops.readback &&
+           state->cpu_readback_context ==
+               state->admitted_cpu_readback_ops.context &&
+           state->cpu_readback_ops.struct_size ==
+               state->admitted_cpu_readback_ops.struct_size &&
+           state->cpu_readback_ops.version ==
+               state->admitted_cpu_readback_ops.version &&
+           state->cpu_readback_ops.context ==
+               state->admitted_cpu_readback_ops.context &&
+           state->cpu_readback_ops.readback ==
+               state->admitted_cpu_readback_ops.readback &&
+           state->cpu_readback_ops.reserved[0] ==
+               state->admitted_cpu_readback_ops.reserved[0] &&
+           state->cpu_readback_ops.reserved[1] ==
+               state->admitted_cpu_readback_ops.reserved[1] &&
+           (state->cpu_readback_ops.readback == NULL ||
+            (state->cpu_readback_ops.struct_size ==
+                 sizeof(state->cpu_readback_ops) &&
+             state->cpu_readback_ops.version ==
+                 RIN_GPU_MEMORY_CPU_READBACK_OPS_VERSION &&
+             state->cpu_readback_ops.context != NULL &&
+             ringpu_memory_all_zero(state->cpu_readback_ops.reserved, 2u)));
 }
 
 static uint64_t ringpu_memory_encode(const RinGpuMemoryRuntimeState* state,
@@ -835,9 +862,12 @@ static void ringpu_memory_clear_all_leases(
     state->active_lease_count = 0u;
 }
 
-int rin_gpu_memory_runtime_init(RinGpuMemoryRuntime* runtime,
-                                const RinGpuMemoryBackendV1* backend) {
+static int ringpu_memory_runtime_init_internal(
+    RinGpuMemoryRuntime* runtime, const RinGpuMemoryBackendV1* backend,
+    const RinGpuMemoryCpuReadbackOpsV1* readback_ops,
+    const void* borrowed_backend_input, size_t borrowed_backend_input_size) {
     RinGpuMemoryBackendV1 backend_copy;
+    RinGpuMemoryCpuReadbackOpsV1 readback_copy;
     RinGpuMemoryRuntimeState* state;
 
     if (!runtime || !backend ||
@@ -846,7 +876,26 @@ int rin_gpu_memory_runtime_init(RinGpuMemoryRuntime* runtime,
         return RIN_GPU_MEMORY_INVALID_ARGUMENT;
     }
     memcpy(&backend_copy, backend, sizeof(backend_copy));
+    memset(&readback_copy, 0, sizeof(readback_copy));
+    if (readback_ops) {
+        memcpy(&readback_copy, readback_ops, sizeof(readback_copy));
+    }
     if (!ringpu_memory_backend_valid(&backend_copy) ||
+        (readback_ops &&
+         (readback_copy.struct_size != sizeof(readback_copy) ||
+          readback_copy.version !=
+              RIN_GPU_MEMORY_CPU_READBACK_OPS_VERSION ||
+          !readback_copy.context ||
+          !readback_copy.readback ||
+          !ringpu_memory_all_zero(readback_copy.reserved, 2u) ||
+          (backend_copy.capabilities & RIN_GPU_MEMORY_CAP_CPU_SYNC) == 0u ||
+          ringpu_memory_overlap(runtime, sizeof(*runtime), readback_ops,
+                                sizeof(*readback_ops)) ||
+          ringpu_memory_overlap(runtime, sizeof(*runtime),
+                                readback_copy.context, 1u) ||
+          ringpu_memory_overlap(borrowed_backend_input,
+                                borrowed_backend_input_size,
+                                readback_copy.context, 1u))) ||
         ((uintptr_t)backend_copy.context >= (uintptr_t)runtime &&
          (uintptr_t)backend_copy.context - (uintptr_t)runtime <
              sizeof(*runtime)) ||
@@ -868,10 +917,46 @@ int rin_gpu_memory_runtime_init(RinGpuMemoryRuntime* runtime,
     if (backend_copy.cpu_upload_ops) {
         state->cpu_upload = backend_copy.cpu_upload_ops->upload;
     }
+    state->cpu_readback_ops = readback_copy;
+    state->admitted_cpu_readback_ops = readback_copy;
+    state->cpu_readback_context = readback_copy.context;
+    state->cpu_readback = readback_copy.readback;
     state->iommu_map_generation = backend_copy.iommu_map_generation;
     state->device_epoch = backend_copy.device_epoch;
     state->next_allocation_serial = 1u;
     return RIN_GPU_MEMORY_OK;
+}
+
+int rin_gpu_memory_runtime_init(RinGpuMemoryRuntime* runtime,
+                                const RinGpuMemoryBackendV1* backend) {
+    return ringpu_memory_runtime_init_internal(runtime, backend, NULL,
+                                               backend, sizeof(*backend));
+}
+
+int rin_gpu_memory_runtime_init_v2(RinGpuMemoryRuntime* runtime,
+                                   const RinGpuMemoryBackendV2* backend) {
+    RinGpuMemoryBackendV2 backend_copy;
+    if (!runtime || !backend ||
+        ringpu_memory_overlap(runtime, sizeof(*runtime), backend,
+                              sizeof(*backend))) {
+        return RIN_GPU_MEMORY_INVALID_ARGUMENT;
+    }
+    memcpy(&backend_copy, backend, sizeof(backend_copy));
+    if (backend_copy.struct_size != sizeof(backend_copy) ||
+        backend_copy.version != RIN_GPU_MEMORY_BACKEND_V2_VERSION ||
+        backend_copy.reserved[0] != 0u || backend_copy.reserved[1] != 0u ||
+        !backend_copy.cpu_readback_ops ||
+        ringpu_memory_overlap(backend, sizeof(*backend),
+                              backend_copy.cpu_readback_ops,
+                              sizeof(*backend_copy.cpu_readback_ops)) ||
+        ringpu_memory_overlap(runtime, sizeof(*runtime),
+                              backend_copy.cpu_readback_ops,
+                              sizeof(*backend_copy.cpu_readback_ops))) {
+        return RIN_GPU_MEMORY_INVALID_ARGUMENT;
+    }
+    return ringpu_memory_runtime_init_internal(
+        runtime, &backend_copy.v1, backend_copy.cpu_readback_ops, backend,
+        sizeof(*backend));
 }
 
 int rin_gpu_memory_allocate(RinGpuMemoryRuntime* runtime,
@@ -927,7 +1012,8 @@ int rin_gpu_memory_allocate(RinGpuMemoryRuntime* runtime,
              0u) ||
         ((desc.flags & RIN_GPU_MEMORY_CPU_VISIBLE) != 0u &&
          (state->backend.capabilities & RIN_GPU_MEMORY_CAP_CPU_UPLOAD) ==
-             0u)) {
+             0u &&
+         state->cpu_readback == NULL)) {
         result = RIN_GPU_MEMORY_INVALID_ARGUMENT;
         goto done;
     }
@@ -1303,10 +1389,13 @@ int rin_gpu_memory_upload(RinGpuMemoryRuntime* runtime,
         goto done;
     }
     if ((slot->flags & RIN_GPU_MEMORY_CPU_VISIBLE) == 0u ||
-        !state->cpu_upload ||
         offset > slot->requested_size ||
         length > slot->requested_size - offset) {
         result = RIN_GPU_MEMORY_INVALID_ARGUMENT;
+        goto done;
+    }
+    if (!state->cpu_upload) {
+        result = RIN_GPU_MEMORY_UNSUPPORTED;
         goto done;
     }
     if (slot->lease_count != 0u) {
@@ -1342,6 +1431,88 @@ int rin_gpu_memory_upload(RinGpuMemoryRuntime* runtime,
     }
     if (offset == 0u && length == slot->requested_size) {
         slot->cpu_upload_pending = 0u;
+    }
+    result = RIN_GPU_MEMORY_OK;
+
+done:
+    ringpu_memory_unlock(state);
+    return result;
+}
+
+int rin_gpu_memory_readback(RinGpuMemoryRuntime* runtime,
+                            uint64_t allocation_handle, uint64_t offset,
+                            void* destination, uint64_t length) {
+    RinGpuMemoryCallbackSnapshot callback_snapshot;
+    RinGpuMemoryRuntimeState* state;
+    RinGpuMemoryAllocationSlot* slot;
+    int backend_result;
+    int result;
+
+    if (!runtime || !destination || length == 0u ||
+        length > (uint64_t)SIZE_MAX ||
+        ringpu_memory_overlap(runtime, sizeof(*runtime), destination,
+                              (size_t)length)) {
+        return RIN_GPU_MEMORY_INVALID_ARGUMENT;
+    }
+    result = ringpu_memory_lock(runtime, &state);
+    if (result != RIN_GPU_MEMORY_OK) return result;
+    if (state->flags == RIN_GPU_MEMORY_STATUS_LOST) {
+        result = RIN_GPU_MEMORY_LOST;
+        goto done;
+    }
+    if (state->flags != RIN_GPU_MEMORY_STATUS_READY) {
+        result = RIN_GPU_MEMORY_STATE;
+        goto done;
+    }
+    slot = ringpu_memory_lookup_allocation(state, allocation_handle, NULL);
+    if (!slot) {
+        result = RIN_GPU_MEMORY_STALE;
+        goto done;
+    }
+    if ((slot->flags & RIN_GPU_MEMORY_CPU_VISIBLE) == 0u ||
+        offset > slot->requested_size ||
+        length > slot->requested_size - offset) {
+        result = RIN_GPU_MEMORY_INVALID_ARGUMENT;
+        goto done;
+    }
+    if (!state->cpu_readback) {
+        result = RIN_GPU_MEMORY_UNSUPPORTED;
+        goto done;
+    }
+    if (slot->cpu_upload_pending != 0u) {
+        result = RIN_GPU_MEMORY_BUSY;
+        goto done;
+    }
+
+    result = ringpu_memory_callback_begin(state, &callback_snapshot);
+    if (result != RIN_GPU_MEMORY_OK) goto done;
+    backend_result = state->backend.sync(
+        state->backend.context, slot->backing_cookie,
+        RIN_GPU_MEMORY_SYNC_DEVICE_TO_CPU, offset, length);
+    result = ringpu_memory_callback_end(state, &callback_snapshot);
+    memset(&callback_snapshot, 0, sizeof(callback_snapshot));
+    if (result != RIN_GPU_MEMORY_OK) goto done;
+    if (backend_result != 0) {
+        ringpu_memory_mark_lost(state);
+        result = RIN_GPU_MEMORY_BACKEND_FAILED;
+        goto done;
+    }
+
+    result = ringpu_memory_callback_begin(state, &callback_snapshot);
+    if (result != RIN_GPU_MEMORY_OK) goto done;
+    backend_result = state->cpu_readback(
+        state->cpu_readback_context, slot->backing_cookie, offset, destination,
+        length);
+    result = ringpu_memory_callback_end(state, &callback_snapshot);
+    memset(&callback_snapshot, 0, sizeof(callback_snapshot));
+    if (result != RIN_GPU_MEMORY_OK) {
+        memset(destination, 0, (size_t)length);
+        goto done;
+    }
+    if (backend_result != 0) {
+        memset(destination, 0, (size_t)length);
+        result = RIN_GPU_MEMORY_BACKEND_FAILED;
+        goto done;
     }
     result = RIN_GPU_MEMORY_OK;
 
@@ -1652,6 +1823,7 @@ RinGpuResult rin_gpu_memory_result_to_gpu(
         case RIN_GPU_MEMORY_LOST: return RIN_GPU_ERROR_DEVICE_LOST;
         case RIN_GPU_MEMORY_STALE: return RIN_GPU_ERROR_INVALID_HANDLE;
         case RIN_GPU_MEMORY_LIMIT: return RIN_GPU_ERROR_LIMIT;
+        case RIN_GPU_MEMORY_UNSUPPORTED: return RIN_GPU_ERROR_UNSUPPORTED;
         default: return RIN_GPU_ERROR_BACKEND;
     }
 }

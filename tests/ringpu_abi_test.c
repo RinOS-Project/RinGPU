@@ -14,6 +14,12 @@ _Static_assert(sizeof(RinGpuMemoryAllocationDescV1) == 64u,
                "RinGPU public memory descriptor drift");
 _Static_assert(sizeof(RinGpuMemoryBackendV1) == 192u,
                "RinGPU public memory backend drift");
+_Static_assert(sizeof(RinGpuMemoryCpuReadbackOpsV1) == 40u,
+               "RinGPU public memory readback ops drift");
+_Static_assert(offsetof(RinGpuMemoryBackendV2, cpu_readback_ops) == 200u,
+               "RinGPU public memory backend V2 offset drift");
+_Static_assert(sizeof(RinGpuMemoryBackendV2) == 224u,
+               "RinGPU public memory backend V2 drift");
 _Static_assert(sizeof(RinGpuMemoryStatusV1) == 128u,
                "RinGPU public memory status drift");
 #if UINTPTR_MAX == UINT64_MAX
