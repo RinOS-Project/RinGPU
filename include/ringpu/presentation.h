@@ -260,6 +260,11 @@ int rin_gpu_presentation_begin_frame(
 int rin_gpu_presentation_abandon_frame(
     RinGpuPresentationRuntime* runtime,
     const RinGpuPresentationAcquireV1* acquire);
+/* Read-only submit preflight. It does not reserve the image; callers must
+ * serialize it with subsequent presentation operations on this runtime. */
+int rin_gpu_presentation_validate_submit_frame(
+    RinGpuPresentationRuntime* runtime,
+    const RinGpuPresentationSubmitV1* submit);
 int rin_gpu_presentation_submit_frame(
     RinGpuPresentationRuntime* runtime,
     const RinGpuPresentationSubmitV1* submit, uint64_t* fence_value_out);
