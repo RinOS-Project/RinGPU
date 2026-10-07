@@ -58,6 +58,10 @@ typedef struct RinGpuDeviceRuntimeState {
     RinGpuDeviceBackendV1 admitted_backend;
     RinGpuDeviceSubmitWithDependenciesV2Fn submit_with_dependencies;
     RinGpuDeviceSubmitWithDependenciesV2Fn admitted_submit_with_dependencies;
+    RinGpuDeviceSubmitWithScopedDependenciesV3Fn
+        submit_with_scoped_dependencies;
+    RinGpuDeviceSubmitWithScopedDependenciesV3Fn
+        admitted_submit_with_scoped_dependencies;
     RinGpuDiagnosticsRuntime* diagnostics;
     uint64_t device_epoch;
     uint64_t last_monotonic_ns;
@@ -247,6 +251,8 @@ static int ringpu_device_binding_valid(
                         state->submit_with_dependencies != NULL) &&
            state->submit_with_dependencies ==
                state->admitted_submit_with_dependencies &&
+           state->submit_with_scoped_dependencies ==
+               state->admitted_submit_with_scoped_dependencies &&
            ringpu_device_backend_equal(&state->backend,
                                        &state->admitted_backend);
 }
@@ -412,7 +418,9 @@ static int ringpu_device_recover(RinGpuDeviceRuntimeState* state,
 
 static int ringpu_device_runtime_init_internal(
     RinGpuDeviceRuntime* runtime, const RinGpuDeviceBackendV1* backend,
-    RinGpuDeviceSubmitWithDependenciesV2Fn submit_with_dependencies) {
+    RinGpuDeviceSubmitWithDependenciesV2Fn submit_with_dependencies,
+    RinGpuDeviceSubmitWithScopedDependenciesV3Fn
+        submit_with_scoped_dependencies) {
     RinGpuDeviceBackendV1 backend_copy;
     RinGpuDeviceRuntimeState* state;
     uint64_t now;
@@ -442,6 +450,9 @@ static int ringpu_device_runtime_init_internal(
     state->admitted_backend = backend_copy;
     state->submit_with_dependencies = submit_with_dependencies;
     state->admitted_submit_with_dependencies = submit_with_dependencies;
+    state->submit_with_scoped_dependencies = submit_with_scoped_dependencies;
+    state->admitted_submit_with_scoped_dependencies =
+        submit_with_scoped_dependencies;
     state->device_epoch = 1u;
     state->iommu_map_generation = backend_copy.iommu_map_generation;
     result = ringpu_device_now(state, &now);
@@ -455,7 +466,7 @@ static int ringpu_device_runtime_init_internal(
 
 int rin_gpu_device_runtime_init(RinGpuDeviceRuntime* runtime,
                                 const RinGpuDeviceBackendV1* backend) {
-    return ringpu_device_runtime_init_internal(runtime, backend, NULL);
+    return ringpu_device_runtime_init_internal(runtime, backend, NULL, NULL);
 }
 
 int rin_gpu_device_runtime_init_v2(RinGpuDeviceRuntime* runtime,
@@ -476,16 +487,44 @@ int rin_gpu_device_runtime_init_v2(RinGpuDeviceRuntime* runtime,
         return RIN_GPU_DEVICE_INVALID_ARGUMENT;
     }
     return ringpu_device_runtime_init_internal(
-        runtime, &backend_copy.base, backend_copy.submit_with_dependencies);
+        runtime, &backend_copy.base, backend_copy.submit_with_dependencies,
+        NULL);
+}
+
+int rin_gpu_device_runtime_init_v3(RinGpuDeviceRuntime* runtime,
+                                   const RinGpuDeviceBackendV3* backend) {
+    RinGpuDeviceBackendV3 backend_copy;
+    if (!runtime || !backend ||
+        ringpu_device_overlap(runtime, sizeof(*runtime), backend,
+                              sizeof(*backend)))
+        return RIN_GPU_DEVICE_INVALID_ARGUMENT;
+    memcpy(&backend_copy, backend, sizeof(backend_copy));
+    if (backend_copy.struct_size != sizeof(backend_copy) ||
+        backend_copy.version != RIN_GPU_DEVICE_BACKEND_V3_VERSION ||
+        !backend_copy.submit_with_scoped_dependencies ||
+        !ringpu_device_all_zero(backend_copy.reserved, 2u))
+        return RIN_GPU_DEVICE_INVALID_ARGUMENT;
+    if (backend_copy.base.struct_size != sizeof(backend_copy.base) ||
+        backend_copy.base.version != RIN_GPU_DEVICE_BACKEND_V2_VERSION ||
+        !backend_copy.base.submit_with_dependencies ||
+        !ringpu_device_all_zero(backend_copy.base.reserved, 2u))
+        return RIN_GPU_DEVICE_INVALID_ARGUMENT;
+    return ringpu_device_runtime_init_internal(
+        runtime, &backend_copy.base.base,
+        backend_copy.base.submit_with_dependencies,
+        backend_copy.submit_with_scoped_dependencies);
 }
 
 static int ringpu_device_runtime_submit_internal(
     RinGpuDeviceRuntime* runtime, const RinGpuDeviceSubmissionV1* submission,
-    uint32_t wait_count, const RinGpuDeviceSubmissionWaitV1* waits) {
+    uint32_t wait_count, const RinGpuDeviceSubmissionWaitV1* waits,
+    const RinGpuDeviceSubmissionWaitV2* scoped_waits) {
     RinGpuDeviceSubmissionV1 candidate;
     RinGpuDeviceSubmissionV1 immutable_candidate;
     RinGpuDeviceSubmissionV2 backend_candidate;
     RinGpuDeviceSubmissionV2 immutable_backend_candidate;
+    RinGpuDeviceSubmissionV3 scoped_backend_candidate;
+    RinGpuDeviceSubmissionV3 immutable_scoped_backend_candidate;
     RinGpuDeviceRuntimeState* state;
     RinGpuDeviceQueueState* queue;
     RinGpuDeviceInFlight* slot;
@@ -545,6 +584,21 @@ static int ringpu_device_runtime_submit_internal(
             result = RIN_GPU_DEVICE_INVALID_ARGUMENT;
             goto done;
         }
+        if (scoped_waits &&
+            (scoped_waits[wait_index].struct_size !=
+                 sizeof(scoped_waits[wait_index]) ||
+             scoped_waits[wait_index].version !=
+                 RIN_GPU_DEVICE_SUBMISSION_WAIT_V2_VERSION ||
+             scoped_waits[wait_index].queue_id != wait->queue_id ||
+             scoped_waits[wait_index].flags != wait->flags ||
+             scoped_waits[wait_index].completion_value !=
+                 wait->completion_value ||
+             scoped_waits[wait_index].execution_scope_mask == 0u ||
+             (scoped_waits[wait_index].execution_scope_mask &
+              ~RIN_GPU_DEVICE_SCOPE_KNOWN) != 0u)) {
+            result = RIN_GPU_DEVICE_INVALID_ARGUMENT;
+            goto done;
+        }
         if (wait->queue_id == candidate.queue_id) {
             if (wait->completion_value >= candidate.completion_value) {
                 result = RIN_GPU_DEVICE_INVALID_ARGUMENT;
@@ -588,8 +642,11 @@ static int ringpu_device_runtime_submit_internal(
         result = RIN_GPU_DEVICE_LIMIT;
         goto done;
     }
-    if ((wait_count != 0u || !state->backend.submit) &&
-        !state->submit_with_dependencies) {
+    if ((scoped_waits && wait_count != 0u &&
+         !state->submit_with_scoped_dependencies) ||
+        ((!scoped_waits || wait_count == 0u) &&
+         (wait_count != 0u || !state->backend.submit) &&
+         !state->submit_with_dependencies)) {
         result = RIN_GPU_DEVICE_UNSUPPORTED;
         goto done;
     }
@@ -603,9 +660,24 @@ static int ringpu_device_runtime_submit_internal(
         memcpy(backend_candidate.waits, waits,
                (size_t)wait_count * sizeof(backend_candidate.waits[0]));
     immutable_backend_candidate = backend_candidate;
+    memset(&scoped_backend_candidate, 0, sizeof(scoped_backend_candidate));
+    if (scoped_waits && wait_count != 0u) {
+        scoped_backend_candidate.struct_size =
+            sizeof(scoped_backend_candidate);
+        scoped_backend_candidate.version =
+            RIN_GPU_DEVICE_SUBMISSION_V3_VERSION;
+        scoped_backend_candidate.base = candidate;
+        scoped_backend_candidate.wait_count = wait_count;
+        memcpy(scoped_backend_candidate.waits, scoped_waits,
+               (size_t)wait_count * sizeof(scoped_backend_candidate.waits[0]));
+    }
+    immutable_scoped_backend_candidate = scoped_backend_candidate;
     result = ringpu_device_callback_begin(state);
     if (result != RIN_GPU_DEVICE_OK) goto done;
-    if (wait_count != 0u || !state->backend.submit) {
+    if (scoped_waits && wait_count != 0u) {
+        backend_result = state->submit_with_scoped_dependencies(
+            state->backend.context, &scoped_backend_candidate);
+    } else if (wait_count != 0u || !state->backend.submit) {
         backend_result = state->submit_with_dependencies(
             state->backend.context, &backend_candidate);
     } else {
@@ -617,7 +689,11 @@ static int ringpu_device_runtime_submit_internal(
     if (memcmp(&candidate, &immutable_candidate, sizeof(candidate)) != 0 ||
         ((wait_count != 0u || !state->backend.submit) &&
          memcmp(&backend_candidate, &immutable_backend_candidate,
-                sizeof(backend_candidate)) != 0)) {
+                sizeof(backend_candidate)) != 0) ||
+        (scoped_waits && wait_count != 0u &&
+         memcmp(&scoped_backend_candidate,
+                &immutable_scoped_backend_candidate,
+                sizeof(scoped_backend_candidate)) != 0)) {
         ringpu_device_mark_lost(state);
         result = RIN_GPU_DEVICE_PROTOCOL;
         goto done;
@@ -654,7 +730,7 @@ int rin_gpu_device_runtime_submit(
     RinGpuDeviceRuntime* runtime,
     const RinGpuDeviceSubmissionV1* submission) {
     return ringpu_device_runtime_submit_internal(runtime, submission, 0u,
-                                                 NULL);
+                                                 NULL, NULL);
 }
 
 int rin_gpu_device_runtime_submit_v2(
@@ -694,7 +770,53 @@ int rin_gpu_device_runtime_submit_v2(
         }
     }
     return ringpu_device_runtime_submit_internal(
-        runtime, &candidate.base, candidate.wait_count, candidate.waits);
+        runtime, &candidate.base, candidate.wait_count, candidate.waits, NULL);
+}
+
+int rin_gpu_device_runtime_submit_v3(
+    RinGpuDeviceRuntime* runtime,
+    const RinGpuDeviceSubmissionV3* submission) {
+    RinGpuDeviceSubmissionV3 candidate;
+    RinGpuDeviceSubmissionWaitV1 waits[RIN_GPU_DEVICE_MAX_SUBMISSION_WAITS];
+    if (!runtime || !submission ||
+        ringpu_device_overlap(runtime, sizeof(*runtime), submission,
+                              sizeof(*submission)))
+        return RIN_GPU_DEVICE_INVALID_ARGUMENT;
+    memcpy(&candidate, submission, sizeof(candidate));
+    if (candidate.struct_size != sizeof(candidate) ||
+        candidate.version != RIN_GPU_DEVICE_SUBMISSION_V3_VERSION ||
+        candidate.reserved0 != 0u ||
+        candidate.wait_count > RIN_GPU_DEVICE_MAX_SUBMISSION_WAITS)
+        return RIN_GPU_DEVICE_INVALID_ARGUMENT;
+    memset(waits, 0, sizeof(waits));
+    for (uint32_t index = 0u; index < candidate.wait_count; ++index) {
+        const RinGpuDeviceSubmissionWaitV2* scoped =
+            &candidate.waits[index];
+        if (scoped->struct_size != sizeof(*scoped) ||
+            scoped->version != RIN_GPU_DEVICE_SUBMISSION_WAIT_V2_VERSION ||
+            scoped->flags != 0u || scoped->completion_value == 0u ||
+            scoped->execution_scope_mask == 0u ||
+            (scoped->execution_scope_mask & ~RIN_GPU_DEVICE_SCOPE_KNOWN) !=
+                0u)
+            return RIN_GPU_DEVICE_INVALID_ARGUMENT;
+        waits[index].struct_size = sizeof(waits[index]);
+        waits[index].version = RIN_GPU_DEVICE_RUNTIME_VERSION;
+        waits[index].queue_id = scoped->queue_id;
+        waits[index].flags = scoped->flags;
+        waits[index].completion_value = scoped->completion_value;
+    }
+    for (uint32_t index = candidate.wait_count;
+         index < RIN_GPU_DEVICE_MAX_SUBMISSION_WAITS; ++index) {
+        const uint8_t* bytes =
+            (const uint8_t*)(const void*)&candidate.waits[index];
+        for (size_t byte_index = 0u;
+             byte_index < sizeof(candidate.waits[index]); ++byte_index)
+            if (bytes[byte_index] != 0u)
+                return RIN_GPU_DEVICE_INVALID_ARGUMENT;
+    }
+    return ringpu_device_runtime_submit_internal(
+        runtime, &candidate.base, candidate.wait_count, waits,
+        candidate.wait_count == 0u ? NULL : candidate.waits);
 }
 
 int rin_gpu_device_runtime_prepare_submission(
@@ -803,6 +925,52 @@ int rin_gpu_device_runtime_prepare_submission_v2(
     if (wait_count != 0u)
         memcpy(submission_out->waits, waits,
                (size_t)wait_count * sizeof(submission_out->waits[0]));
+    return RIN_GPU_DEVICE_OK;
+}
+
+int rin_gpu_device_runtime_prepare_submission_v3(
+    RinGpuDeviceRuntime* runtime, uint32_t queue_id, uint64_t command_cookie,
+    uint32_t wait_count, const RinGpuDeviceSubmissionWaitV2* waits,
+    RinGpuDeviceSubmissionV3* submission_out) {
+    RinGpuDeviceSubmissionV1 base;
+    RinGpuDeviceSubmissionV3 candidate;
+    int result;
+    if (!submission_out || wait_count > RIN_GPU_DEVICE_MAX_SUBMISSION_WAITS ||
+        (wait_count != 0u && !waits))
+        return RIN_GPU_DEVICE_INVALID_ARGUMENT;
+    if ((runtime && ringpu_device_overlap(runtime, sizeof(*runtime),
+                                          submission_out,
+                                          sizeof(*submission_out))) ||
+        (wait_count != 0u &&
+         ((runtime && ringpu_device_overlap(
+                          runtime, sizeof(*runtime), waits,
+                          (size_t)wait_count * sizeof(*waits))) ||
+          ringpu_device_overlap(submission_out, sizeof(*submission_out),
+                                waits,
+                                (size_t)wait_count * sizeof(*waits)))))
+        return RIN_GPU_DEVICE_INVALID_ARGUMENT;
+    memset(submission_out, 0, sizeof(*submission_out));
+    for (uint32_t index = 0u; index < wait_count; ++index) {
+        if (waits[index].struct_size != sizeof(waits[index]) ||
+            waits[index].version != RIN_GPU_DEVICE_SUBMISSION_WAIT_V2_VERSION ||
+            waits[index].flags != 0u || waits[index].completion_value == 0u ||
+            waits[index].execution_scope_mask == 0u ||
+            (waits[index].execution_scope_mask &
+             ~RIN_GPU_DEVICE_SCOPE_KNOWN) != 0u)
+            return RIN_GPU_DEVICE_INVALID_ARGUMENT;
+    }
+    result = rin_gpu_device_runtime_prepare_submission(
+        runtime, queue_id, command_cookie, &base);
+    if (result != RIN_GPU_DEVICE_OK) return result;
+    memset(&candidate, 0, sizeof(candidate));
+    candidate.struct_size = sizeof(candidate);
+    candidate.version = RIN_GPU_DEVICE_SUBMISSION_V3_VERSION;
+    candidate.base = base;
+    candidate.wait_count = wait_count;
+    if (wait_count != 0u)
+        memcpy(candidate.waits, waits,
+               (size_t)wait_count * sizeof(candidate.waits[0]));
+    *submission_out = candidate;
     return RIN_GPU_DEVICE_OK;
 }
 
