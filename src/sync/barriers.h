@@ -9,10 +9,9 @@ static inline int ringpu_sync2_barrier_scopes_valid(
     uint32_t source_access, uint32_t destination_access,
     uint32_t flags, uint32_t reserved)
 {
-    /* A zero stage cannot carry access. Access may independently be NONE for
-     * an execution-only dependency; an entirely empty barrier is a no-op. */
-    return (source_stage | destination_stage) != 0u &&
-           (source_stage != 0u || source_access == 0u) &&
+    /* Synchronization2 permits NONE scopes and execution-only dependencies.
+     * A zero stage cannot carry a non-empty access scope. */
+    return (source_stage != 0u || source_access == 0u) &&
            (destination_stage != 0u || destination_access == 0u) &&
            (source_stage & ~RIN_GPU_PIPELINE_STAGE_KNOWN) == 0u &&
            (destination_stage & ~RIN_GPU_PIPELINE_STAGE_KNOWN) == 0u &&
