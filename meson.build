@@ -11,6 +11,7 @@ ringpu_sources = files(
   'src/core/core.c',
   'src/core/object_lifetime.c',
   'src/core/object_table.c',
+  'src/platform/backend_bridge.c',
   'src/platform/thread.c',
   'src/runtime.c',
   'src/validation/diagnostics.c',
@@ -27,21 +28,32 @@ ringpu_sources = files(
   'src/presentation/presentation.c',
   'src/presentation/present.c',
   'src/presentation/render_pass.c',
+  'src/pipeline/cache.c',
   'src/pipeline/pipelines.c',
   'src/queue/submit.c',
   'src/pipeline/graphics.c',
   'src/resource/resources.c',
   'src/shader/modules.c',
   'src/shader/spirv_frontend.c',
+  'src/query/queries.c',
   'src/capability/cross_process_capability.c',
 )
 
 ringpu = library('RinGPU', ringpu_sources, include_directories: inc,
                  install: true,
+                 pic: true,
                  version: '1.0.0')
 ringpu_dep = declare_dependency(link_with: ringpu,
                                 include_directories: include_directories('include'))
+pkgconfig = import('pkgconfig')
+pkgconfig.generate(ringpu,
+                   name: 'RinGPU',
+                   filebase: 'ringpu',
+                   description: 'RinGPU graphics runtime')
 install_subdir('include/ringpu', install_dir: get_option('includedir'))
+install_data('../rinresource/include/rinresource/catalog.h',
+             '../rinresource/include/rinresource/loader.h',
+             install_dir: join_paths(get_option('includedir'), 'rinresource'))
 
 if get_option('build_rinos_ipc_adapter')
   ringpu_ipc = static_library('RinGPUIpc',
