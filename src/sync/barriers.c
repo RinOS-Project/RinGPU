@@ -159,21 +159,6 @@ int ringpu_command_compute_barrier(
     return RIN_GPU_OK;
 }
 
-static int ringpu_scoped_barrier_valid(uint32_t source_stage,
-                                       uint32_t destination_stage,
-                                       uint32_t source_access,
-                                       uint32_t destination_access,
-                                       uint32_t flags, uint32_t reserved)
-{
-    return source_stage != 0u && destination_stage != 0u &&
-           (source_stage & ~RIN_GPU_PIPELINE_STAGE_KNOWN) == 0u &&
-           (destination_stage & ~RIN_GPU_PIPELINE_STAGE_KNOWN) == 0u &&
-           source_access != 0u && destination_access != 0u &&
-           (source_access & ~RIN_GPU_RESOURCE_KNOWN_ACCESS) == 0u &&
-           (destination_access & ~RIN_GPU_RESOURCE_KNOWN_ACCESS) == 0u &&
-           flags == 0u && reserved == 0u;
-}
-
 int ringpu_command_compute_barrier_v2(
     RinGpuCore* core, RinGpuHandle command_list,
     const RinGpuComputeBarrierV2* barrier)
@@ -186,7 +171,7 @@ int ringpu_command_compute_barrier_v2(
     if (!barrier ||
         !ringpu_versioned(barrier->abi_version, barrier->struct_size,
                           sizeof(*barrier)) ||
-        !ringpu_scoped_barrier_valid(
+        !ringpu_sync2_barrier_scopes_valid(
             barrier->source_stage, barrier->destination_stage,
             barrier->source_access, barrier->destination_access,
             barrier->flags, barrier->reserved)) {
@@ -258,7 +243,7 @@ int ringpu_command_graphics_barrier_v2(
     if (!barrier ||
         !ringpu_versioned(barrier->abi_version, barrier->struct_size,
                           sizeof(*barrier)) ||
-        !ringpu_scoped_barrier_valid(
+        !ringpu_sync2_barrier_scopes_valid(
             barrier->source_stage, barrier->destination_stage,
             barrier->source_access, barrier->destination_access,
             barrier->flags, barrier->reserved)) {

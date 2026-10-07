@@ -1025,6 +1025,10 @@ typedef struct RinGpuGraphicsBarrierV1 {
     uint32_t reserved;
 } RinGpuGraphicsBarrierV1;
 
+/* V2 scopes follow synchronization2 semantics: either side may use NONE,
+ * access masks may be NONE independently, and a NONE stage requires a NONE
+ * access mask. At least one stage scope must be non-empty. V1 keeps its
+ * original access-mask contract. */
 typedef struct RinGpuComputeBarrierV2 {
     uint32_t abi_version;
     uint32_t struct_size;

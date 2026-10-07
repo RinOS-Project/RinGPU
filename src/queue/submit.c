@@ -7,6 +7,7 @@
 #include "../pipeline/pipelines.h"
 #include "../presentation/present.h"
 #include "../presentation/render_pass.h"
+#include "../sync/barriers.h"
 #include "../validation/pipeline.h"
 #include "../validation/resource.h"
 
@@ -795,6 +796,13 @@ static int ringpu_queue_submit_internal(
                    RIN_GPU_BACKEND_COMMAND_COMPUTE_BARRIER_V2) {
             const RinGpuComputeBarrierV2* barrier =
                 &command->value.compute_barrier_v2;
+            if (!ringpu_sync2_barrier_scopes_valid(
+                    barrier->source_stage, barrier->destination_stage,
+                    barrier->source_access, barrier->destination_access,
+                    barrier->flags, barrier->reserved)) {
+                result = RIN_GPU_ERROR_STATE;
+                break;
+            }
             commands[index].value.compute_barrier_v2.source_stage =
                 barrier->source_stage;
             commands[index].value.compute_barrier_v2.destination_stage =
@@ -826,18 +834,11 @@ static int ringpu_queue_submit_internal(
                    RIN_GPU_BACKEND_COMMAND_GRAPHICS_BARRIER_V2) {
             const RinGpuGraphicsBarrierV2* barrier =
                 &command->value.graphics_barrier_v2;
-            if (active_render_target == 0u || barrier->source_stage == 0u ||
-                barrier->destination_stage == 0u ||
-                (barrier->source_stage & ~RIN_GPU_PIPELINE_STAGE_KNOWN) != 0u ||
-                (barrier->destination_stage &
-                 ~RIN_GPU_PIPELINE_STAGE_KNOWN) != 0u ||
-                barrier->source_access == 0u ||
-                barrier->destination_access == 0u ||
-                (barrier->source_access & ~RIN_GPU_RESOURCE_KNOWN_ACCESS) !=
-                    0u ||
-                (barrier->destination_access &
-                 ~RIN_GPU_RESOURCE_KNOWN_ACCESS) != 0u ||
-                barrier->flags != 0u || barrier->reserved != 0u) {
+            if (active_render_target == 0u ||
+                !ringpu_sync2_barrier_scopes_valid(
+                    barrier->source_stage, barrier->destination_stage,
+                    barrier->source_access, barrier->destination_access,
+                    barrier->flags, barrier->reserved)) {
                 result = RIN_GPU_ERROR_STATE;
                 break;
             }
