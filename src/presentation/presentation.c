@@ -422,15 +422,13 @@ static int damage_valid(const RinGpuPresentationSubmitV1* submit,
            submit->damage_count != 0u;
 }
 
-static int validate_submit_frame(
+static int validate_submit_frame_active(
     PresentationState* state, const RinGpuPresentationSubmitV1* submit,
     PresentationOutputSlot** output_out, PresentationImageSlot** image_out) {
     PresentationOutputSlot* output;
     PresentationImageSlot* image;
-    int ready = runtime_active(state);
     if (output_out) *output_out = NULL;
     if (image_out) *image_out = NULL;
-    if (ready != RIN_GPU_PRESENTATION_OK) return ready;
     if (!submit ||
         !versioned(submit->struct_size, submit->version, sizeof(*submit)) ||
         submit->display_id == UINT32_MAX || submit->image_token == 0u ||
@@ -462,8 +460,10 @@ static int validate_submit_frame(
 int rin_gpu_presentation_validate_submit_frame(
     RinGpuPresentationRuntime* runtime,
     const RinGpuPresentationSubmitV1* submit) {
-    return validate_submit_frame(presentation_state(runtime), submit, NULL,
-                                 NULL);
+    PresentationState* state = presentation_state(runtime);
+    int ready = runtime_active(state);
+    if (ready != RIN_GPU_PRESENTATION_OK) return ready;
+    return validate_submit_frame_active(state, submit, NULL, NULL);
 }
 
 int rin_gpu_presentation_submit_frame(
@@ -474,9 +474,11 @@ int rin_gpu_presentation_submit_frame(
     PresentationImageSlot* image = NULL;
     uint64_t fence;
     int result;
+    int ready = runtime_active(state);
     if (fence_value_out) *fence_value_out = 0u;
+    if (ready != RIN_GPU_PRESENTATION_OK) return ready;
     if (!fence_value_out) return RIN_GPU_PRESENTATION_INVALID_ARGUMENT;
-    result = validate_submit_frame(state, submit, &output, &image);
+    result = validate_submit_frame_active(state, submit, &output, &image);
     if (result != RIN_GPU_PRESENTATION_OK) return result;
     fence = state->next_fence_value++;
     result = state->backend.submit(state->backend.context, submit, fence);
