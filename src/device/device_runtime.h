@@ -8,9 +8,11 @@
 #include "../validation/diagnostics.h"
 
 #define RIN_GPU_DEVICE_RUNTIME_VERSION 1u
+#define RIN_GPU_DEVICE_SUBMISSION_V2_VERSION 2u
 #define RIN_GPU_DEVICE_RUNTIME_STATE_QWORDS 576u
 #define RIN_GPU_DEVICE_MAX_QUEUES 8u
 #define RIN_GPU_DEVICE_MAX_IN_FLIGHT 64u
+#define RIN_GPU_DEVICE_MAX_SUBMISSION_WAITS 8u
 #define RIN_GPU_DEVICE_MAX_RESET_ATTEMPTS 8u
 #define RIN_GPU_DEVICE_MIN_TIMEOUT_NS UINT64_C(1000000)
 #define RIN_GPU_DEVICE_MAX_TIMEOUT_NS UINT64_C(30000000000)
@@ -49,7 +51,8 @@ typedef enum RinGpuDeviceRuntimeResult {
     RIN_GPU_DEVICE_LOST = -6,
     RIN_GPU_DEVICE_TIMEOUT = -7,
     RIN_GPU_DEVICE_LIMIT = -8,
-    RIN_GPU_DEVICE_STALE = -9
+    RIN_GPU_DEVICE_STALE = -9,
+    RIN_GPU_DEVICE_UNSUPPORTED = -10
 } RinGpuDeviceRuntimeResult;
 
 typedef enum RinGpuDeviceCompletionStatus {
@@ -85,6 +88,26 @@ typedef struct RinGpuDeviceSubmissionV1 {
     uint64_t deadline_ns;
     uint64_t reserved;
 } RinGpuDeviceSubmissionV1;
+
+typedef struct RinGpuDeviceSubmissionWaitV1 {
+    uint32_t struct_size;
+    uint32_t version;
+    uint32_t queue_id;
+    uint32_t flags;
+    uint64_t completion_value;
+} RinGpuDeviceSubmissionWaitV1;
+
+/* V2 carries queue-timeline dependencies to a backend that can submit native
+ * waits. Values identify already-admitted completion points in this device
+ * epoch; API-specific semaphore handles never cross this boundary. */
+typedef struct RinGpuDeviceSubmissionV2 {
+    uint32_t struct_size;
+    uint32_t version;
+    RinGpuDeviceSubmissionV1 base;
+    uint32_t wait_count;
+    uint32_t reserved0;
+    RinGpuDeviceSubmissionWaitV1 waits[RIN_GPU_DEVICE_MAX_SUBMISSION_WAITS];
+} RinGpuDeviceSubmissionV2;
 
 typedef struct RinGpuDeviceCompletionV1 {
     uint32_t struct_size;
@@ -140,6 +163,22 @@ typedef struct RinGpuDeviceBackendV1 {
     uint64_t reserved[RIN_GPU_DEVICE_BACKEND_RESERVED_QWORDS];
 } RinGpuDeviceBackendV1;
 
+#define RIN_GPU_DEVICE_BACKEND_V2_VERSION 2u
+typedef int (*RinGpuDeviceSubmitWithDependenciesV2Fn)(
+    void* context, const RinGpuDeviceSubmissionV2* submission);
+
+/* V2 is additive: the V1 backend contract remains byte-for-byte unchanged.
+ * submit_with_dependencies receives queue timeline waits and owns their
+ * native lowering; the V1 callback remains usable for callers that do not
+ * require cross-queue dependencies. */
+typedef struct RinGpuDeviceBackendV2 {
+    uint32_t struct_size;
+    uint32_t version;
+    RinGpuDeviceBackendV1 base;
+    RinGpuDeviceSubmitWithDependenciesV2Fn submit_with_dependencies;
+    uint64_t reserved[2];
+} RinGpuDeviceBackendV2;
+
 typedef struct RinGpuDeviceStatusV1 {
     uint32_t struct_size;
     uint32_t version;
@@ -177,15 +216,24 @@ typedef struct RinGpuDeviceRuntime {
 
 int rin_gpu_device_runtime_init(RinGpuDeviceRuntime* runtime,
                                 const RinGpuDeviceBackendV1* backend);
+int rin_gpu_device_runtime_init_v2(RinGpuDeviceRuntime* runtime,
+                                   const RinGpuDeviceBackendV2* backend);
 int rin_gpu_device_runtime_submit(
     RinGpuDeviceRuntime* runtime,
     const RinGpuDeviceSubmissionV1* submission);
+int rin_gpu_device_runtime_submit_v2(
+    RinGpuDeviceRuntime* runtime,
+    const RinGpuDeviceSubmissionV2* submission);
 /* Snapshots the next submission identity while the device is active.  The
  * result is intentionally still submitted through rin_gpu_device_runtime_submit:
  * a caller that races another producer receives STALE without issuing work. */
 int rin_gpu_device_runtime_prepare_submission(
     RinGpuDeviceRuntime* runtime, uint32_t queue_id, uint64_t command_cookie,
     RinGpuDeviceSubmissionV1* submission_out);
+int rin_gpu_device_runtime_prepare_submission_v2(
+    RinGpuDeviceRuntime* runtime, uint32_t queue_id, uint64_t command_cookie,
+    uint32_t wait_count, const RinGpuDeviceSubmissionWaitV1* waits,
+    RinGpuDeviceSubmissionV2* submission_out);
 int rin_gpu_device_runtime_poll(RinGpuDeviceRuntime* runtime,
                                RinGpuDevicePollReportV1* report);
 /* Consume one completion already collected by an IRQ-safe vendor dispatcher.
@@ -224,6 +272,10 @@ int rin_gpu_device_runtime_abandon_in_flight(RinGpuDeviceRuntime* runtime);
 #if defined(__cplusplus)
 static_assert(sizeof(RinGpuDeviceSubmissionV1) == 80u,
               "RinGPU device submission drift");
+static_assert(sizeof(RinGpuDeviceSubmissionWaitV1) == 24u,
+              "RinGPU device submission wait drift");
+static_assert(sizeof(RinGpuDeviceSubmissionV2) == 288u,
+              "RinGPU device submission V2 drift");
 static_assert(sizeof(RinGpuDeviceCompletionV1) == 48u,
               "RinGPU device completion drift");
 static_assert(sizeof(RinGpuDeviceBackendV1) == 144u,
@@ -235,6 +287,10 @@ static_assert(sizeof(RinGpuDevicePollReportV1) == 64u,
 #else
 _Static_assert(sizeof(RinGpuDeviceSubmissionV1) == 80u,
                "RinGPU device submission drift");
+_Static_assert(sizeof(RinGpuDeviceSubmissionWaitV1) == 24u,
+               "RinGPU device submission wait drift");
+_Static_assert(sizeof(RinGpuDeviceSubmissionV2) == 288u,
+               "RinGPU device submission V2 drift");
 _Static_assert(sizeof(RinGpuDeviceCompletionV1) == 48u,
                "RinGPU device completion drift");
 _Static_assert(sizeof(RinGpuDeviceBackendV1) == 144u,
