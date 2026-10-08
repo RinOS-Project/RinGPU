@@ -24,6 +24,7 @@ static int capability_result_is_known(int32_t status)
     case RIN_GPU_CROSS_PROCESS_STALE:
     case RIN_GPU_CROSS_PROCESS_DENIED:
     case RIN_GPU_CROSS_PROCESS_IPC:
+    case RIN_GPU_CROSS_PROCESS_BUSY:
         return 1;
     default:
         return 0;
