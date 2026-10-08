@@ -157,6 +157,9 @@ if(RINGPU_BUILD_TESTS)
                     tests/ringpu_shader_resource_test.c)
     ringpu_add_test(ringpu-result-mapping-test ringpu-result-mapping
                     tests/ringpu_result_mapping_test.c)
+    ringpu_add_test(ringpu-memory-external-mapping-test
+                    ringpu-memory-external-mapping
+                    tests/ringpu_memory_external_mapping_test.c)
     if(RINGPU_BUILD_RINOS_IPC_ADAPTER)
         add_executable(ringpu-cross-process-ipc-test
                        tests/ringpu_cross_process_ipc_test.c)

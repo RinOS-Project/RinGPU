@@ -68,7 +68,10 @@ typedef enum RinGpuMemoryRuntimeResult {
     RIN_GPU_MEMORY_LOST = -7,
     RIN_GPU_MEMORY_STALE = -8,
     RIN_GPU_MEMORY_LIMIT = -9,
-    RIN_GPU_MEMORY_UNSUPPORTED = -10
+    RIN_GPU_MEMORY_UNSUPPORTED = -10,
+    /* A backend-created external mapping remains owned by the returned
+     * lease and must be unmapped before the allocation can be released. */
+    RIN_GPU_MEMORY_CLEANUP_PENDING = -11
 } RinGpuMemoryRuntimeResult;
 
 /* Preserve the detailed memory result for callers that need it while
@@ -213,6 +216,7 @@ typedef struct RinGpuMemoryCpuReadbackOpsV1 {
 
 #define RIN_GPU_MEMORY_CPU_READBACK_OPS_VERSION 1u
 #define RIN_GPU_MEMORY_BACKEND_V2_VERSION 2u
+#define RIN_GPU_MEMORY_BACKEND_V3_VERSION 3u
 
 typedef struct RinGpuMemoryBackendV2 {
     uint32_t struct_size;
@@ -223,6 +227,64 @@ typedef struct RinGpuMemoryBackendV2 {
     const RinGpuMemoryCpuReadbackOpsV1* cpu_readback_ops;
     uint64_t reserved[2];
 } RinGpuMemoryBackendV2;
+
+/* An external address-space identity is explicit and generation-bound. The
+ * generation fields remain separate: owner/output generation is not the
+ * physical device generation or the RinGPU product epoch. The returned
+ * address is meaningful only inside this exact identity; it is not a CPU
+ * pointer, GPUVA, or IOVA unless the owner explicitly defines it as such. */
+#define RIN_GPU_MEMORY_ADDRESS_SPACE_VERSION 1u
+#define RIN_GPU_MEMORY_ADDRESS_SPACE_DISPLAY_FETCH 1u
+typedef struct RinGpuMemoryAddressSpaceV1 {
+    uint32_t struct_size;
+    uint32_t version;
+    uint32_t kind;
+    uint32_t flags;
+    uint64_t owner_cookie;
+    uint64_t generation;
+    uint64_t device_generation;
+    uint64_t reserved;
+} RinGpuMemoryAddressSpaceV1;
+
+/* Map the complete allocation backing into the named external address
+ * space. On success, mapping_cookie identifies the retained mapping and
+ * address_out is the allocation start in that address space. On failure,
+ * either both outputs are zero and nothing was retained, or mapping_cookie
+ * identifies a partial mapping that must be released through unmap; the
+ * latter is surfaced as CLEANUP_PENDING with a live memory lease. The map
+ * callback must derive its mapping from the backing owner, never by treating
+ * the allocation's GPUVA/IOVA as a display address. */
+typedef int (*RinGpuMemoryMapExternalFn)(
+    void* context, uint64_t backing_cookie, uint64_t allocation_size,
+    uint32_t access, const RinGpuMemoryAddressSpaceV1* address_space,
+    uint64_t* address_out, uint64_t* mapping_cookie_out);
+/* Success proves the exact mapping cookie is gone. Any error must leave it
+ * valid for a later retry. The cookie is globally unique within this ops
+ * context and captures the address-space generation used by map. */
+typedef int (*RinGpuMemoryUnmapExternalFn)(void* context,
+                                           uint64_t mapping_cookie);
+
+typedef struct RinGpuMemoryExternalMappingOpsV1 {
+    uint32_t struct_size;
+    uint32_t version;
+    void* context;
+    RinGpuMemoryMapExternalFn map;
+    RinGpuMemoryUnmapExternalFn unmap;
+    uint64_t reserved[2];
+} RinGpuMemoryExternalMappingOpsV1;
+#define RIN_GPU_MEMORY_EXTERNAL_MAPPING_OPS_VERSION 1u
+
+/* V3 keeps the GPUVA memory backend unchanged and adds an independent,
+ * versioned external-address-space mapping owner. CPU readback remains
+ * optional here; unlike BackendV2 it is not a prerequisite for mapping. */
+typedef struct RinGpuMemoryBackendV3 {
+    uint32_t struct_size;
+    uint32_t version;
+    RinGpuMemoryBackendV1 v1;
+    const RinGpuMemoryCpuReadbackOpsV1* cpu_readback_ops;
+    const RinGpuMemoryExternalMappingOpsV1* external_mapping_ops;
+    uint64_t reserved[2];
+} RinGpuMemoryBackendV3;
 
 typedef struct RinGpuMemoryStatusV1 {
     uint32_t struct_size;
@@ -254,6 +316,8 @@ int rin_gpu_memory_runtime_init(RinGpuMemoryRuntime* runtime,
                                 const RinGpuMemoryBackendV1* backend);
 int rin_gpu_memory_runtime_init_v2(RinGpuMemoryRuntime* runtime,
                                    const RinGpuMemoryBackendV2* backend);
+int rin_gpu_memory_runtime_init_v3(RinGpuMemoryRuntime* runtime,
+                                   const RinGpuMemoryBackendV3* backend);
 int rin_gpu_memory_allocate(RinGpuMemoryRuntime* runtime,
                             const RinGpuMemoryAllocationDescV1* descriptor,
                             uint64_t* allocation_handle_out);
@@ -266,6 +330,19 @@ int rin_gpu_memory_acquire(RinGpuMemoryRuntime* runtime,
                            uint64_t* lease_handle_out);
 int rin_gpu_memory_release(RinGpuMemoryRuntime* runtime,
                            uint64_t lease_handle);
+/* Retains an allocation and maps its backing into an explicitly identified
+ * external address space. A nonzero lease handle is returned even when the
+ * result is CLEANUP_PENDING or LOST so the caller can retry cleanup. */
+int rin_gpu_memory_map_external(
+    RinGpuMemoryRuntime* runtime, uint64_t allocation_handle,
+    uint32_t required_access,
+    const RinGpuMemoryAddressSpaceV1* address_space,
+    uint64_t* address_in_space_out, uint64_t* lease_handle_out);
+/* Releases a mapping lease only after the external owner has established
+ * that the mapped resource is no longer in use. Backend failures retain the
+ * lease and mapping cookie for retry. */
+int rin_gpu_memory_unmap_external(RinGpuMemoryRuntime* runtime,
+                                  uint64_t lease_handle);
 /* Synchronizes a CPU-visible allocation. Callers must wait for relevant
  * device work before DEVICE_TO_CPU invalidation. */
 int rin_gpu_memory_sync(RinGpuMemoryRuntime* runtime,
@@ -310,6 +387,15 @@ static_assert(offsetof(RinGpuMemoryBackendV2, cpu_readback_ops) == 200u,
               "RinGPU memory backend V2 extension offset drift");
 static_assert(sizeof(RinGpuMemoryBackendV2) == 224u,
               "RinGPU memory backend V2 drift");
+static_assert(sizeof(RinGpuMemoryAddressSpaceV1) == 48u,
+              "RinGPU external address-space identity drift");
+#if UINTPTR_MAX == UINT32_MAX
+static_assert(sizeof(RinGpuMemoryBackendV3) == 224u,
+              "RinGPU memory backend V3 drift");
+#else
+static_assert(sizeof(RinGpuMemoryBackendV3) == 232u,
+              "RinGPU memory backend V3 drift");
+#endif
 static_assert(sizeof(RinGpuMemoryStatusV1) == 128u,
               "RinGPU memory status drift");
 #else
@@ -327,6 +413,15 @@ _Static_assert(offsetof(RinGpuMemoryBackendV2, cpu_readback_ops) == 200u,
                "RinGPU memory backend V2 extension offset drift");
 _Static_assert(sizeof(RinGpuMemoryBackendV2) == 224u,
                "RinGPU memory backend V2 drift");
+_Static_assert(sizeof(RinGpuMemoryAddressSpaceV1) == 48u,
+               "RinGPU external address-space identity drift");
+#if UINTPTR_MAX == UINT32_MAX
+_Static_assert(sizeof(RinGpuMemoryBackendV3) == 224u,
+               "RinGPU memory backend V3 drift");
+#else
+_Static_assert(sizeof(RinGpuMemoryBackendV3) == 232u,
+               "RinGPU memory backend V3 drift");
+#endif
 _Static_assert(sizeof(RinGpuMemoryStatusV1) == 128u,
                "RinGPU memory status drift");
 #endif
