@@ -29,6 +29,8 @@ RinResult rin_channel_send_v1(
     RinGpuCrossProcessCapabilityTokenV1 token;
     RinGpuCrossProcessCapabilityTokenV2 token_v2;
     RinGpuCrossProcessCapabilityLeaseV2 lease_v2;
+    RinGpuCrossProcessCapabilityMapReadableLeaseRequestV1 map_readable;
+    RinGpuCrossProcessCapabilityMappedReadableLeaseV1 mapped_readable;
     uint8_t* request_bytes;
 
     assert(channel == UINT64_C(7));
@@ -90,6 +92,29 @@ RinResult rin_channel_send_v1(
         response.payload_size = sizeof(lease_v2);
         response_size += sizeof(lease_v2);
         memcpy(response_bytes, &response, sizeof(response));
+    } else if (request.opcode ==
+               RIN_GPU_CAPABILITY_IPC_MAP_READABLE_LEASE_V1) {
+        assert(request.payload_size == sizeof(map_readable));
+        memcpy(&map_readable, request_bytes + sizeof(request),
+               sizeof(map_readable));
+        memset(&mapped_readable, 0, sizeof(mapped_readable));
+        mapped_readable.struct_size = sizeof(mapped_readable);
+        mapped_readable.version =
+            RIN_GPU_CROSS_PROCESS_MAPPED_READABLE_V1_VERSION;
+        mapped_readable.token = map_readable.token;
+        mapped_readable.lease_id = map_readable.lease_id;
+        mapped_readable.resource_id = UINT64_C(29);
+        mapped_readable.device_generation = map_readable.device_generation;
+        mapped_readable.address_in_recipient = UINT64_C(0x40001000);
+        mapped_readable.allocation_size = UINT64_C(4096);
+        mapped_readable.rights = RIN_GPU_CROSS_PROCESS_RIGHT_READ;
+        mapped_readable.access =
+            RIN_GPU_CROSS_PROCESS_MAPPED_ACCESS_CPU_READ;
+        memcpy(response_bytes + sizeof(response), &mapped_readable,
+               sizeof(mapped_readable));
+        response.payload_size = sizeof(mapped_readable);
+        response_size += sizeof(mapped_readable);
+        memcpy(response_bytes, &response, sizeof(response));
     } else if (request.opcode == RIN_GPU_CAPABILITY_IPC_RELEASE_LEASE_V2 ||
                request.opcode == RIN_GPU_CAPABILITY_IPC_REVOKE_V2) {
         assert(request.payload_size ==
@@ -122,6 +147,8 @@ int main(void)
     RinGpuCrossProcessCapabilityTokenV2 token_v2;
     RinGpuCrossProcessCapabilityAcquireRequestV2 acquire_v2;
     RinGpuCrossProcessCapabilityLeaseV2 lease_v2;
+    RinGpuCrossProcessCapabilityMapReadableLeaseRequestV1 map_readable;
+    RinGpuCrossProcessCapabilityMappedReadableLeaseV1 mapped_readable;
     RinGpuCrossProcessCapabilityReleaseLeaseV2 release_v2;
 
     memset(&client, 0, sizeof(client));
@@ -177,6 +204,24 @@ int main(void)
     assert(lease_v2.token == token_v2.token);
     assert(lease_v2.lease_id == UINT64_C(23));
     assert(lease_v2.resource_id == UINT64_C(29));
+
+    memset(&map_readable, 0, sizeof(map_readable));
+    map_readable.struct_size = sizeof(map_readable);
+    map_readable.version = RIN_GPU_CROSS_PROCESS_MAPPED_READABLE_V1_VERSION;
+    map_readable.token = lease_v2.token;
+    map_readable.lease_id = lease_v2.lease_id;
+    map_readable.device_generation = lease_v2.device_generation;
+    memset(&mapped_readable, 0, sizeof(mapped_readable));
+    assert(rin_gpu_cross_process_capability_ipc_map_readable_lease_v1(
+               &client, &map_readable, &mapped_readable) ==
+           RIN_GPU_CROSS_PROCESS_OK);
+    assert(mapped_readable.address_in_recipient == UINT64_C(0x40001000));
+    assert(mapped_readable.allocation_size == UINT64_C(4096));
+    response_status = RIN_GPU_CROSS_PROCESS_UNSUPPORTED;
+    assert(rin_gpu_cross_process_capability_ipc_map_readable_lease_v1(
+               &client, &map_readable, &mapped_readable) ==
+           RIN_GPU_CROSS_PROCESS_UNSUPPORTED);
+    assert(mapped_readable.address_in_recipient == 0u);
 
     memset(&release_v2, 0, sizeof(release_v2));
     release_v2.struct_size = sizeof(release_v2);

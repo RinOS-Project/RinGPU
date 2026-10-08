@@ -11,7 +11,10 @@
 enum {
     RIN_GPU_CAPABILITY_IPC_BUFFER_SIZE =
         (int)(sizeof(RinGpuCapabilityIpcHeaderV1) +
-              sizeof(RinGpuCrossProcessCapabilityGrantDescV2))
+              (sizeof(RinGpuCrossProcessCapabilityMappedReadableLeaseV1) >
+                       sizeof(RinGpuCrossProcessCapabilityGrantDescV2)
+                   ? sizeof(RinGpuCrossProcessCapabilityMappedReadableLeaseV1)
+                   : sizeof(RinGpuCrossProcessCapabilityGrantDescV2)))
 };
 
 static int capability_result_is_known(int32_t status)
@@ -25,6 +28,7 @@ static int capability_result_is_known(int32_t status)
     case RIN_GPU_CROSS_PROCESS_DENIED:
     case RIN_GPU_CROSS_PROCESS_IPC:
     case RIN_GPU_CROSS_PROCESS_BUSY:
+    case RIN_GPU_CROSS_PROCESS_UNSUPPORTED:
         return 1;
     default:
         return 0;
@@ -135,6 +139,37 @@ static int release_lease_v2_valid(
            request->token != 0u && request->lease_id != 0u &&
            request->device_generation != 0u && request->reserved[0] == 0u &&
            request->reserved[1] == 0u;
+}
+
+static int map_readable_lease_v1_valid(
+    const RinGpuCrossProcessCapabilityMapReadableLeaseRequestV1* request)
+{
+    return request != NULL && request->struct_size == sizeof(*request) &&
+           request->version ==
+               RIN_GPU_CROSS_PROCESS_MAPPED_READABLE_V1_VERSION &&
+           request->token != 0u && request->lease_id != 0u &&
+           request->device_generation != 0u &&
+           request->reserved[0] == 0u && request->reserved[1] == 0u;
+}
+
+static int mapped_readable_lease_v1_valid(
+    const RinGpuCrossProcessCapabilityMappedReadableLeaseV1* mapping)
+{
+    return mapping != NULL && mapping->struct_size == sizeof(*mapping) &&
+           mapping->version ==
+               RIN_GPU_CROSS_PROCESS_MAPPED_READABLE_V1_VERSION &&
+           mapping->token != 0u && mapping->lease_id != 0u &&
+           mapping->resource_id != 0u && mapping->device_generation != 0u &&
+           mapping->address_in_recipient != 0u &&
+           mapping->allocation_size != 0u &&
+           mapping->address_in_recipient <=
+               UINT64_MAX - mapping->allocation_size &&
+           mapping->rights != 0u &&
+           (mapping->rights & ~RIN_GPU_CROSS_PROCESS_RIGHT_MASK) == 0u &&
+           (mapping->rights & RIN_GPU_CROSS_PROCESS_RIGHT_READ) != 0u &&
+           mapping->access ==
+               RIN_GPU_CROSS_PROCESS_MAPPED_ACCESS_CPU_READ &&
+           mapping->reserved[0] == 0u && mapping->reserved[1] == 0u;
 }
 
 static int lease_v2_valid(const RinGpuCrossProcessCapabilityLeaseV2* lease)
@@ -490,4 +525,38 @@ int rin_gpu_cross_process_capability_ipc_revoke_v2(
     if (result != RIN_GPU_CROSS_PROCESS_OK) return result;
     return receive_response(client, RIN_GPU_CAPABILITY_IPC_REVOKE_V2,
                             request_id, 0u, buffer, sizeof(buffer), NULL);
+}
+
+int rin_gpu_cross_process_capability_ipc_map_readable_lease_v1(
+    RinGpuCrossProcessCapabilityIpcClientV1* client,
+    const RinGpuCrossProcessCapabilityMapReadableLeaseRequestV1* request,
+    RinGpuCrossProcessCapabilityMappedReadableLeaseV1* mapping_out)
+{
+    uint8_t buffer[RIN_GPU_CAPABILITY_IPC_BUFFER_SIZE];
+    uint8_t* payload;
+    RinGpuCrossProcessCapabilityMappedReadableLeaseV1 mapping;
+    uint64_t request_id;
+    int result;
+
+    if (mapping_out == NULL) return RIN_GPU_CROSS_PROCESS_INVALID_ARGUMENT;
+    memset(mapping_out, 0, sizeof(*mapping_out));
+    if (!map_readable_lease_v1_valid(request))
+        return RIN_GPU_CROSS_PROCESS_INVALID_ARGUMENT;
+    result = send_request(client,
+                          RIN_GPU_CAPABILITY_IPC_MAP_READABLE_LEASE_V1,
+                          request, sizeof(*request), buffer, sizeof(buffer),
+                          &request_id);
+    if (result != RIN_GPU_CROSS_PROCESS_OK) return result;
+    result = receive_response(
+        client, RIN_GPU_CAPABILITY_IPC_MAP_READABLE_LEASE_V1, request_id,
+        sizeof(mapping), buffer, sizeof(buffer), &payload);
+    if (result != RIN_GPU_CROSS_PROCESS_OK) return result;
+    memcpy(&mapping, payload, sizeof(mapping));
+    if (!mapped_readable_lease_v1_valid(&mapping) ||
+        mapping.token != request->token ||
+        mapping.lease_id != request->lease_id ||
+        mapping.device_generation != request->device_generation)
+        return RIN_GPU_CROSS_PROCESS_PROTOCOL;
+    *mapping_out = mapping;
+    return RIN_GPU_CROSS_PROCESS_OK;
 }

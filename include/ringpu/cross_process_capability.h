@@ -138,6 +138,13 @@ int rin_gpu_cross_process_capability_ipc_release_lease_v2(
 int rin_gpu_cross_process_capability_ipc_revoke_v2(
     RinGpuCrossProcessCapabilityIpcClientV1* client,
     const RinGpuCrossProcessCapabilityTokenV2* token);
+/* Map only an allocation explicitly granted READ to the exact authenticated
+ * recipient. The returned address is meaningful only in that recipient's
+ * address space. Releasing the corresponding V2 capability lease unmaps it. */
+int rin_gpu_cross_process_capability_ipc_map_readable_lease_v1(
+    RinGpuCrossProcessCapabilityIpcClientV1* client,
+    const RinGpuCrossProcessCapabilityMapReadableLeaseRequestV1* request,
+    RinGpuCrossProcessCapabilityMappedReadableLeaseV1* mapping_out);
 
 #ifdef __cplusplus
 }
