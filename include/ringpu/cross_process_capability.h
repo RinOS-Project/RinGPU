@@ -121,6 +121,24 @@ int rin_gpu_cross_process_capability_ipc_revoke_process(
     RinGpuCrossProcessCapabilityIpcClientV1* client, uint64_t process_id,
     uint32_t* revoked_count_out);
 
+/* V2 payloads use the same versioned IPC channel envelope. The service must
+ * derive owner/recipient identity from rin_channel_receive_with_peer_v1; no
+ * caller identity is accepted by these client methods. */
+int rin_gpu_cross_process_capability_ipc_issue_v2(
+    RinGpuCrossProcessCapabilityIpcClientV1* client,
+    const RinGpuCrossProcessCapabilityGrantDescV2* desc,
+    RinGpuCrossProcessCapabilityTokenV2* token_out);
+int rin_gpu_cross_process_capability_ipc_acquire_v2(
+    RinGpuCrossProcessCapabilityIpcClientV1* client,
+    const RinGpuCrossProcessCapabilityAcquireRequestV2* request,
+    RinGpuCrossProcessCapabilityLeaseV2* lease_out);
+int rin_gpu_cross_process_capability_ipc_release_lease_v2(
+    RinGpuCrossProcessCapabilityIpcClientV1* client,
+    const RinGpuCrossProcessCapabilityReleaseLeaseV2* request);
+int rin_gpu_cross_process_capability_ipc_revoke_v2(
+    RinGpuCrossProcessCapabilityIpcClientV1* client,
+    const RinGpuCrossProcessCapabilityTokenV2* token);
+
 #ifdef __cplusplus
 }
 #endif

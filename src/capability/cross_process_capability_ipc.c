@@ -11,7 +11,7 @@
 enum {
     RIN_GPU_CAPABILITY_IPC_BUFFER_SIZE =
         (int)(sizeof(RinGpuCapabilityIpcHeaderV1) +
-              sizeof(RinGpuCrossProcessCapabilityDescV1))
+              sizeof(RinGpuCrossProcessCapabilityGrantDescV2))
 };
 
 static int capability_result_is_known(int32_t status)
@@ -89,6 +89,64 @@ static int request_valid(const RinGpuCrossProcessCapabilityRequestV1* request)
            (request->required_rights & ~RIN_GPU_CROSS_PROCESS_RIGHT_MASK) == 0u &&
            request->reserved[0] == 0u && request->reserved[1] == 0u &&
            request->reserved[2] == 0u;
+}
+
+static int grant_desc_v2_valid(
+    const RinGpuCrossProcessCapabilityGrantDescV2* desc)
+{
+    return desc != NULL && desc->struct_size == sizeof(*desc) &&
+           desc->version == RIN_GPU_CROSS_PROCESS_CAPABILITY_V2_VERSION &&
+           desc->rights != 0u &&
+           (desc->rights & ~RIN_GPU_CROSS_PROCESS_RIGHT_MASK) == 0u &&
+           desc->flags == 0u && desc->device_generation != 0u &&
+           desc->resource_id != 0u && desc->recipient_process_id != 0u &&
+           desc->recipient_process_instance_cookie != 0u &&
+           desc->reserved[0] == 0u && desc->reserved[1] == 0u;
+}
+
+static int token_v2_valid(const RinGpuCrossProcessCapabilityTokenV2* token)
+{
+    return token != NULL && token->struct_size == sizeof(*token) &&
+           token->version == RIN_GPU_CROSS_PROCESS_CAPABILITY_V2_VERSION &&
+           token->token != 0u && token->device_generation != 0u &&
+           token->rights != 0u &&
+           (token->rights & ~RIN_GPU_CROSS_PROCESS_RIGHT_MASK) == 0u &&
+           token->reserved[0] == 0u && token->reserved[1] == 0u &&
+           token->reserved[2] == 0u;
+}
+
+static int acquire_request_v2_valid(
+    const RinGpuCrossProcessCapabilityAcquireRequestV2* request)
+{
+    return request != NULL && request->struct_size == sizeof(*request) &&
+           request->version == RIN_GPU_CROSS_PROCESS_CAPABILITY_V2_VERSION &&
+           request->token != 0u && request->device_generation != 0u &&
+           (request->required_rights &
+            ~RIN_GPU_CROSS_PROCESS_RIGHT_MASK) == 0u &&
+           request->reserved[0] == 0u && request->reserved[1] == 0u &&
+           request->reserved[2] == 0u;
+}
+
+static int release_lease_v2_valid(
+    const RinGpuCrossProcessCapabilityReleaseLeaseV2* request)
+{
+    return request != NULL && request->struct_size == sizeof(*request) &&
+           request->version == RIN_GPU_CROSS_PROCESS_CAPABILITY_V2_VERSION &&
+           request->token != 0u && request->lease_id != 0u &&
+           request->device_generation != 0u && request->reserved[0] == 0u &&
+           request->reserved[1] == 0u;
+}
+
+static int lease_v2_valid(const RinGpuCrossProcessCapabilityLeaseV2* lease)
+{
+    return lease != NULL && lease->struct_size == sizeof(*lease) &&
+           lease->version == RIN_GPU_CROSS_PROCESS_CAPABILITY_V2_VERSION &&
+           lease->token != 0u && lease->lease_id != 0u &&
+           lease->resource_id != 0u && lease->device_generation != 0u &&
+           lease->rights != 0u &&
+           (lease->rights & ~RIN_GPU_CROSS_PROCESS_RIGHT_MASK) == 0u &&
+           lease->reserved[0] == 0u && lease->reserved[1] == 0u &&
+           lease->reserved[2] == 0u;
 }
 
 static uint64_t take_request_id(
@@ -331,4 +389,105 @@ int rin_gpu_cross_process_capability_ipc_revoke_process(
         return RIN_GPU_CROSS_PROCESS_PROTOCOL;
     *revoked_count_out = response.revoked_count;
     return RIN_GPU_CROSS_PROCESS_OK;
+}
+
+int rin_gpu_cross_process_capability_ipc_issue_v2(
+    RinGpuCrossProcessCapabilityIpcClientV1* client,
+    const RinGpuCrossProcessCapabilityGrantDescV2* desc,
+    RinGpuCrossProcessCapabilityTokenV2* token_out)
+{
+    uint8_t buffer[RIN_GPU_CAPABILITY_IPC_BUFFER_SIZE];
+    uint8_t* payload;
+    RinGpuCrossProcessCapabilityTokenV2 token;
+    uint64_t request_id;
+    int result;
+
+    if (token_out == NULL) return RIN_GPU_CROSS_PROCESS_INVALID_ARGUMENT;
+    memset(token_out, 0, sizeof(*token_out));
+    if (!grant_desc_v2_valid(desc))
+        return RIN_GPU_CROSS_PROCESS_INVALID_ARGUMENT;
+    result = send_request(client, RIN_GPU_CAPABILITY_IPC_ISSUE_V2, desc,
+                          sizeof(*desc), buffer, sizeof(buffer), &request_id);
+    if (result != RIN_GPU_CROSS_PROCESS_OK) return result;
+    result = receive_response(client, RIN_GPU_CAPABILITY_IPC_ISSUE_V2,
+                              request_id, sizeof(token), buffer,
+                              sizeof(buffer), &payload);
+    if (result != RIN_GPU_CROSS_PROCESS_OK) return result;
+    memcpy(&token, payload, sizeof(token));
+    if (!token_v2_valid(&token) ||
+        token.device_generation != desc->device_generation ||
+        token.rights != desc->rights)
+        return RIN_GPU_CROSS_PROCESS_PROTOCOL;
+    *token_out = token;
+    return RIN_GPU_CROSS_PROCESS_OK;
+}
+
+int rin_gpu_cross_process_capability_ipc_acquire_v2(
+    RinGpuCrossProcessCapabilityIpcClientV1* client,
+    const RinGpuCrossProcessCapabilityAcquireRequestV2* request,
+    RinGpuCrossProcessCapabilityLeaseV2* lease_out)
+{
+    uint8_t buffer[RIN_GPU_CAPABILITY_IPC_BUFFER_SIZE];
+    uint8_t* payload;
+    RinGpuCrossProcessCapabilityLeaseV2 lease;
+    uint64_t request_id;
+    int result;
+
+    if (lease_out == NULL) return RIN_GPU_CROSS_PROCESS_INVALID_ARGUMENT;
+    memset(lease_out, 0, sizeof(*lease_out));
+    if (!acquire_request_v2_valid(request))
+        return RIN_GPU_CROSS_PROCESS_INVALID_ARGUMENT;
+    result = send_request(client, RIN_GPU_CAPABILITY_IPC_ACQUIRE_V2, request,
+                          sizeof(*request), buffer, sizeof(buffer),
+                          &request_id);
+    if (result != RIN_GPU_CROSS_PROCESS_OK) return result;
+    result = receive_response(client, RIN_GPU_CAPABILITY_IPC_ACQUIRE_V2,
+                              request_id, sizeof(lease), buffer,
+                              sizeof(buffer), &payload);
+    if (result != RIN_GPU_CROSS_PROCESS_OK) return result;
+    memcpy(&lease, payload, sizeof(lease));
+    if (!lease_v2_valid(&lease) || lease.token != request->token ||
+        lease.device_generation != request->device_generation ||
+        (lease.rights & request->required_rights) !=
+            request->required_rights)
+        return RIN_GPU_CROSS_PROCESS_PROTOCOL;
+    *lease_out = lease;
+    return RIN_GPU_CROSS_PROCESS_OK;
+}
+
+int rin_gpu_cross_process_capability_ipc_release_lease_v2(
+    RinGpuCrossProcessCapabilityIpcClientV1* client,
+    const RinGpuCrossProcessCapabilityReleaseLeaseV2* request)
+{
+    uint8_t buffer[RIN_GPU_CAPABILITY_IPC_BUFFER_SIZE];
+    uint64_t request_id;
+    int result;
+
+    if (!release_lease_v2_valid(request))
+        return RIN_GPU_CROSS_PROCESS_INVALID_ARGUMENT;
+    result = send_request(client, RIN_GPU_CAPABILITY_IPC_RELEASE_LEASE_V2,
+                          request, sizeof(*request), buffer, sizeof(buffer),
+                          &request_id);
+    if (result != RIN_GPU_CROSS_PROCESS_OK) return result;
+    return receive_response(client,
+                            RIN_GPU_CAPABILITY_IPC_RELEASE_LEASE_V2,
+                            request_id, 0u, buffer, sizeof(buffer), NULL);
+}
+
+int rin_gpu_cross_process_capability_ipc_revoke_v2(
+    RinGpuCrossProcessCapabilityIpcClientV1* client,
+    const RinGpuCrossProcessCapabilityTokenV2* token)
+{
+    uint8_t buffer[RIN_GPU_CAPABILITY_IPC_BUFFER_SIZE];
+    uint64_t request_id;
+    int result;
+
+    if (!token_v2_valid(token))
+        return RIN_GPU_CROSS_PROCESS_INVALID_ARGUMENT;
+    result = send_request(client, RIN_GPU_CAPABILITY_IPC_REVOKE_V2, token,
+                          sizeof(*token), buffer, sizeof(buffer),
+                          &request_id);
+    if (result != RIN_GPU_CROSS_PROCESS_OK) return result;
+    return receive_response(client, RIN_GPU_CAPABILITY_IPC_REVOKE_V2,
+                            request_id, 0u, buffer, sizeof(buffer), NULL);
 }
