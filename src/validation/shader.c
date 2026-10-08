@@ -164,6 +164,22 @@ int ringpu_shader_resource_layout(const RinGpuObjectSlot* shader,
             kinds[image] = RIN_SHADER_RESOURCE_SAMPLED_IMAGE;
             kinds[sampler] = RIN_SHADER_RESOURCE_SAMPLER;
             access[image] |= RIN_GPU_RESOURCE_READ;
+        } else if (instruction->opcode ==
+                   RIN_SHADER_OP_SAMPLE_IMAGE_CUBE_F32) {
+            uint32_t image = RIN_SHADER_SAMPLE_CUBE_IMAGE_BINDING(
+                instruction->resource);
+            uint32_t sampler = RIN_SHADER_SAMPLE_CUBE_SAMPLER_BINDING(
+                instruction->resource);
+
+            if ((kinds[image] != RIN_SHADER_RESOURCE_NONE &&
+                 kinds[image] != RIN_SHADER_RESOURCE_SAMPLED_IMAGE) ||
+                (kinds[sampler] != RIN_SHADER_RESOURCE_NONE &&
+                 kinds[sampler] != RIN_SHADER_RESOURCE_SAMPLER)) {
+                return RIN_GPU_ERROR_SHADER_INVALID;
+            }
+            kinds[image] = RIN_SHADER_RESOURCE_SAMPLED_IMAGE;
+            kinds[sampler] = RIN_SHADER_RESOURCE_SAMPLER;
+            access[image] |= RIN_GPU_RESOURCE_READ;
         } else if (instruction->opcode == RIN_SHADER_OP_SAMPLE_COMPARE_I32 ||
                    instruction->opcode == RIN_SHADER_OP_SAMPLE_COMPARE_F32) {
             uint32_t image = instruction->resource;
