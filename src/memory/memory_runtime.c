@@ -1423,6 +1423,7 @@ int rin_gpu_memory_map_external(
     RinGpuMemoryAddressSpaceV1 admitted_space;
     RinGpuMemoryRuntimeState* state;
     RinGpuMemoryAllocationSlot* allocation;
+    int user_process_mapping;
     RinGpuMemoryLeaseSlot* lease;
     uint64_t address = 0u;
     uint64_t mapping_cookie = 0u;
@@ -1472,15 +1473,21 @@ int rin_gpu_memory_map_external(
         result = RIN_GPU_MEMORY_UNSUPPORTED;
         goto done;
     }
+    user_process_mapping =
+        space.kind == RIN_GPU_MEMORY_ADDRESS_SPACE_USER_PROCESS;
     if (space.struct_size != sizeof(space) ||
         space.version != RIN_GPU_MEMORY_ADDRESS_SPACE_VERSION ||
-        space.kind != RIN_GPU_MEMORY_ADDRESS_SPACE_DISPLAY_FETCH ||
+        (space.kind != RIN_GPU_MEMORY_ADDRESS_SPACE_DISPLAY_FETCH &&
+         !user_process_mapping) ||
         space.flags != 0u || space.owner_cookie == 0u ||
         space.generation == 0u || space.device_generation == 0u ||
-        space.reserved != 0u ||
-        required_access == 0u ||
-        (required_access & ~(RIN_GPU_MEMORY_GPU_READ |
-                             RIN_GPU_MEMORY_GPU_WRITE)) != 0u) {
+        space.reserved != 0u || required_access == 0u ||
+        (user_process_mapping
+             ? (required_access &
+                ~(RIN_GPU_MEMORY_EXTERNAL_ACCESS_CPU_READ |
+                  RIN_GPU_MEMORY_EXTERNAL_ACCESS_CPU_WRITE)) != 0u
+             : (required_access &
+                ~(RIN_GPU_MEMORY_GPU_READ | RIN_GPU_MEMORY_GPU_WRITE)) != 0u)) {
         result = RIN_GPU_MEMORY_INVALID_ARGUMENT;
         goto done;
     }
@@ -1490,7 +1497,12 @@ int rin_gpu_memory_map_external(
         result = RIN_GPU_MEMORY_STALE;
         goto done;
     }
-    if ((allocation->flags & required_access) != required_access) {
+    if (user_process_mapping) {
+        if ((allocation->flags & RIN_GPU_MEMORY_CPU_VISIBLE) == 0u) {
+            result = RIN_GPU_MEMORY_UNSUPPORTED;
+            goto done;
+        }
+    } else if ((allocation->flags & required_access) != required_access) {
         result = RIN_GPU_MEMORY_INVALID_ARGUMENT;
         goto done;
     }

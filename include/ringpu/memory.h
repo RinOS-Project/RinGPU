@@ -235,6 +235,13 @@ typedef struct RinGpuMemoryBackendV2 {
  * pointer, GPUVA, or IOVA unless the owner explicitly defines it as such. */
 #define RIN_GPU_MEMORY_ADDRESS_SPACE_VERSION 1u
 #define RIN_GPU_MEMORY_ADDRESS_SPACE_DISPLAY_FETCH 1u
+#define RIN_GPU_MEMORY_ADDRESS_SPACE_USER_PROCESS 2u
+#define RIN_GPU_MEMORY_EXTERNAL_ACCESS_CPU_READ UINT32_C(0x00000004)
+#define RIN_GPU_MEMORY_EXTERNAL_ACCESS_CPU_WRITE UINT32_C(0x00000008)
+#define RIN_GPU_MEMORY_EXTERNAL_ACCESS_KNOWN                         \
+    (RIN_GPU_MEMORY_GPU_READ | RIN_GPU_MEMORY_GPU_WRITE |            \
+     RIN_GPU_MEMORY_EXTERNAL_ACCESS_CPU_READ |                       \
+     RIN_GPU_MEMORY_EXTERNAL_ACCESS_CPU_WRITE)
 typedef struct RinGpuMemoryAddressSpaceV1 {
     uint32_t struct_size;
     uint32_t version;
@@ -247,7 +254,10 @@ typedef struct RinGpuMemoryAddressSpaceV1 {
 } RinGpuMemoryAddressSpaceV1;
 
 /* Map the complete allocation backing into the named external address
- * space. On success, mapping_cookie identifies the retained mapping and
+ * space (display-fetch or a user process). For USER_PROCESS, the owner cookie
+ * and generation identify the exact process instance, and access uses the
+ * CPU_READ/CPU_WRITE bits below; the allocation must be CPU-visible. On
+ * success, mapping_cookie identifies the retained mapping and
  * address_out is the allocation start in that address space. On failure,
  * either both outputs are zero and nothing was retained, or mapping_cookie
  * identifies a partial mapping that must be released through unmap; the
