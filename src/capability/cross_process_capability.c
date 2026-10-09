@@ -112,10 +112,11 @@ int rin_gpu_cross_process_capability_issue(
     for (index = 0u; index < RIN_GPU_CROSS_PROCESS_CAPABILITY_MAX; ++index) {
         if (runtime->entries[index].live == 0u) break;
     }
-    if (index == RIN_GPU_CROSS_PROCESS_CAPABILITY_MAX)
+    if (index == RIN_GPU_CROSS_PROCESS_CAPABILITY_MAX ||
+        runtime->next_token == 0u)
         return RIN_GPU_CROSS_PROCESS_LIMIT;
-    token = runtime->next_token++;
-    if (token == 0u) return RIN_GPU_CROSS_PROCESS_LIMIT;
+    token = runtime->next_token;
+    runtime->next_token = token == UINT64_MAX ? 0u : token + 1u;
     runtime->entries[index].token = token;
     runtime->entries[index].owner_process_id = desc->owner_process_id;
     runtime->entries[index].device_generation = desc->device_generation;
