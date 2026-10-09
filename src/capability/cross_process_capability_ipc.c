@@ -205,6 +205,34 @@ static void init_message(
     message->bytes.size = byte_size;
 }
 
+static int wait_channel_ready(
+    const RinGpuCrossProcessCapabilityIpcClientV1* client,
+    uint32_t wanted_events)
+{
+    if (!client_valid(client)) return RIN_GPU_CROSS_PROCESS_INVALID_ARGUMENT;
+    for (;;) {
+        RinWaitItemV1 item;
+        RinSliceV1 items;
+        uint32_t index = UINT32_MAX;
+        RinResult result;
+
+        memset(&item, 0, sizeof(item));
+        item.handle = client->channel;
+        item.events = wanted_events | RIN_WAIT_EVENT_ERROR |
+                      RIN_WAIT_EVENT_HANGUP;
+        items.address = (uint64_t)(uintptr_t)&item;
+        items.size = sizeof(item);
+        result = rin_wait_many_v1(items, RIN_SDK_INFINITE, &index);
+        if (result != RIN_SUCCESS) return map_sdk_result(result);
+        if (index != 0u) return RIN_GPU_CROSS_PROCESS_IPC;
+        if ((item.observed & wanted_events) != 0u)
+            return RIN_GPU_CROSS_PROCESS_OK;
+        if ((item.observed &
+             (RIN_WAIT_EVENT_ERROR | RIN_WAIT_EVENT_HANGUP)) != 0u)
+            return RIN_GPU_CROSS_PROCESS_IPC;
+    }
+}
+
 static int send_request(
     RinGpuCrossProcessCapabilityIpcClientV1* client, uint16_t opcode,
     const void* payload, size_t payload_size, uint8_t* buffer,
@@ -234,8 +262,18 @@ static int send_request(
     if (payload_size != 0u) memcpy(buffer + sizeof(header), payload, payload_size);
 
     init_message(&message, request_id, buffer, byte_size);
-    result = rin_channel_send_v1(client->channel, &message);
-    if (result != RIN_SUCCESS) return map_sdk_result(result);
+    for (;;) {
+        result = rin_channel_send_v1(client->channel, &message);
+        if (result == RIN_SUCCESS) break;
+        if (result != RIN_ERROR_WOULD_BLOCK)
+            return map_sdk_result(result);
+        {
+            int wait_result = wait_channel_ready(
+                client, RIN_WAIT_EVENT_WRITABLE);
+            if (wait_result != RIN_GPU_CROSS_PROCESS_OK)
+                return wait_result;
+        }
+    }
     *request_id_out = request_id;
     return RIN_GPU_CROSS_PROCESS_OK;
 }
@@ -258,8 +296,17 @@ static int receive_response(
 
     memset(buffer, 0, buffer_size);
     init_message(&message, request_id, buffer, buffer_size);
-    result = rin_channel_receive_v1(client->channel, &message);
-    if (result != RIN_SUCCESS) return map_sdk_result(result);
+    for (;;) {
+        result = rin_channel_receive_v1(client->channel, &message);
+        if (result == RIN_SUCCESS) break;
+        if (result != RIN_ERROR_WOULD_BLOCK)
+            return map_sdk_result(result);
+        {
+            int wait_result = wait_channel_ready(
+                client, RIN_WAIT_EVENT_READABLE);
+            if (wait_result != RIN_GPU_CROSS_PROCESS_OK) return wait_result;
+        }
+    }
     if (message.struct_size < sizeof(message) ||
         message.version != RIN_SDK_STRUCT_VERSION_1 ||
         message.message_id != request_id || message.bytes.address !=
