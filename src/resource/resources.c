@@ -417,6 +417,82 @@ int ringpu_bind_image_memory(
     return RIN_GPU_OK;
 }
 
+static int ringpu_get_resource_memory_binding(
+    RinGpuCore* core, RinGpuHandle resource, uint16_t resource_type,
+    RinGpuResourceMemoryBindingV1* binding_out)
+{
+    const RinGpuObjectSlot* resource_slot = NULL;
+    const RinGpuObjectSlot* memory_slot = NULL;
+    RinGpuHandle memory_handle = 0u;
+    uint64_t offset_bytes = 0u;
+    uint64_t size_bytes = 0u;
+    int result;
+
+    if (!binding_out) return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    memset(binding_out, 0, sizeof(*binding_out));
+    result = ringpu_core_ready(core);
+    if (result != RIN_GPU_OK) return result;
+
+    ringpu_core_resource_lock(core);
+    result = ringpu_core_ready(core);
+    if (result != RIN_GPU_OK) goto done;
+    result = ringpu_slot_const(core, resource, resource_type, NULL,
+                               &resource_slot);
+    if (result != RIN_GPU_OK) goto done;
+    if (resource_type == RIN_GPU_OBJECT_BUFFER) {
+        memory_handle = resource_slot->value.buffer.memory_handle;
+        offset_bytes = resource_slot->value.buffer.memory_offset;
+        size_bytes = resource_slot->value.buffer.memory_size;
+    } else {
+        memory_handle = resource_slot->value.image.memory_handle;
+        offset_bytes = resource_slot->value.image.memory_offset;
+        size_bytes = resource_slot->value.image.memory_size;
+    }
+    if (memory_handle == 0u || size_bytes == 0u ||
+        offset_bytes > UINT64_MAX - size_bytes) {
+        result = RIN_GPU_ERROR_STATE;
+        goto done;
+    }
+    result = ringpu_slot_const(core, memory_handle, RIN_GPU_OBJECT_MEMORY,
+                               NULL, &memory_slot);
+    if (result != RIN_GPU_OK) {
+        result = RIN_GPU_ERROR_STATE;
+        goto done;
+    }
+    if (offset_bytes + size_bytes > memory_slot->value.memory.size_bytes) {
+        result = RIN_GPU_ERROR_STATE;
+        goto done;
+    }
+
+    binding_out->abi_version = RIN_GPU_ABI_VERSION;
+    binding_out->struct_size = sizeof(*binding_out);
+    binding_out->memory = memory_handle;
+    binding_out->offset_bytes = offset_bytes;
+    binding_out->size_bytes = size_bytes;
+    result = RIN_GPU_OK;
+
+done:
+    ringpu_core_resource_unlock(core);
+    if (result != RIN_GPU_OK) memset(binding_out, 0, sizeof(*binding_out));
+    return result;
+}
+
+int ringpu_get_buffer_memory_binding(
+    RinGpuCore* core, RinGpuHandle buffer,
+    RinGpuResourceMemoryBindingV1* binding_out)
+{
+    return ringpu_get_resource_memory_binding(
+        core, buffer, RIN_GPU_OBJECT_BUFFER, binding_out);
+}
+
+int ringpu_get_image_memory_binding(
+    RinGpuCore* core, RinGpuHandle image,
+    RinGpuResourceMemoryBindingV1* binding_out)
+{
+    return ringpu_get_resource_memory_binding(
+        core, image, RIN_GPU_OBJECT_IMAGE, binding_out);
+}
+
 static int ringpu_create_buffer_impl(RinGpuCore* core,
                                     const RinGpuBufferDescV1* desc,
                                     RinGpuHandle* buffer)

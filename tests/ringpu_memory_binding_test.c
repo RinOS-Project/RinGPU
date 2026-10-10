@@ -99,6 +99,7 @@ int main(void)
     RinGpuResourceMemoryRequirementsV1 buffer_requirements;
     RinGpuMemoryDescV1 memory_desc;
     RinGpuResourceMemoryBindingV1 binding;
+    RinGpuResourceMemoryBindingV1 binding_query;
     RinGpuImageUploadV1 upload;
     RinGpuImageReadbackV1 readback;
     RinGpuImageTransitionV1 transition;
@@ -144,6 +145,14 @@ int main(void)
         ringpu_create_image(&core, &image_desc, &image) != RIN_GPU_OK) {
         goto done;
     }
+    memset(&binding_query, 0xA5, sizeof(binding_query));
+    if (ringpu_get_image_memory_binding(&core, image, &binding_query) !=
+            RIN_GPU_ERROR_STATE ||
+        binding_query.abi_version != 0u || binding_query.struct_size != 0u ||
+        binding_query.memory != 0u || binding_query.offset_bytes != 0u ||
+        binding_query.size_bytes != 0u) {
+        goto done;
+    }
     memset(&binding, 0, sizeof(binding));
     binding.abi_version = RIN_GPU_ABI_VERSION;
     binding.struct_size = sizeof(binding);
@@ -153,6 +162,15 @@ int main(void)
         ringpu_bind_image_memory(&core, image, &binding) !=
             RIN_GPU_ERROR_BUSY ||
         ringpu_destroy(&core, memory) != RIN_GPU_ERROR_BUSY) {
+        goto done;
+    }
+    if (ringpu_get_image_memory_binding(&core, image, &binding_query) !=
+            RIN_GPU_OK ||
+        binding_query.abi_version != RIN_GPU_ABI_VERSION ||
+        binding_query.struct_size != sizeof(binding_query) ||
+        binding_query.memory != memory || binding_query.offset_bytes != 0u ||
+        binding_query.size_bytes != requirements.size_bytes ||
+        binding_query.reserved[0] != 0u || binding_query.reserved[1] != 0u) {
         goto done;
     }
     memset(&upload, 0, sizeof(upload));
@@ -244,6 +262,15 @@ int main(void)
                              sizeof(source)) != RIN_GPU_ERROR_BOUNDS) {
         goto done;
     }
+    if (ringpu_get_buffer_memory_binding(&core, buffer, &binding_query) !=
+            RIN_GPU_OK ||
+        binding_query.memory != buffer_memory ||
+        binding_query.offset_bytes != 0u ||
+        binding_query.size_bytes != buffer_requirements.size_bytes ||
+        ringpu_get_image_memory_binding(&core, buffer, &binding_query) !=
+            RIN_GPU_ERROR_WRONG_TYPE || binding_query.memory != 0u) {
+        goto done;
+    }
     if (ringpu_upload_buffer(&core, buffer, 0u, source,
                              sizeof(source)) != RIN_GPU_OK) {
         goto done;
@@ -263,6 +290,8 @@ int main(void)
         }
     }
     if (ringpu_destroy(&core, buffer) != RIN_GPU_OK ||
+        ringpu_get_buffer_memory_binding(&core, buffer, &binding_query) !=
+            RIN_GPU_ERROR_INVALID_HANDLE || binding_query.memory != 0u ||
         ringpu_destroy(&core, buffer_memory) != RIN_GPU_OK) {
         goto done;
     }
@@ -290,6 +319,17 @@ int main(void)
     binding.offset_bytes = requirements.size_bytes;
     if (ringpu_bind_image_memory(&core, image3, &binding) != RIN_GPU_OK ||
         ringpu_destroy(&core, memory2) != RIN_GPU_ERROR_BUSY) {
+        goto done;
+    }
+    if (ringpu_get_image_memory_binding(&core, image2, &binding_query) !=
+            RIN_GPU_OK ||
+        binding_query.memory != memory2 || binding_query.offset_bytes != 0u ||
+        binding_query.size_bytes != requirements.size_bytes ||
+        ringpu_get_image_memory_binding(&core, image3, &binding_query) !=
+            RIN_GPU_OK ||
+        binding_query.memory != memory2 ||
+        binding_query.offset_bytes != requirements.size_bytes ||
+        binding_query.size_bytes != requirements.size_bytes) {
         goto done;
     }
     binding.offset_bytes = requirements.size_bytes / 2u;

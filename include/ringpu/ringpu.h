@@ -1510,6 +1510,12 @@ int ringpu_create_memory(RinGpuCore* core, const RinGpuMemoryDescV1* desc,
 int ringpu_bind_buffer_memory(
     RinGpuCore* core, RinGpuHandle buffer,
     const RinGpuResourceMemoryBindingV1* binding);
+/* Returns the live memory-object handle and exact bound allocation range for
+ * a resource. This is metadata only: the handle remains core-local and is
+ * not a process allocation capability or a GPU address. */
+int ringpu_get_buffer_memory_binding(
+    RinGpuCore* core, RinGpuHandle buffer,
+    RinGpuResourceMemoryBindingV1* binding_out);
 /* Copies a non-empty CPU range into a CPU-visible buffer.  A successful call
  * has completed the backend's required CPU-to-device cache synchronization. */
 int ringpu_upload_buffer(RinGpuCore* core, RinGpuHandle buffer,
@@ -1528,6 +1534,9 @@ int ringpu_get_image_memory_requirements(
 int ringpu_bind_image_memory(
     RinGpuCore* core, RinGpuHandle image,
     const RinGpuResourceMemoryBindingV1* binding);
+int ringpu_get_image_memory_binding(
+    RinGpuCore* core, RinGpuHandle image,
+    RinGpuResourceMemoryBindingV1* binding_out);
 /* Copies a non-empty CPU region into a CPU-visible image. `source_size` must
  * cover every source row and slice selected by `upload`; success includes the
  * backend's required CPU-to-device cache synchronization. A complete mip/layer
