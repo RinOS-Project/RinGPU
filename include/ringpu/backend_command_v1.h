@@ -68,6 +68,29 @@ typedef struct RinGpuBackendImageToBufferCopyV1 {
     uint32_t reserved;
 } RinGpuBackendImageToBufferCopyV1;
 
+/* Copy one uncompressed texel region from a buffer into an image. The buffer
+ * row pitch and exact source span are explicit; consumers must not infer a
+ * tiling, modifier, or allocation extent from the image dimensions. */
+typedef struct RinGpuBackendBufferToImageCopyV1 {
+    uint64_t buffer_cookie;
+    uint64_t buffer_offset;
+    uint64_t buffer_size_bytes;
+    uint64_t buffer_row_pitch_bytes;
+    uint64_t image_cookie;
+    uint32_t image_mip_level;
+    uint32_t image_array_layer;
+    uint32_t image_width;
+    uint32_t image_height;
+    uint32_t image_offset_x;
+    uint32_t image_offset_y;
+    uint32_t copy_width;
+    uint32_t copy_height;
+    uint32_t buffer_image_height_texels;
+    uint32_t bytes_per_texel;
+    uint32_t flags;
+    uint32_t reserved;
+} RinGpuBackendBufferToImageCopyV1;
+
 /* The bridge transition record is independent of the API-specific transition
  * type. aspect_mask is meaningful in the common contract; older OS-Core
  * layouts that only carried reserved must validate and convert it explicitly. */
@@ -630,6 +653,7 @@ typedef struct RinGpuBackendRenderPassDepthStencilBeginV1 {
     RinGpuBackendBufferCopyV1 buffer_copy;                                   \
     RinGpuBackendImageCopyV1 image_copy;                                     \
     RinGpuBackendImageToBufferCopyV1 image_to_buffer_copy;                   \
+    RinGpuBackendBufferToImageCopyV1 buffer_to_image_copy;                   \
     transition_type image_transition;                                        \
     RinGpuBackendDispatchV1 dispatch;                                        \
     RinGpuBackendComputeBarrierV1 compute_barrier;                           \

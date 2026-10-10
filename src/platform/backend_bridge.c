@@ -469,6 +469,9 @@ static int bridge_canonicalize_command(
     BRIDGE_COPY_COMMAND_PAYLOAD(
         RIN_GPU_BACKEND_COMMAND_COPY_IMAGE_TO_BUFFER,
         image_to_buffer_copy);
+    BRIDGE_COPY_COMMAND_PAYLOAD(
+        RIN_GPU_BACKEND_COMMAND_COPY_BUFFER_TO_IMAGE,
+        buffer_to_image_copy);
     BRIDGE_COPY_COMMAND_PAYLOAD(RIN_GPU_BACKEND_COMMAND_TRANSITION_IMAGE,
                                 image_transition);
     BRIDGE_COPY_COMMAND_PAYLOAD(RIN_GPU_BACKEND_COMMAND_DISPATCH, dispatch);
