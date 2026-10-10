@@ -556,6 +556,30 @@ int ringpu_runtime_bind_buffer_memory(
     return ringpu_bind_buffer_memory(&runtime->core, buffer, binding);
 }
 
+int ringpu_runtime_get_buffer_memory_requirements(
+    RinGpuRuntime* runtime, const RinGpuBufferDescV1* desc,
+    RinGpuResourceMemoryRequirementsV1* requirements_out)
+{
+    if (!requirements_out) return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    memset(requirements_out, 0, sizeof(*requirements_out));
+    if (runtime == NULL || runtime->initialized != RIN_GPU_RUNTIME_VERSION)
+        return RIN_GPU_ERROR_STATE;
+    return ringpu_get_buffer_memory_requirements(
+        &runtime->core, desc, requirements_out);
+}
+
+int ringpu_runtime_get_buffer_memory_binding(
+    RinGpuRuntime* runtime, RinGpuHandle buffer,
+    RinGpuResourceMemoryBindingV1* binding_out)
+{
+    if (!binding_out) return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    memset(binding_out, 0, sizeof(*binding_out));
+    if (runtime == NULL || runtime->initialized != RIN_GPU_RUNTIME_VERSION)
+        return RIN_GPU_ERROR_STATE;
+    return ringpu_get_buffer_memory_binding(&runtime->core, buffer,
+                                            binding_out);
+}
+
 int ringpu_runtime_upload_buffer(RinGpuRuntime* runtime,
                                  RinGpuHandle buffer, uint64_t destination_offset,
                                  const void* source, uint64_t size_bytes)
@@ -655,6 +679,30 @@ int ringpu_runtime_bind_image_memory(
     if (runtime == NULL || runtime->initialized != RIN_GPU_RUNTIME_VERSION)
         return RIN_GPU_ERROR_STATE;
     return ringpu_bind_image_memory(&runtime->core, image, binding);
+}
+
+int ringpu_runtime_get_image_memory_requirements(
+    RinGpuRuntime* runtime, const RinGpuImageDescV1* desc,
+    RinGpuResourceMemoryRequirementsV1* requirements_out)
+{
+    if (!requirements_out) return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    memset(requirements_out, 0, sizeof(*requirements_out));
+    if (runtime == NULL || runtime->initialized != RIN_GPU_RUNTIME_VERSION)
+        return RIN_GPU_ERROR_STATE;
+    return ringpu_get_image_memory_requirements(
+        &runtime->core, desc, requirements_out);
+}
+
+int ringpu_runtime_get_image_memory_binding(
+    RinGpuRuntime* runtime, RinGpuHandle image,
+    RinGpuResourceMemoryBindingV1* binding_out)
+{
+    if (!binding_out) return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    memset(binding_out, 0, sizeof(*binding_out));
+    if (runtime == NULL || runtime->initialized != RIN_GPU_RUNTIME_VERSION)
+        return RIN_GPU_ERROR_STATE;
+    return ringpu_get_image_memory_binding(&runtime->core, image,
+                                           binding_out);
 }
 
 int ringpu_runtime_upload_image(RinGpuRuntime* runtime, RinGpuHandle image,

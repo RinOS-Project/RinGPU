@@ -128,6 +128,15 @@ int ringpu_runtime_create_memory(RinGpuRuntime* runtime,
 int ringpu_runtime_bind_buffer_memory(
     RinGpuRuntime* runtime, RinGpuHandle buffer,
     const RinGpuResourceMemoryBindingV1* binding);
+/* Requirement queries use the resource descriptor before creation. Binding
+ * queries return the exact live core-local memory handle/range; they do not
+ * expose an SDK allocation capability or GPU address. */
+int ringpu_runtime_get_buffer_memory_requirements(
+    RinGpuRuntime* runtime, const RinGpuBufferDescV1* desc,
+    RinGpuResourceMemoryRequirementsV1* requirements_out);
+int ringpu_runtime_get_buffer_memory_binding(
+    RinGpuRuntime* runtime, RinGpuHandle buffer,
+    RinGpuResourceMemoryBindingV1* binding_out);
 int ringpu_runtime_upload_buffer(RinGpuRuntime* runtime,
                                  RinGpuHandle buffer, uint64_t destination_offset,
                                  const void* source, uint64_t size_bytes);
@@ -162,6 +171,12 @@ int ringpu_runtime_create_image(RinGpuRuntime* runtime,
 int ringpu_runtime_bind_image_memory(
     RinGpuRuntime* runtime, RinGpuHandle image,
     const RinGpuResourceMemoryBindingV1* binding);
+int ringpu_runtime_get_image_memory_requirements(
+    RinGpuRuntime* runtime, const RinGpuImageDescV1* desc,
+    RinGpuResourceMemoryRequirementsV1* requirements_out);
+int ringpu_runtime_get_image_memory_binding(
+    RinGpuRuntime* runtime, RinGpuHandle image,
+    RinGpuResourceMemoryBindingV1* binding_out);
 int ringpu_runtime_upload_image(RinGpuRuntime* runtime, RinGpuHandle image,
                                 const RinGpuImageUploadV1* upload,
                                 const void* source, uint64_t source_size);

@@ -193,6 +193,9 @@ if(RINGPU_BUILD_TESTS)
                         tests/ringpu_compressed_test.c)
         ringpu_add_test(ringpu-memory-binding-test ringpu-memory-binding
                         tests/ringpu_memory_binding_test.c)
+        ringpu_add_test(ringpu-memory-binding-runtime-test
+                        ringpu-memory-binding-runtime
+                        tests/ringpu_memory_binding_runtime_test.c)
         ringpu_add_test(ringpu-software-memory-suballocator-test
                         ringpu-software-memory-suballocator
                         tests/ringpu_software_memory_suballocator_test.c)
