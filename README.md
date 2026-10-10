@@ -61,6 +61,21 @@ CPU-visible buffers also have an explicit readback owner through
 ranges after upload completion; backends without a readback callback return a
 state error instead of fabricating a mapping or success.
 
+## Software backend CPU memory budget
+
+Each software backend enforces the `max_total_bytes` value from its creation
+descriptor. All software backend instances in one loaded RinGPU library image
+also share `RIN_GPU_SOFTWARE_BACKEND_MAX_AGGREGATE_BYTES` (1 GiB). The shared
+counter includes backend objects, resource and execution allocations, and
+reserved memory-pool blocks, including idle cached blocks. A failed aggregate
+reservation first reclaims idle blocks owned by the requesting backend. A
+successful free returns its charge to both limits.
+
+The aggregate limit bounds this software backend's allocations in one loaded
+library image. Caller-owned storage supplied by callbacks and physical GPU or
+driver allocations are outside this CPU budget; separately linked copies of
+RinGPU maintain independent counters.
+
 ## Public API contract
 
 | Requirement | Contract |

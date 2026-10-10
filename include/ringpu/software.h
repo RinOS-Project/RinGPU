@@ -15,6 +15,11 @@ extern "C" {
 #define RIN_GPU_SOFTWARE_BACKEND_VERSION_3 3u
 #define RIN_GPU_SOFTWARE_BACKEND_VERSION_4 4u
 #define RIN_GPU_SOFTWARE_EXTERNAL_IMAGE_VERSION 1u
+/* Aggregate CPU allocation ceiling shared by all software backend instances
+ * in one loaded RinGPU library image. Each instance also enforces the lower
+ * max_total_bytes value supplied in its descriptor. */
+#define RIN_GPU_SOFTWARE_BACKEND_MAX_AGGREGATE_BYTES \
+    (UINT64_C(1024) * UINT64_C(1024) * UINT64_C(1024))
 
 /* V4 makes the reference backend observable without making execution
  * dependent on host addresses or wall-clock state. The flags are deliberately

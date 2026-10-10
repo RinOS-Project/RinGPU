@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 #include "software_backend.h"
 #include "../core/core.h"
+#include "../platform/thread.h"
 #include "../sync/barriers.h"
 #include "../validation/pipeline.h"
 #include "../validation/resource.h"
@@ -668,6 +669,49 @@ struct RinGpuSoftwareBackend {
     SwQueryState queries[RIN_GPU_CORE_MAX_OBJECTS];
 };
 
+static volatile long sw_global_allocation_lock;
+static uint64_t sw_global_allocated_bytes;
+
+static int sw_global_reserve(uint64_t bytes)
+{
+    int reserved = 0;
+
+    if (bytes == 0u)
+        return 0;
+    ringpu_platform_resource_lock_acquire(
+        &sw_global_allocation_lock, NULL, NULL);
+    if (sw_global_allocated_bytes <=
+            RIN_GPU_SOFTWARE_BACKEND_MAX_AGGREGATE_BYTES &&
+        bytes <= RIN_GPU_SOFTWARE_BACKEND_MAX_AGGREGATE_BYTES -
+                     sw_global_allocated_bytes) {
+        sw_global_allocated_bytes += bytes;
+        reserved = 1;
+    }
+    ringpu_platform_resource_lock_release(&sw_global_allocation_lock);
+    return reserved;
+}
+
+static void sw_global_release(uint64_t bytes)
+{
+    if (bytes == 0u)
+        return;
+    ringpu_platform_resource_lock_acquire(
+        &sw_global_allocation_lock, NULL, NULL);
+    /* Preserve other backends' reservations if an internal release is ever
+     * mismatched; an accounting bug must not underflow the shared total. */
+    if (bytes <= sw_global_allocated_bytes)
+        sw_global_allocated_bytes -= bytes;
+    ringpu_platform_resource_lock_release(&sw_global_allocation_lock);
+}
+
+static void sw_backend_record_free(RinGpuSoftwareBackend* backend)
+{
+    if (!backend)
+        return;
+    free(backend);
+    sw_global_release(sizeof(*backend));
+}
+
 static void sw_memory_pool_aligned_free(RinGpuSoftwareBackend* backend,
                                        void* allocation, uint64_t bytes);
 
@@ -930,18 +974,31 @@ static int sw_reserve(RinGpuSoftwareBackend* backend, uint64_t bytes)
     if (backend->allocated_bytes > backend->max_total_bytes ||
         bytes > backend->max_total_bytes - backend->allocated_bytes)
         return RIN_GPU_ERROR_NO_MEMORY;
+    if (!sw_global_reserve(bytes)) {
+        /* Cached suballocator blocks are part of the shared limit. Release
+         * this backend's idle blocks before rejecting an otherwise-valid
+         * allocation at the aggregate limit. */
+        sw_memory_pool_reclaim_idle(backend);
+        if (backend->allocated_bytes > backend->max_total_bytes ||
+            bytes > backend->max_total_bytes - backend->allocated_bytes ||
+            !sw_global_reserve(bytes))
+            return RIN_GPU_ERROR_NO_MEMORY;
+    }
     backend->allocated_bytes += bytes;
     return RIN_GPU_OK;
 }
 
 static void sw_release(RinGpuSoftwareBackend* backend, uint64_t bytes)
 {
+    uint64_t released_bytes;
+
     if (!backend)
         return;
-    if (bytes > backend->allocated_bytes)
-        backend->allocated_bytes = 0u;
-    else
-        backend->allocated_bytes -= bytes;
+    released_bytes = bytes > backend->allocated_bytes
+                         ? backend->allocated_bytes
+                         : bytes;
+    backend->allocated_bytes -= released_bytes;
+    sw_global_release(released_bytes);
 }
 
 /* Backend objects and their CPU shadows are part of the same bounded budget
@@ -11297,15 +11354,19 @@ int ringpu_software_backend_create(
             return RIN_GPU_ERROR_INVALID_ARGUMENT;
         }
     }
-    backend = calloc(1u, sizeof(*backend));
-    if (!backend)
+    if (!sw_global_reserve(sizeof(*backend)))
         return RIN_GPU_ERROR_NO_MEMORY;
+    backend = calloc(1u, sizeof(*backend));
+    if (!backend) {
+        sw_global_release(sizeof(*backend));
+        return RIN_GPU_ERROR_NO_MEMORY;
+    }
     backend->max_total_bytes = desc->max_total_bytes;
     /* The backend object is caller-owned resource metadata just like every
      * typed object it creates. Count it before publishing the handle so an
      * untrusted embedding cannot bypass the budget with a tiny resource cap. */
     if (desc->max_total_bytes < sizeof(*backend)) {
-        free(backend);
+        sw_backend_record_free(backend);
         return RIN_GPU_ERROR_NO_MEMORY;
     }
     backend->allocated_bytes = sizeof(*backend);
@@ -11315,7 +11376,7 @@ int ringpu_software_backend_create(
         desc->version == RIN_GPU_SOFTWARE_BACKEND_VERSION_4) {
         memcpy(&desc_v2, desc, sizeof(desc_v2));
         if (!desc_v2.present_callback && !headless_v4) {
-            free(backend);
+            sw_backend_record_free(backend);
             return RIN_GPU_ERROR_INVALID_ARGUMENT;
         }
         backend->present_callback = desc_v2.present_callback;
@@ -11325,7 +11386,7 @@ int ringpu_software_backend_create(
         desc->version == RIN_GPU_SOFTWARE_BACKEND_VERSION_4) {
         memcpy(&desc_v3, desc, sizeof(desc_v3));
         if (!desc_v3.acquire_image && !headless_v4) {
-            free(backend);
+            sw_backend_record_free(backend);
             return RIN_GPU_ERROR_INVALID_ARGUMENT;
         }
         backend->acquire_image = desc_v3.acquire_image;
@@ -11343,7 +11404,7 @@ int ringpu_software_backend_create(
             backend->memory_pool = (SwMemoryPoolState*)sw_alloc(
                 backend, sizeof(*backend->memory_pool), 1);
             if (!backend->memory_pool) {
-                free(backend);
+                sw_backend_record_free(backend);
                 return RIN_GPU_ERROR_NO_MEMORY;
             }
             sw_memory_pool_state_init(backend->memory_pool);
@@ -11357,7 +11418,7 @@ int ringpu_software_backend_create(
     return RIN_GPU_OK;
 
 fail_v4:
-    free(backend);
+    sw_backend_record_free(backend);
     *backend_out = NULL;
     return RIN_GPU_ERROR_INVALID_ARGUMENT;
 }
@@ -11383,7 +11444,7 @@ void ringpu_software_backend_destroy(RinGpuSoftwareBackend* backend)
         }
         sw_free(backend, pool, sizeof(*pool));
     }
-    free(backend);
+    sw_backend_record_free(backend);
 }
 
 int ringpu_software_backend_query_memory_pool_stats(
