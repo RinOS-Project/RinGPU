@@ -119,6 +119,10 @@ int ringpu_get_query_result(RinGpuCore* core, RinGpuHandle query,
     result_code = ringpu_slot(core, query, RIN_GPU_OBJECT_QUERY, NULL, &slot);
     if (result_code != RIN_GPU_OK) return result_code;
     type = slot->value.query.query_type;
+    memset(result, 0, sizeof(*result));
+    result->abi_version = RIN_GPU_ABI_VERSION;
+    result->struct_size = sizeof(*result);
+    result->query_type = type;
     memset(values, 0, sizeof(values));
     if (slot->value.query.available != 0u) {
         memcpy(values, slot->value.query.values, sizeof(values));
@@ -146,10 +150,6 @@ int ringpu_get_query_result(RinGpuCore* core, RinGpuHandle query,
             slot->value.query.available = 1u;
         }
     }
-    memset(result, 0, sizeof(*result));
-    result->abi_version = RIN_GPU_ABI_VERSION;
-    result->struct_size = sizeof(*result);
-    result->query_type = type;
     result->available = available;
     if (available != 0u)
         memcpy(result->values, values, sizeof(result->values));
