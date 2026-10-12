@@ -92,8 +92,8 @@ typedef struct RinGpuBackendBufferToImageCopyV1 {
 } RinGpuBackendBufferToImageCopyV1;
 
 /* The bridge transition record is independent of the API-specific transition
- * type. aspect_mask is meaningful in the common contract; older OS-Core
- * layouts that only carried reserved must validate and convert it explicitly. */
+ * type. aspect_mask is meaningful in the common contract; OS-Core-generated
+ * transitions use zero because the core transition API has no aspect selector. */
 typedef struct RinGpuBackendImageTransitionDescV1 {
     uint32_t abi_version;
     uint32_t struct_size;
