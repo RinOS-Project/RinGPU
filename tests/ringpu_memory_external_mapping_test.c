@@ -242,6 +242,7 @@ int main(void) {
     uint64_t range_allocation = 0u;
     uint64_t range_address = 0u;
     uint64_t range_lease = 0u;
+    uint32_t external_map_count_before_range = 0u;
     int result = 1;
 
     memset(&fixture, 0, sizeof(fixture));
@@ -345,6 +346,7 @@ int main(void) {
     address_space.owner_cookie = 13u;
     address_space.generation = 29u;
     address_space.device_generation = 31u;
+    external_map_count_before_range = fixture.external_map_count;
     range_address = UINT64_MAX;
     range_lease = UINT64_MAX;
     if (rin_gpu_memory_map_external(
@@ -352,7 +354,7 @@ int main(void) {
             &address_space, &range_address, &range_lease) !=
             RIN_GPU_MEMORY_INVALID_ARGUMENT ||
         range_address != 0u || range_lease != 0u ||
-        fixture.external_map_count != 0u)
+        fixture.external_map_count != external_map_count_before_range)
         goto done;
     if (rin_gpu_memory_map_external_range_v2(
             &range_runtime, range_allocation, RIN_GPU_MEMORY_GPU_READ,
