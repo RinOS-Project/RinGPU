@@ -144,6 +144,13 @@ int rin_gpu_cross_process_capability_ipc_map_readable_lease_v1(
     RinGpuCrossProcessCapabilityIpcClientV1* client,
     const RinGpuCrossProcessCapabilityMapReadableLeaseRequestV1* request,
     RinGpuCrossProcessCapabilityMappedReadableLeaseV1* mapping_out);
+/* Query the OS-Core admitted Vulkan profile and explicit logical-to-physical
+ * queue routes for one live device generation. This is discovery data only;
+ * it grants no resource or submission authority. */
+int rin_gpu_cross_process_capability_ipc_query_vulkan_catalog_v1(
+    RinGpuCrossProcessCapabilityIpcClientV1* client,
+    const RinGpuVulkanCatalogQueryRequestV1* request,
+    RinGpuVulkanCatalogSnapshotV1* snapshot_out);
 
 #ifdef __cplusplus
 }

@@ -10,11 +10,7 @@
 
 enum {
     RIN_GPU_CAPABILITY_IPC_BUFFER_SIZE =
-        (int)(sizeof(RinGpuCapabilityIpcHeaderV1) +
-              (sizeof(RinGpuCrossProcessCapabilityMappedReadableLeaseV1) >
-                       sizeof(RinGpuCrossProcessCapabilityGrantDescV2)
-                   ? sizeof(RinGpuCrossProcessCapabilityMappedReadableLeaseV1)
-                   : sizeof(RinGpuCrossProcessCapabilityGrantDescV2)))
+        (int)RIN_GPU_CAPABILITY_IPC_MAX_RESPONSE_BYTES
 };
 
 static int capability_result_is_known(int32_t status)
@@ -170,6 +166,52 @@ static int mapped_readable_lease_v1_valid(
            mapping->access ==
                RIN_GPU_CROSS_PROCESS_MAPPED_ACCESS_CPU_READ &&
            mapping->reserved[0] == 0u && mapping->reserved[1] == 0u;
+}
+
+static int vulkan_catalog_query_v1_valid(
+    const RinGpuVulkanCatalogQueryRequestV1* request)
+{
+    return request && request->struct_size == sizeof(*request) &&
+           request->version == RIN_GPU_VULKAN_CATALOG_QUERY_V1_VERSION &&
+           request->device_id != 0u && request->device_generation != 0u &&
+           request->reserved[0] == 0u && request->reserved[1] == 0u;
+}
+
+static int vulkan_catalog_snapshot_v1_valid(
+    const RinGpuVulkanCatalogSnapshotV1* snapshot,
+    const RinGpuVulkanCatalogQueryRequestV1* request)
+{
+    uint32_t profile_header[2];
+
+    if (!snapshot || !vulkan_catalog_query_v1_valid(request) ||
+        snapshot->struct_size != sizeof(*snapshot) ||
+        snapshot->version != RIN_GPU_VULKAN_CATALOG_SNAPSHOT_V1_VERSION ||
+        snapshot->device_id != request->device_id ||
+        snapshot->device_generation != request->device_generation ||
+        snapshot->device_epoch == 0u ||
+        snapshot->profile_size != RIN_GPU_VULKAN_CATALOG_PROFILE_V2_SIZE ||
+        snapshot->profile_version != 2u || snapshot->route_count == 0u ||
+        snapshot->route_count > RIN_GPU_VULKAN_CATALOG_MAX_QUEUE_ROUTES ||
+        snapshot->route_struct_size !=
+            sizeof(RinGpuVulkanQueueRouteIpcV1) ||
+        snapshot->reserved[0] != 0u || snapshot->reserved[1] != 0u)
+        return 0;
+    memcpy(profile_header, snapshot->profile, sizeof(profile_header));
+    if (profile_header[0] != RIN_GPU_VULKAN_CATALOG_PROFILE_V2_SIZE ||
+        profile_header[1] != snapshot->profile_version)
+        return 0;
+    for (uint32_t index = 0u;
+         index < RIN_GPU_VULKAN_CATALOG_MAX_QUEUE_ROUTES; ++index) {
+        const RinGpuVulkanQueueRouteIpcV1* route = &snapshot->routes[index];
+        if (index < snapshot->route_count) {
+            if (route->reserved != 0u) return 0;
+        } else if (route->queue_family_index != 0u ||
+                   route->queue_index != 0u ||
+                   route->physical_queue_id != 0u || route->reserved != 0u) {
+            return 0;
+        }
+    }
+    return 1;
 }
 
 static int lease_v2_valid(const RinGpuCrossProcessCapabilityLeaseV2* lease)
@@ -605,5 +647,35 @@ int rin_gpu_cross_process_capability_ipc_map_readable_lease_v1(
         mapping.device_generation != request->device_generation)
         return RIN_GPU_CROSS_PROCESS_PROTOCOL;
     *mapping_out = mapping;
+    return RIN_GPU_CROSS_PROCESS_OK;
+}
+
+int rin_gpu_cross_process_capability_ipc_query_vulkan_catalog_v1(
+    RinGpuCrossProcessCapabilityIpcClientV1* client,
+    const RinGpuVulkanCatalogQueryRequestV1* request,
+    RinGpuVulkanCatalogSnapshotV1* snapshot_out)
+{
+    uint8_t buffer[RIN_GPU_CAPABILITY_IPC_BUFFER_SIZE];
+    uint8_t* payload;
+    RinGpuVulkanCatalogSnapshotV1 snapshot;
+    uint64_t request_id;
+    int result;
+
+    if (!snapshot_out) return RIN_GPU_CROSS_PROCESS_INVALID_ARGUMENT;
+    memset(snapshot_out, 0, sizeof(*snapshot_out));
+    if (!vulkan_catalog_query_v1_valid(request))
+        return RIN_GPU_CROSS_PROCESS_INVALID_ARGUMENT;
+    result = send_request(
+        client, RIN_GPU_CAPABILITY_IPC_QUERY_VULKAN_CATALOG_V1, request,
+        sizeof(*request), buffer, sizeof(buffer), &request_id);
+    if (result != RIN_GPU_CROSS_PROCESS_OK) return result;
+    result = receive_response(
+        client, RIN_GPU_CAPABILITY_IPC_QUERY_VULKAN_CATALOG_V1, request_id,
+        sizeof(snapshot), buffer, sizeof(buffer), &payload);
+    if (result != RIN_GPU_CROSS_PROCESS_OK) return result;
+    memcpy(&snapshot, payload, sizeof(snapshot));
+    if (!vulkan_catalog_snapshot_v1_valid(&snapshot, request))
+        return RIN_GPU_CROSS_PROCESS_PROTOCOL;
+    *snapshot_out = snapshot;
     return RIN_GPU_CROSS_PROCESS_OK;
 }

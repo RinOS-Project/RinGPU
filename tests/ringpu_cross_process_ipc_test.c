@@ -5,10 +5,11 @@
 #include <stdint.h>
 #include <string.h>
 
-static uint8_t response_bytes[128];
+static uint8_t response_bytes[RIN_GPU_CAPABILITY_IPC_MAX_RESPONSE_BYTES];
 static uint64_t response_size;
 static RinResult receive_result;
 static int32_t response_status;
+static uint32_t corrupt_catalog_response;
 
 RinResult rin_service_connect_v1(RinStringV1 name, RinChannel* channel)
 {
@@ -31,6 +32,8 @@ RinResult rin_channel_send_v1(
     RinGpuCrossProcessCapabilityLeaseV2 lease_v2;
     RinGpuCrossProcessCapabilityMapReadableLeaseRequestV1 map_readable;
     RinGpuCrossProcessCapabilityMappedReadableLeaseV1 mapped_readable;
+    RinGpuVulkanCatalogQueryRequestV1 catalog_request;
+    RinGpuVulkanCatalogSnapshotV1 catalog_snapshot;
     uint8_t* request_bytes;
 
     assert(channel == UINT64_C(7));
@@ -115,6 +118,43 @@ RinResult rin_channel_send_v1(
         response.payload_size = sizeof(mapped_readable);
         response_size += sizeof(mapped_readable);
         memcpy(response_bytes, &response, sizeof(response));
+    } else if (request.opcode ==
+               RIN_GPU_CAPABILITY_IPC_QUERY_VULKAN_CATALOG_V1) {
+        assert(request.payload_size == sizeof(catalog_request));
+        memcpy(&catalog_request, request_bytes + sizeof(request),
+               sizeof(catalog_request));
+        assert(catalog_request.device_id == UINT64_C(0x80867d55));
+        assert(catalog_request.device_generation == UINT64_C(0x101));
+        memset(&catalog_snapshot, 0, sizeof(catalog_snapshot));
+        catalog_snapshot.struct_size = sizeof(catalog_snapshot);
+        catalog_snapshot.version =
+            RIN_GPU_VULKAN_CATALOG_SNAPSHOT_V1_VERSION;
+        catalog_snapshot.device_id = catalog_request.device_id;
+        catalog_snapshot.device_generation =
+            catalog_request.device_generation;
+        catalog_snapshot.device_epoch = UINT64_C(0x202);
+        catalog_snapshot.profile_size =
+            RIN_GPU_VULKAN_CATALOG_PROFILE_V2_SIZE;
+        catalog_snapshot.profile_version = 2u;
+        catalog_snapshot.route_count = 1u;
+        catalog_snapshot.route_struct_size =
+            sizeof(RinGpuVulkanQueueRouteIpcV1);
+        {
+            const uint32_t profile_header[2] = {
+                RIN_GPU_VULKAN_CATALOG_PROFILE_V2_SIZE, 2u};
+            memcpy(catalog_snapshot.profile, profile_header,
+                   sizeof(profile_header));
+        }
+        catalog_snapshot.routes[0].queue_family_index = 0u;
+        catalog_snapshot.routes[0].queue_index = 0u;
+        catalog_snapshot.routes[0].physical_queue_id = 3u;
+        if (corrupt_catalog_response)
+            catalog_snapshot.routes[1].physical_queue_id = 2u;
+        memcpy(response_bytes + sizeof(response), &catalog_snapshot,
+               sizeof(catalog_snapshot));
+        response.payload_size = sizeof(catalog_snapshot);
+        response_size += sizeof(catalog_snapshot);
+        memcpy(response_bytes, &response, sizeof(response));
     } else if (request.opcode == RIN_GPU_CAPABILITY_IPC_RELEASE_LEASE_V2 ||
                request.opcode == RIN_GPU_CAPABILITY_IPC_REVOKE_V2) {
         assert(request.payload_size ==
@@ -150,6 +190,8 @@ int main(void)
     RinGpuCrossProcessCapabilityMapReadableLeaseRequestV1 map_readable;
     RinGpuCrossProcessCapabilityMappedReadableLeaseV1 mapped_readable;
     RinGpuCrossProcessCapabilityReleaseLeaseV2 release_v2;
+    RinGpuVulkanCatalogQueryRequestV1 catalog_request;
+    RinGpuVulkanCatalogSnapshotV1 catalog_snapshot;
 
     memset(&client, 0, sizeof(client));
     assert(rin_gpu_cross_process_capability_ipc_connect(&client) ==
@@ -236,5 +278,24 @@ int main(void)
                &client, &token_v2) == RIN_GPU_CROSS_PROCESS_BUSY);
     assert(rin_gpu_cross_process_capability_ipc_revoke_v2(
                &client, &token_v2) == RIN_GPU_CROSS_PROCESS_OK);
+
+    memset(&catalog_request, 0, sizeof(catalog_request));
+    catalog_request.struct_size = sizeof(catalog_request);
+    catalog_request.version = RIN_GPU_VULKAN_CATALOG_QUERY_V1_VERSION;
+    catalog_request.device_id = UINT64_C(0x80867d55);
+    catalog_request.device_generation = UINT64_C(0x101);
+    memset(&catalog_snapshot, 0xa5, sizeof(catalog_snapshot));
+    corrupt_catalog_response = 1u;
+    assert(rin_gpu_cross_process_capability_ipc_query_vulkan_catalog_v1(
+               &client, &catalog_request, &catalog_snapshot) ==
+           RIN_GPU_CROSS_PROCESS_PROTOCOL);
+    assert(catalog_snapshot.device_id == 0u);
+    corrupt_catalog_response = 0u;
+    assert(rin_gpu_cross_process_capability_ipc_query_vulkan_catalog_v1(
+               &client, &catalog_request, &catalog_snapshot) ==
+           RIN_GPU_CROSS_PROCESS_OK);
+    assert(catalog_snapshot.device_epoch == UINT64_C(0x202));
+    assert(catalog_snapshot.route_count == 1u);
+    assert(catalog_snapshot.routes[0].physical_queue_id == 3u);
     return 0;
 }
