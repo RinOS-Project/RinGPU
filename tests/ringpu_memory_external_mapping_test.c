@@ -10,14 +10,18 @@ typedef struct MappingFixture {
     uint32_t gpu_map_count;
     uint32_t gpu_unmap_count;
     uint32_t external_map_count;
+    uint32_t external_range_map_count;
     uint32_t external_unmap_count;
     uint32_t external_live_count;
     uint32_t fail_external_map_with_cookie;
+    uint32_t fail_external_range_map_with_cookie;
     uint32_t fail_external_unmap_once;
     uint64_t last_backing_cookie;
     uint64_t last_address_space_cookie;
     uint64_t last_address_space_generation;
     uint64_t last_device_generation;
+    uint64_t last_range_offset;
+    uint64_t last_range_size;
 } MappingFixture;
 
 static int create_backing(void* context, uint32_t heap, uint32_t flags,
@@ -128,6 +132,41 @@ static int unmap_external(void* context, uint64_t mapping_cookie) {
     return 0;
 }
 
+static int map_external_range(
+    void* context, uint64_t backing_cookie, uint64_t allocation_size,
+    uint64_t allocation_offset, uint64_t range_size, uint32_t access,
+    const RinGpuMemoryAddressSpaceV1* address_space,
+    uint64_t* address_out, uint64_t* mapping_cookie_out) {
+    MappingFixture* fixture = (MappingFixture*)context;
+    if (!fixture || backing_cookie == 0u || allocation_size == 0u ||
+        range_size == 0u || allocation_offset > allocation_size ||
+        range_size > allocation_size - allocation_offset ||
+        access != RIN_GPU_MEMORY_GPU_READ || !address_space ||
+        address_space->kind != RIN_GPU_MEMORY_ADDRESS_SPACE_GPU_PROCESS ||
+        address_space->owner_cookie == 0u || address_space->generation == 0u ||
+        address_space->device_generation == 0u || !address_out ||
+        !mapping_cookie_out)
+        return -1;
+    fixture->external_range_map_count++;
+    fixture->last_backing_cookie = backing_cookie;
+    fixture->last_address_space_cookie = address_space->owner_cookie;
+    fixture->last_address_space_generation = address_space->generation;
+    fixture->last_device_generation = address_space->device_generation;
+    fixture->last_range_offset = allocation_offset;
+    fixture->last_range_size = range_size;
+    if (fixture->fail_external_range_map_with_cookie != 0u) {
+        fixture->fail_external_range_map_with_cookie = 0u;
+        *address_out = 0u;
+        *mapping_cookie_out = UINT64_C(0xe000000000000004);
+        fixture->external_live_count++;
+        return -1;
+    }
+    *address_out = UINT64_C(0x90000000);
+    *mapping_cookie_out = UINT64_C(0xe000000000000003);
+    fixture->external_live_count++;
+    return 0;
+}
+
 static void init_backend(RinGpuMemoryBackendV3* backend,
                          RinGpuMemoryExternalMappingOpsV1* external_ops,
                          MappingFixture* fixture) {
@@ -161,11 +200,37 @@ static void init_backend(RinGpuMemoryBackendV3* backend,
     backend->external_mapping_ops = external_ops;
 }
 
+static void init_backend_v4(
+    RinGpuMemoryBackendV4* backend,
+    RinGpuMemoryExternalMappingOpsV1* external_ops_v1,
+    RinGpuMemoryExternalMappingOpsV2* external_ops_v2,
+    MappingFixture* fixture) {
+    RinGpuMemoryBackendV3 backend_v3;
+    init_backend(&backend_v3, external_ops_v1, fixture);
+    memset(backend, 0, sizeof(*backend));
+    memset(external_ops_v2, 0, sizeof(*external_ops_v2));
+    backend->struct_size = sizeof(*backend);
+    backend->version = RIN_GPU_MEMORY_BACKEND_V4_VERSION;
+    backend->v1 = backend_v3.v1;
+    backend->external_mapping_ops = external_ops_v1;
+    backend->external_range_mapping_ops = external_ops_v2;
+    external_ops_v2->struct_size = sizeof(*external_ops_v2);
+    external_ops_v2->version =
+        RIN_GPU_MEMORY_EXTERNAL_MAPPING_OPS_V2_VERSION;
+    external_ops_v2->context = fixture;
+    external_ops_v2->map_range = map_external_range;
+    external_ops_v2->unmap = unmap_external;
+}
+
 int main(void) {
     MappingFixture fixture;
     RinGpuMemoryRuntime runtime;
+    RinGpuMemoryRuntime range_runtime;
     RinGpuMemoryBackendV3 backend;
+    RinGpuMemoryBackendV4 range_backend;
     RinGpuMemoryExternalMappingOpsV1 external_ops;
+    RinGpuMemoryExternalMappingOpsV1 range_external_ops_v1;
+    RinGpuMemoryExternalMappingOpsV2 range_external_ops_v2;
     RinGpuMemoryAllocationDescV1 descriptor;
     RinGpuMemoryAddressSpaceV1 address_space;
     RinGpuMemoryAllocationInfoV1 allocation_info;
@@ -174,10 +239,14 @@ int main(void) {
     uint64_t allocation = 0u;
     uint64_t address = 0u;
     uint64_t lease = 0u;
+    uint64_t range_allocation = 0u;
+    uint64_t range_address = 0u;
+    uint64_t range_lease = 0u;
     int result = 1;
 
     memset(&fixture, 0, sizeof(fixture));
     memset(&runtime, 0, sizeof(runtime));
+    memset(&range_runtime, 0, sizeof(range_runtime));
     init_backend(&backend, &external_ops, &fixture);
     if (rin_gpu_memory_runtime_init_v3(&runtime, &backend) !=
         RIN_GPU_MEMORY_OK)
@@ -258,6 +327,77 @@ int main(void) {
         fixture.backing_count != 0u || fixture.destroy_count != 2u ||
         fixture.external_unmap_count != 3u ||
         rin_gpu_memory_runtime_destroy(&runtime) != RIN_GPU_MEMORY_OK)
+        goto done;
+
+    init_backend_v4(&range_backend, &range_external_ops_v1,
+                    &range_external_ops_v2, &fixture);
+    if (rin_gpu_memory_runtime_init_v4(&range_runtime, &range_backend) !=
+        RIN_GPU_MEMORY_OK)
+        goto done;
+    if (rin_gpu_memory_allocate(&range_runtime, &descriptor,
+                                &range_allocation) != RIN_GPU_MEMORY_OK ||
+        range_allocation == 0u)
+        goto done;
+    memset(&address_space, 0, sizeof(address_space));
+    address_space.struct_size = sizeof(address_space);
+    address_space.version = RIN_GPU_MEMORY_ADDRESS_SPACE_VERSION;
+    address_space.kind = RIN_GPU_MEMORY_ADDRESS_SPACE_GPU_PROCESS;
+    address_space.owner_cookie = 13u;
+    address_space.generation = 29u;
+    address_space.device_generation = 31u;
+    range_address = UINT64_MAX;
+    range_lease = UINT64_MAX;
+    if (rin_gpu_memory_map_external(
+            &range_runtime, range_allocation, RIN_GPU_MEMORY_GPU_READ,
+            &address_space, &range_address, &range_lease) !=
+            RIN_GPU_MEMORY_INVALID_ARGUMENT ||
+        range_address != 0u || range_lease != 0u ||
+        fixture.external_map_count != 0u)
+        goto done;
+    if (rin_gpu_memory_map_external_range_v2(
+            &range_runtime, range_allocation, RIN_GPU_MEMORY_GPU_READ,
+            &address_space, 8191u, 2u, &range_address,
+            &range_lease) != RIN_GPU_MEMORY_INVALID_ARGUMENT ||
+        range_address != 0u || range_lease != 0u ||
+        fixture.external_range_map_count != 0u)
+        goto done;
+    fixture.fail_external_range_map_with_cookie = 1u;
+    if (rin_gpu_memory_map_external_range_v2(
+            &range_runtime, range_allocation, RIN_GPU_MEMORY_GPU_READ,
+            &address_space, 1024u, 2048u, &range_address,
+            &range_lease) != RIN_GPU_MEMORY_CLEANUP_PENDING ||
+        range_address != 0u || range_lease == 0u ||
+        fixture.external_range_map_count != 1u ||
+        fixture.external_live_count != 1u)
+        goto done;
+    fixture.fail_external_unmap_once = 1u;
+    if (rin_gpu_memory_unmap_external(&range_runtime, range_lease) !=
+            RIN_GPU_MEMORY_BACKEND_FAILED ||
+        fixture.external_live_count != 1u ||
+        rin_gpu_memory_unmap_external(&range_runtime, range_lease) !=
+            RIN_GPU_MEMORY_OK ||
+        fixture.external_live_count != 0u)
+        goto done;
+    if (rin_gpu_memory_map_external_range_v2(
+            &range_runtime, range_allocation, RIN_GPU_MEMORY_GPU_READ,
+            &address_space, 1024u, 2048u, &range_address,
+            &range_lease) != RIN_GPU_MEMORY_OK ||
+        range_address != UINT64_C(0x90000000) || range_lease == 0u ||
+        fixture.external_range_map_count != 2u ||
+        fixture.last_range_offset != 1024u ||
+        fixture.last_range_size != 2048u ||
+        fixture.last_address_space_cookie != address_space.owner_cookie ||
+        fixture.last_address_space_generation != address_space.generation ||
+        fixture.last_device_generation != address_space.device_generation ||
+        fixture.external_live_count != 1u)
+        goto done;
+    if (rin_gpu_memory_unmap_external(&range_runtime, range_lease) !=
+            RIN_GPU_MEMORY_OK ||
+        fixture.external_live_count != 0u ||
+        rin_gpu_memory_destroy_allocation(&range_runtime,
+                                          range_allocation) !=
+            RIN_GPU_MEMORY_OK ||
+        rin_gpu_memory_runtime_destroy(&range_runtime) != RIN_GPU_MEMORY_OK)
         goto done;
     result = 0;
 

@@ -217,6 +217,7 @@ typedef struct RinGpuMemoryCpuReadbackOpsV1 {
 #define RIN_GPU_MEMORY_CPU_READBACK_OPS_VERSION 1u
 #define RIN_GPU_MEMORY_BACKEND_V2_VERSION 2u
 #define RIN_GPU_MEMORY_BACKEND_V3_VERSION 3u
+#define RIN_GPU_MEMORY_BACKEND_V4_VERSION 4u
 
 typedef struct RinGpuMemoryBackendV2 {
     uint32_t struct_size;
@@ -236,6 +237,7 @@ typedef struct RinGpuMemoryBackendV2 {
 #define RIN_GPU_MEMORY_ADDRESS_SPACE_VERSION 1u
 #define RIN_GPU_MEMORY_ADDRESS_SPACE_DISPLAY_FETCH 1u
 #define RIN_GPU_MEMORY_ADDRESS_SPACE_USER_PROCESS 2u
+#define RIN_GPU_MEMORY_ADDRESS_SPACE_GPU_PROCESS 3u
 #define RIN_GPU_MEMORY_EXTERNAL_ACCESS_CPU_READ UINT32_C(0x00000004)
 #define RIN_GPU_MEMORY_EXTERNAL_ACCESS_CPU_WRITE UINT32_C(0x00000008)
 #define RIN_GPU_MEMORY_EXTERNAL_ACCESS_KNOWN                         \
@@ -284,6 +286,28 @@ typedef struct RinGpuMemoryExternalMappingOpsV1 {
 } RinGpuMemoryExternalMappingOpsV1;
 #define RIN_GPU_MEMORY_EXTERNAL_MAPPING_OPS_VERSION 1u
 
+/* V2 maps only the explicitly authorized backing byte range. It is reserved
+ * for a process GPU address space; the callback must not map bytes before or
+ * after [allocation_offset, allocation_offset + range_size). The returned
+ * address is meaningful only in the exact supplied address-space identity,
+ * and is not implicitly a GPUVA or IOVA. `mapping_cookie_out` owns the exact
+ * range mapping and is released through the paired unmap callback. */
+typedef int (*RinGpuMemoryMapExternalRangeFn)(
+    void* context, uint64_t backing_cookie, uint64_t allocation_size,
+    uint64_t allocation_offset, uint64_t range_size, uint32_t access,
+    const RinGpuMemoryAddressSpaceV1* address_space,
+    uint64_t* address_out, uint64_t* mapping_cookie_out);
+
+typedef struct RinGpuMemoryExternalMappingOpsV2 {
+    uint32_t struct_size;
+    uint32_t version;
+    void* context;
+    RinGpuMemoryMapExternalRangeFn map_range;
+    RinGpuMemoryUnmapExternalFn unmap;
+    uint64_t reserved[2];
+} RinGpuMemoryExternalMappingOpsV2;
+#define RIN_GPU_MEMORY_EXTERNAL_MAPPING_OPS_V2_VERSION 2u
+
 /* V3 keeps the GPUVA memory backend unchanged and adds an independent,
  * versioned external-address-space mapping owner. CPU readback remains
  * optional here; unlike BackendV2 it is not a prerequisite for mapping. */
@@ -295,6 +319,18 @@ typedef struct RinGpuMemoryBackendV3 {
     const RinGpuMemoryExternalMappingOpsV1* external_mapping_ops;
     uint64_t reserved[2];
 } RinGpuMemoryBackendV3;
+
+/* V4 adds an exact-range process-GPU mapper independently of V3's
+ * whole-allocation DISPLAY_FETCH/CPU mapping provider. */
+typedef struct RinGpuMemoryBackendV4 {
+    uint32_t struct_size;
+    uint32_t version;
+    RinGpuMemoryBackendV1 v1;
+    const RinGpuMemoryCpuReadbackOpsV1* cpu_readback_ops;
+    const RinGpuMemoryExternalMappingOpsV1* external_mapping_ops;
+    const RinGpuMemoryExternalMappingOpsV2* external_range_mapping_ops;
+    uint64_t reserved[2];
+} RinGpuMemoryBackendV4;
 
 typedef struct RinGpuMemoryStatusV1 {
     uint32_t struct_size;
@@ -328,6 +364,8 @@ int rin_gpu_memory_runtime_init_v2(RinGpuMemoryRuntime* runtime,
                                    const RinGpuMemoryBackendV2* backend);
 int rin_gpu_memory_runtime_init_v3(RinGpuMemoryRuntime* runtime,
                                    const RinGpuMemoryBackendV3* backend);
+int rin_gpu_memory_runtime_init_v4(RinGpuMemoryRuntime* runtime,
+                                   const RinGpuMemoryBackendV4* backend);
 int rin_gpu_memory_allocate(RinGpuMemoryRuntime* runtime,
                             const RinGpuMemoryAllocationDescV1* descriptor,
                             uint64_t* allocation_handle_out);
@@ -347,6 +385,14 @@ int rin_gpu_memory_map_external(
     RinGpuMemoryRuntime* runtime, uint64_t allocation_handle,
     uint32_t required_access,
     const RinGpuMemoryAddressSpaceV1* address_space,
+    uint64_t* address_in_space_out, uint64_t* lease_handle_out);
+/* Exact-range process GPU mapping. Unlike map_external(), this requires a V2
+ * range provider and never maps the complete allocation as a fallback. */
+int rin_gpu_memory_map_external_range_v2(
+    RinGpuMemoryRuntime* runtime, uint64_t allocation_handle,
+    uint32_t required_access,
+    const RinGpuMemoryAddressSpaceV1* address_space,
+    uint64_t allocation_offset, uint64_t range_size,
     uint64_t* address_in_space_out, uint64_t* lease_handle_out);
 /* Releases a mapping lease only after the external owner has established
  * that the mapped resource is no longer in use. Backend failures retain the
