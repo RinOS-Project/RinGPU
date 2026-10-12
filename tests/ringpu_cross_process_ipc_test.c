@@ -2,6 +2,7 @@
 #include <ringpu/cross_process_capability.h>
 
 #include <assert.h>
+#include <rin/gpu.h>
 #include <stdint.h>
 #include <string.h>
 
@@ -32,6 +33,7 @@ RinResult rin_channel_send_v1(
     RinGpuCrossProcessCapabilityLeaseV2 lease_v2;
     RinGpuCrossProcessCapabilityMapReadableLeaseRequestV1 map_readable;
     RinGpuCrossProcessCapabilityMappedReadableLeaseV1 mapped_readable;
+    RinGpuCapabilityPresentResourceBindV1 present_bind;
     RinGpuVulkanCatalogQueryRequestV1 catalog_request;
     RinGpuVulkanCatalogSnapshotV1 catalog_snapshot;
     uint8_t* request_bytes;
@@ -155,6 +157,19 @@ RinResult rin_channel_send_v1(
         response.payload_size = sizeof(catalog_snapshot);
         response_size += sizeof(catalog_snapshot);
         memcpy(response_bytes, &response, sizeof(response));
+    } else if (request.opcode ==
+               RIN_GPU_CAPABILITY_IPC_BIND_PRESENT_RESOURCE_V1) {
+        assert(request.payload_size == sizeof(present_bind));
+        memcpy(&present_bind, request_bytes + sizeof(request),
+               sizeof(present_bind));
+        assert(present_bind.token == UINT64_C(19));
+        assert(present_bind.lease_id == UINT64_C(23));
+        assert(present_bind.device_generation == UINT64_C(31));
+        assert(present_bind.resource_cookie == UINT64_C(0xC011A7));
+        assert(present_bind.allocation_offset == UINT64_C(256));
+        assert(present_bind.size_bytes == UINT64_C(1024));
+        assert(present_bind.required_gpu_access ==
+               RIN_GPU_ALLOCATION_GPU_READ);
     } else if (request.opcode == RIN_GPU_CAPABILITY_IPC_RELEASE_LEASE_V2 ||
                request.opcode == RIN_GPU_CAPABILITY_IPC_REVOKE_V2) {
         assert(request.payload_size ==
@@ -189,6 +204,7 @@ int main(void)
     RinGpuCrossProcessCapabilityLeaseV2 lease_v2;
     RinGpuCrossProcessCapabilityMapReadableLeaseRequestV1 map_readable;
     RinGpuCrossProcessCapabilityMappedReadableLeaseV1 mapped_readable;
+    RinGpuCapabilityPresentResourceBindV1 present_bind;
     RinGpuCrossProcessCapabilityReleaseLeaseV2 release_v2;
     RinGpuVulkanCatalogQueryRequestV1 catalog_request;
     RinGpuVulkanCatalogSnapshotV1 catalog_snapshot;
@@ -259,6 +275,31 @@ int main(void)
            RIN_GPU_CROSS_PROCESS_OK);
     assert(mapped_readable.address_in_recipient == UINT64_C(0x40001000));
     assert(mapped_readable.allocation_size == UINT64_C(4096));
+    memset(&present_bind, 0, sizeof(present_bind));
+    present_bind.struct_size = sizeof(present_bind);
+    present_bind.version =
+        RIN_GPU_CAPABILITY_PRESENT_RESOURCE_BIND_V1_VERSION;
+    present_bind.token = lease_v2.token;
+    present_bind.lease_id = lease_v2.lease_id;
+    present_bind.device_generation = lease_v2.device_generation;
+    present_bind.resource_cookie = UINT64_C(0xC011A7);
+    present_bind.allocation_offset = UINT64_C(256);
+    present_bind.size_bytes = UINT64_C(1024);
+    present_bind.required_gpu_access = RIN_GPU_ALLOCATION_GPU_READ;
+    assert(rin_gpu_cross_process_capability_ipc_bind_present_resource_v1(
+               &client, &present_bind) == RIN_GPU_CROSS_PROCESS_OK);
+    response_status = RIN_GPU_CROSS_PROCESS_BUSY;
+    assert(rin_gpu_cross_process_capability_ipc_bind_present_resource_v1(
+               &client, &present_bind) == RIN_GPU_CROSS_PROCESS_BUSY);
+    response_status = RIN_GPU_CROSS_PROCESS_OK;
+    {
+        const uint64_t request_id_before = client.next_request_id;
+        present_bind.allocation_offset = UINT64_MAX - UINT64_C(3);
+        assert(rin_gpu_cross_process_capability_ipc_bind_present_resource_v1(
+                   &client, &present_bind) ==
+               RIN_GPU_CROSS_PROCESS_INVALID_ARGUMENT);
+        assert(client.next_request_id == request_id_before);
+    }
     response_status = RIN_GPU_CROSS_PROCESS_UNSUPPORTED;
     assert(rin_gpu_cross_process_capability_ipc_map_readable_lease_v1(
                &client, &map_readable, &mapped_readable) ==

@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: MIT */
 #include <ringpu/cross_process_capability.h>
 
+#include <rin/gpu.h>
 #include <rin/gpu_capability.h>
 #include <rin/ipc.h>
 
@@ -146,6 +147,20 @@ static int map_readable_lease_v1_valid(
            request->token != 0u && request->lease_id != 0u &&
            request->device_generation != 0u &&
            request->reserved[0] == 0u && request->reserved[1] == 0u;
+}
+
+static int present_resource_bind_v1_valid(
+    const RinGpuCapabilityPresentResourceBindV1* request)
+{
+    return request && request->struct_size == sizeof(*request) &&
+           request->version ==
+               RIN_GPU_CAPABILITY_PRESENT_RESOURCE_BIND_V1_VERSION &&
+           request->token != 0u && request->lease_id != 0u &&
+           request->device_generation != 0u &&
+           request->resource_cookie != 0u && request->size_bytes != 0u &&
+           request->allocation_offset <= UINT64_MAX - request->size_bytes &&
+           request->required_gpu_access == RIN_GPU_ALLOCATION_GPU_READ &&
+           request->reserved == 0u;
 }
 
 static int mapped_readable_lease_v1_valid(
@@ -648,6 +663,26 @@ int rin_gpu_cross_process_capability_ipc_map_readable_lease_v1(
         return RIN_GPU_CROSS_PROCESS_PROTOCOL;
     *mapping_out = mapping;
     return RIN_GPU_CROSS_PROCESS_OK;
+}
+
+int rin_gpu_cross_process_capability_ipc_bind_present_resource_v1(
+    RinGpuCrossProcessCapabilityIpcClientV1* client,
+    const RinGpuCapabilityPresentResourceBindV1* request)
+{
+    uint8_t buffer[RIN_GPU_CAPABILITY_IPC_BUFFER_SIZE];
+    uint64_t request_id;
+    int result;
+
+    if (!present_resource_bind_v1_valid(request))
+        return RIN_GPU_CROSS_PROCESS_INVALID_ARGUMENT;
+    result = send_request(client,
+                          RIN_GPU_CAPABILITY_IPC_BIND_PRESENT_RESOURCE_V1,
+                          request, sizeof(*request), buffer, sizeof(buffer),
+                          &request_id);
+    if (result != RIN_GPU_CROSS_PROCESS_OK) return result;
+    return receive_response(
+        client, RIN_GPU_CAPABILITY_IPC_BIND_PRESENT_RESOURCE_V1, request_id,
+        0u, buffer, sizeof(buffer), NULL);
 }
 
 int rin_gpu_cross_process_capability_ipc_query_vulkan_catalog_v1(

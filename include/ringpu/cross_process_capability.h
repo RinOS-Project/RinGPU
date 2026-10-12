@@ -144,6 +144,12 @@ int rin_gpu_cross_process_capability_ipc_map_readable_lease_v1(
     RinGpuCrossProcessCapabilityIpcClientV1* client,
     const RinGpuCrossProcessCapabilityMapReadableLeaseRequestV1* request,
     RinGpuCrossProcessCapabilityMappedReadableLeaseV1* mapping_out);
+/* Bind an exact GPU_READ allocation range into the authenticated recipient's
+ * process-resource namespace under an already acquired PRESENT lease. The
+ * lease release retires this binding; no GPUVA or scanout address is returned. */
+int rin_gpu_cross_process_capability_ipc_bind_present_resource_v1(
+    RinGpuCrossProcessCapabilityIpcClientV1* client,
+    const RinGpuCapabilityPresentResourceBindV1* request);
 /* Query the OS-Core admitted Vulkan profile and explicit logical-to-physical
  * queue routes for one live device generation. This is discovery data only;
  * it grants no resource or submission authority. */
