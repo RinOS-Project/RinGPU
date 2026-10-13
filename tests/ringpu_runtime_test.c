@@ -4,6 +4,7 @@
 #include "../src/core/core.h"
 #include "../src/platform/backend_bridge.h"
 
+#include <stdio.h>
 #include <string.h>
 
 static const RinGpuBackendOpsV1* external_backend_delegate;
@@ -147,6 +148,12 @@ static uint32_t platform_backend_command_payload_size(uint32_t type)
         draw_indexed_indirect);
     PLATFORM_COMMAND_PAYLOAD_SIZE(RIN_GPU_BACKEND_COMMAND_DISPATCH_INDIRECT,
                                   dispatch_indirect);
+    PLATFORM_COMMAND_PAYLOAD_SIZE(
+        RIN_GPU_BACKEND_COMMAND_COPY_IMAGE_TO_BUFFER,
+        image_to_buffer_copy);
+    PLATFORM_COMMAND_PAYLOAD_SIZE(
+        RIN_GPU_BACKEND_COMMAND_COPY_BUFFER_TO_IMAGE,
+        buffer_to_image_copy);
     default:
         return UINT32_MAX;
     }
@@ -189,12 +196,24 @@ static int platform_backend_bridge_invoke(
                 payload_size > sizeof(commands[index].value) ||
                 memcmp(payload,
                        &mock->expected_commands[index].value,
-                       payload_size) != 0)
+                       payload_size) != 0) {
+                fprintf(stderr,
+                        "canonical command mismatch index=%u type=%u "
+                        "expected_type=%u payload_size=%u reserved=%u\n",
+                        index, commands[index].type,
+                        mock->expected_commands[index].type, payload_size,
+                        commands[index].reserved);
                 return RIN_GPU_ERROR_PROTOCOL;
+            }
             for (uint32_t byte = payload_size;
                  byte < sizeof(commands[index].value); ++byte) {
-                if (payload[byte] != 0u)
+                if (payload[byte] != 0u) {
+                    fprintf(stderr,
+                            "canonical command tail mismatch index=%u "
+                            "type=%u byte=%u value=%u\n",
+                            index, commands[index].type, byte, payload[byte]);
                     return RIN_GPU_ERROR_PROTOCOL;
+                }
             }
         }
         ++mock->submit_count;
@@ -273,6 +292,9 @@ static int test_platform_backend_command_canonicalization(void)
     RinGpuPlatformBackendAdapterV1 adapter = {0};
     PlatformBackendBridgeMock mock = {0};
     RinGpuBackendCommandV1 commands[RIN_GPU_BACKEND_COMMAND_LAST_V1];
+    RinGpuBackendCommandV1 expected_commands[
+        RIN_GPU_BACKEND_COMMAND_LAST_V1];
+    int result;
 
     bridge.struct_size = sizeof(bridge);
     bridge.version = RIN_GPU_PLATFORM_BACKEND_BRIDGE_VERSION;
@@ -282,7 +304,7 @@ static int test_platform_backend_command_canonicalization(void)
     bridge.command_abi_version = RIN_GPU_BACKEND_COMMAND_ABI_VERSION;
     bridge.command_record_size = sizeof(RinGpuBackendCommandV1);
     bridge.invoke = platform_backend_bridge_invoke;
-    mock.expected_commands = commands;
+    mock.expected_commands = expected_commands;
     mock.expected_command_count =
         RIN_GPU_BACKEND_COMMAND_LAST_V1;
     memset(commands, 0, sizeof(commands));
@@ -295,16 +317,30 @@ static int test_platform_backend_command_canonicalization(void)
             payload[byte] =
                 (uint8_t)(0x37u + index * 19u + byte * 23u);
         }
+        expected_commands[index] = commands[index];
+        {
+            const uint32_t payload_size =
+                platform_backend_command_payload_size(
+                    expected_commands[index].type);
+            if (payload_size == UINT32_MAX ||
+                payload_size > sizeof(expected_commands[index].value))
+                return 67;
+            memset((uint8_t*)&expected_commands[index].value + payload_size,
+                   0, sizeof(expected_commands[index].value) - payload_size);
+        }
     }
-    if (ringpu_platform_backend_adapter_init(
-            &adapter, &bridge, &mock, RIN_GPU_BACKEND_FAMILY_INTEL) !=
-            RIN_GPU_OK ||
-        adapter.backend_ops.submit_commands == NULL ||
-        adapter.backend_ops.submit_commands(
-            &adapter, commands, RIN_GPU_BACKEND_COMMAND_LAST_V1) !=
-            RIN_GPU_OK ||
-        mock.submit_count != 1u)
+    result = ringpu_platform_backend_adapter_init(
+        &adapter, &bridge, &mock, RIN_GPU_BACKEND_FAMILY_INTEL);
+    if (result != RIN_GPU_OK || adapter.backend_ops.submit_commands == NULL)
         return 67;
+    result = adapter.backend_ops.submit_commands(
+        &adapter, commands, RIN_GPU_BACKEND_COMMAND_LAST_V1);
+    if (result != RIN_GPU_OK || mock.submit_count != 1u) {
+        fprintf(stderr,
+                "canonical command submission failed result=%d count=%u\n",
+                result, mock.submit_count);
+        return 67;
+    }
 
     commands[0].type = 0u;
     if (adapter.backend_ops.submit_commands(
