@@ -16,6 +16,11 @@ last-use serial is complete and recorded/dependent references are released.
 Recorded commands use the common
 `RinGpuBackendCommandV1` representation and reach the device only through
 `submit_commands`; native API handles do not escape into common descriptors.
+The command record is exactly 872 bytes, including its 864-byte canonical
+payload reservation on 32-bit targets. Pointer-bearing callback records such
+as `RinGpuMemoryCpuReadbackOpsV1` remain process-ABI sized and must be
+validated using their version and `struct_size`; their 32-bit and 64-bit
+sizes intentionally differ.
 
 Resource creation callbacks for buffers, images, samplers, and memory are
 failure-atomic at the core boundary: if a callback returns an error after

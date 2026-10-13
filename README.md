@@ -38,6 +38,14 @@ The public version is `RINGPU_API_VERSION == 1`.  ABI records use an explicit
 `struct_size`, version, and reserved fields; handles are opaque integers and
 are never process pointers or physical addresses.
 
+`RinGpuBackendCommandV1` has a fixed 872-byte process command record on both
+32-bit and 64-bit targets. Its 864-byte payload reserves the canonical wire
+size even when 32-bit natural alignment makes every typed payload smaller.
+Pointer-bearing memory callback tables remain native process ABI records: the
+readback table and V2 extension are 32/220 bytes on 32-bit targets and 40/224
+bytes on 64-bit targets. Consumers must use the declared `struct_size` and
+version when passing those callback tables.
+
 `ringpu_shader_validate_resource()` is the bounded public resource-catalog
 adapter for RSH1 shader blobs. It copies a `TYPE_SHADER` entry into
 caller-owned storage and validates it without filesystem access or hidden

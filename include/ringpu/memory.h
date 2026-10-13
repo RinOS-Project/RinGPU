@@ -437,12 +437,22 @@ static_assert(sizeof(RinGpuMemoryRebindV1) == 64u,
               "RinGPU memory rebind drift");
 static_assert(sizeof(RinGpuMemoryBackendV1) == 192u,
               "RinGPU memory backend drift");
+#if UINTPTR_MAX == UINT32_MAX
+static_assert(sizeof(RinGpuMemoryCpuReadbackOpsV1) == 32u,
+              "RinGPU memory readback ops drift");
+#else
 static_assert(sizeof(RinGpuMemoryCpuReadbackOpsV1) == 40u,
               "RinGPU memory readback ops drift");
+#endif
 static_assert(offsetof(RinGpuMemoryBackendV2, cpu_readback_ops) == 200u,
               "RinGPU memory backend V2 extension offset drift");
+#if UINTPTR_MAX == UINT32_MAX
+static_assert(sizeof(RinGpuMemoryBackendV2) == 220u,
+              "RinGPU memory backend V2 drift");
+#else
 static_assert(sizeof(RinGpuMemoryBackendV2) == 224u,
               "RinGPU memory backend V2 drift");
+#endif
 static_assert(sizeof(RinGpuMemoryAddressSpaceV1) == 48u,
               "RinGPU external address-space identity drift");
 #if UINTPTR_MAX == UINT32_MAX
@@ -463,12 +473,22 @@ _Static_assert(sizeof(RinGpuMemoryRebindV1) == 64u,
                "RinGPU memory rebind drift");
 _Static_assert(sizeof(RinGpuMemoryBackendV1) == 192u,
                "RinGPU memory backend drift");
+#if UINTPTR_MAX == UINT32_MAX
+_Static_assert(sizeof(RinGpuMemoryCpuReadbackOpsV1) == 32u,
+               "RinGPU memory readback ops drift");
+#else
 _Static_assert(sizeof(RinGpuMemoryCpuReadbackOpsV1) == 40u,
                "RinGPU memory readback ops drift");
+#endif
 _Static_assert(offsetof(RinGpuMemoryBackendV2, cpu_readback_ops) == 200u,
                "RinGPU memory backend V2 extension offset drift");
+#if UINTPTR_MAX == UINT32_MAX
+_Static_assert(sizeof(RinGpuMemoryBackendV2) == 220u,
+               "RinGPU memory backend V2 drift");
+#else
 _Static_assert(sizeof(RinGpuMemoryBackendV2) == 224u,
                "RinGPU memory backend V2 drift");
+#endif
 _Static_assert(sizeof(RinGpuMemoryAddressSpaceV1) == 48u,
                "RinGPU external address-space identity drift");
 #if UINTPTR_MAX == UINT32_MAX

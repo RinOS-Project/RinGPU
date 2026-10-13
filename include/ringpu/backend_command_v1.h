@@ -693,6 +693,13 @@ typedef struct RinGpuBackendCommandV1 {
         RinGpuBackendQueryV1 query;
         RinGpuBackendDrawIndirectV1 draw_indirect;
         RinGpuBackendDrawIndexedIndirectV1 draw_indexed_indirect;
+        /* Keep the versioned process command record at its canonical payload
+         * size on 32-bit targets too. Natural uint64_t alignment makes the
+         * largest typed member four bytes smaller on i386; this byte-array
+         * alternative reserves the wire space without changing any opcode's
+         * typed payload layout. */
+        uint8_t reserved_canonical_payload[
+            RIN_GPU_BACKEND_COMMAND_PAYLOAD_BYTES_V1];
     } value;
 } RinGpuBackendCommandV1;
 
