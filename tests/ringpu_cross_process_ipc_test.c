@@ -11,6 +11,9 @@ static uint64_t response_size;
 static RinResult receive_result;
 static int32_t response_status;
 static uint32_t corrupt_catalog_response;
+static uint32_t send_would_block_once;
+static uint32_t receive_would_block_once;
+static uint32_t wait_many_calls;
 
 RinResult rin_service_connect_v1(RinStringV1 name, RinChannel* channel)
 {
@@ -40,6 +43,10 @@ RinResult rin_channel_send_v1(
 
     assert(channel == UINT64_C(7));
     assert(message != NULL);
+    if (send_would_block_once != 0u) {
+        send_would_block_once = 0u;
+        return RIN_ERROR_WOULD_BLOCK;
+    }
     assert(message->bytes.size >= sizeof(request));
     request_bytes = (uint8_t*)(uintptr_t)message->bytes.address;
     memcpy(&request, request_bytes, sizeof(request));
@@ -184,12 +191,39 @@ RinResult rin_channel_receive_v1(
     RinChannel channel, RinIpcMessageV1* message)
 {
     assert(channel == UINT64_C(7));
+    if (receive_would_block_once != 0u) {
+        receive_would_block_once = 0u;
+        return RIN_ERROR_WOULD_BLOCK;
+    }
     if (receive_result != RIN_SUCCESS) return receive_result;
     assert(message != NULL);
     assert(message->bytes.size >= response_size);
     memcpy((void*)(uintptr_t)message->bytes.address, response_bytes,
            (size_t)response_size);
     message->bytes.size = response_size;
+    return RIN_SUCCESS;
+}
+
+RinResult rin_wait_many_v1(RinSliceV1 items, uint64_t timeout_ns,
+                           uint32_t* index)
+{
+    RinWaitItemV1* item;
+    uint32_t ready_events;
+    assert(items.address != 0u);
+    assert(items.size == sizeof(RinWaitItemV1));
+    assert(timeout_ns == RIN_SDK_INFINITE);
+    assert(index != NULL);
+    item = (RinWaitItemV1*)(uintptr_t)items.address;
+    assert(item->handle == UINT64_C(7));
+    assert((item->events & (RIN_WAIT_EVENT_ERROR | RIN_WAIT_EVENT_HANGUP)) ==
+           (RIN_WAIT_EVENT_ERROR | RIN_WAIT_EVENT_HANGUP));
+    ready_events = item->events &
+                   ~(RIN_WAIT_EVENT_ERROR | RIN_WAIT_EVENT_HANGUP);
+    assert(ready_events == RIN_WAIT_EVENT_READABLE ||
+           ready_events == RIN_WAIT_EVENT_WRITABLE);
+    item->observed = ready_events;
+    *index = 0u;
+    ++wait_many_calls;
     return RIN_SUCCESS;
 }
 
@@ -208,6 +242,7 @@ int main(void)
     RinGpuCrossProcessCapabilityReleaseLeaseV2 release_v2;
     RinGpuVulkanCatalogQueryRequestV1 catalog_request;
     RinGpuVulkanCatalogSnapshotV1 catalog_snapshot;
+    uint32_t wait_many_calls_before;
 
     memset(&client, 0, sizeof(client));
     assert(rin_gpu_cross_process_capability_ipc_connect(&client) ==
@@ -224,6 +259,13 @@ int main(void)
     desc.resource_id = UINT64_C(17);
     desc.rights = RIN_GPU_CROSS_PROCESS_RIGHT_READ;
     memset(&token, 0, sizeof(token));
+    wait_many_calls_before = wait_many_calls;
+    send_would_block_once = 1u;
+    receive_would_block_once = 1u;
+    assert(rin_gpu_cross_process_capability_ipc_issue(&client, &desc, &token) ==
+           RIN_GPU_CROSS_PROCESS_OK);
+    assert(token.token == UINT64_C(9));
+    assert(wait_many_calls == wait_many_calls_before + 2u);
     receive_result = RIN_ERROR_IO;
     assert(rin_gpu_cross_process_capability_ipc_issue(&client, &desc, &token) ==
            RIN_GPU_CROSS_PROCESS_IPC);
