@@ -9,10 +9,21 @@ static inline int ringpu_sync2_barrier_scopes_valid(
     uint32_t source_access, uint32_t destination_access,
     uint32_t flags, uint32_t reserved)
 {
+    const uint32_t source_access_stages =
+        source_stage & ~(RIN_GPU_PIPELINE_STAGE_TOP_OF_PIPE |
+                         RIN_GPU_PIPELINE_STAGE_BOTTOM_OF_PIPE);
+    const uint32_t destination_access_stages =
+        destination_stage & ~(RIN_GPU_PIPELINE_STAGE_TOP_OF_PIPE |
+                             RIN_GPU_PIPELINE_STAGE_BOTTOM_OF_PIPE);
+
     /* Synchronization2 permits NONE scopes and execution-only dependencies.
-     * A zero stage cannot carry a non-empty access scope. */
+     * A zero stage cannot carry a non-empty access scope. TOP_OF_PIPE and
+     * BOTTOM_OF_PIPE are execution-only endpoints too; a non-empty memory
+     * access scope needs at least one stage that can perform accesses. */
     return (source_stage != 0u || source_access == 0u) &&
            (destination_stage != 0u || destination_access == 0u) &&
+           (source_access == 0u || source_access_stages != 0u) &&
+           (destination_access == 0u || destination_access_stages != 0u) &&
            (source_stage & ~RIN_GPU_PIPELINE_STAGE_KNOWN) == 0u &&
            (destination_stage & ~RIN_GPU_PIPELINE_STAGE_KNOWN) == 0u &&
            (source_access & ~RIN_GPU_RESOURCE_KNOWN_ACCESS) == 0u &&

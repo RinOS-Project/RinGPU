@@ -295,6 +295,43 @@ int main(void)
     memset(&compute_barrier_v2, 0, sizeof(compute_barrier_v2));
     compute_barrier_v2.abi_version = RIN_GPU_ABI_VERSION;
     compute_barrier_v2.struct_size = sizeof(compute_barrier_v2);
+    compute_barrier_v2.source_stage = RIN_GPU_PIPELINE_STAGE_TOP_OF_PIPE;
+    compute_barrier_v2.destination_stage =
+        RIN_GPU_PIPELINE_STAGE_COMPUTE_SHADER;
+    compute_barrier_v2.source_access = RIN_GPU_RESOURCE_READ;
+    compute_barrier_v2.destination_access = RIN_GPU_RESOURCE_WRITE;
+    if (ringpu_command_compute_barrier_v2(&core, command_list,
+                                          &compute_barrier_v2) !=
+        RIN_GPU_ERROR_INVALID_ARGUMENT) {
+        goto done;
+    }
+    compute_barrier_v2.source_stage = RIN_GPU_PIPELINE_STAGE_COPY;
+    compute_barrier_v2.destination_stage =
+        RIN_GPU_PIPELINE_STAGE_BOTTOM_OF_PIPE;
+    compute_barrier_v2.source_access = RIN_GPU_RESOURCE_WRITE;
+    compute_barrier_v2.destination_access = RIN_GPU_RESOURCE_READ;
+    if (ringpu_command_compute_barrier_v2(&core, command_list,
+                                          &compute_barrier_v2) !=
+        RIN_GPU_ERROR_INVALID_ARGUMENT) {
+        goto done;
+    }
+    compute_barrier_v2.source_stage =
+        RIN_GPU_PIPELINE_STAGE_TOP_OF_PIPE |
+        RIN_GPU_PIPELINE_STAGE_COMPUTE_SHADER;
+    compute_barrier_v2.destination_stage =
+        RIN_GPU_PIPELINE_STAGE_COMPUTE_SHADER;
+    compute_barrier_v2.source_access = RIN_GPU_RESOURCE_READ;
+    compute_barrier_v2.destination_access = RIN_GPU_RESOURCE_WRITE;
+    if (ringpu_command_compute_barrier_v2(&core, command_list,
+                                          &compute_barrier_v2) != RIN_GPU_OK) {
+        goto done;
+    }
+    if (ringpu_command_list_reset(&core, command_list) != RIN_GPU_OK) {
+        goto done;
+    }
+    memset(&compute_barrier_v2, 0, sizeof(compute_barrier_v2));
+    compute_barrier_v2.abi_version = RIN_GPU_ABI_VERSION;
+    compute_barrier_v2.struct_size = sizeof(compute_barrier_v2);
     compute_barrier_v2.source_stage = RIN_GPU_PIPELINE_STAGE_COPY;
     compute_barrier_v2.destination_stage =
         RIN_GPU_PIPELINE_STAGE_COMPUTE_SHADER;
