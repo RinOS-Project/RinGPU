@@ -1,0 +1,367 @@
+/* SPDX-License-Identifier: MIT */
+#ifndef RINGPU_PUBLIC_DEVICE_RUNTIME_H
+#define RINGPU_PUBLIC_DEVICE_RUNTIME_H
+
+#include <stddef.h>
+#include <stdint.h>
+
+#include "diagnostics.h"
+
+#define RIN_GPU_DEVICE_RUNTIME_VERSION 1u
+#define RIN_GPU_DEVICE_SUBMISSION_V2_VERSION 2u
+#define RIN_GPU_DEVICE_SUBMISSION_V3_VERSION 3u
+#define RIN_GPU_DEVICE_SUBMISSION_WAIT_V2_VERSION 2u
+#define RIN_GPU_DEVICE_RUNTIME_STATE_QWORDS 576u
+#define RIN_GPU_DEVICE_MAX_QUEUES 8u
+#define RIN_GPU_DEVICE_MAX_IN_FLIGHT 64u
+#define RIN_GPU_DEVICE_MAX_SUBMISSION_WAITS 8u
+#define RIN_GPU_DEVICE_MAX_RESET_ATTEMPTS 8u
+#define RIN_GPU_DEVICE_MIN_TIMEOUT_NS UINT64_C(1000000)
+#define RIN_GPU_DEVICE_MAX_TIMEOUT_NS UINT64_C(30000000000)
+
+/* Backend-neutral execution scopes for a dependency wait. API adapters map
+ * their public stage masks to these semantic classes before submission. */
+#define RIN_GPU_DEVICE_SCOPE_GRAPHICS UINT64_C(0x00000001)
+#define RIN_GPU_DEVICE_SCOPE_COMPUTE UINT64_C(0x00000002)
+#define RIN_GPU_DEVICE_SCOPE_TRANSFER UINT64_C(0x00000004)
+#define RIN_GPU_DEVICE_SCOPE_HOST UINT64_C(0x00000008)
+#define RIN_GPU_DEVICE_SCOPE_ALL_COMMANDS UINT64_C(0x00000010)
+#define RIN_GPU_DEVICE_SCOPE_KNOWN \
+    (RIN_GPU_DEVICE_SCOPE_GRAPHICS | RIN_GPU_DEVICE_SCOPE_COMPUTE | \
+     RIN_GPU_DEVICE_SCOPE_TRANSFER | RIN_GPU_DEVICE_SCOPE_HOST | \
+     RIN_GPU_DEVICE_SCOPE_ALL_COMMANDS)
+
+#if UINTPTR_MAX == UINT32_MAX
+#define RIN_GPU_DEVICE_BACKEND_RESERVED_QWORDS 8u
+#else
+#define RIN_GPU_DEVICE_BACKEND_RESERVED_QWORDS 5u
+#endif
+
+#define RIN_GPU_DEVICE_CAP_DMA_ISOLATED UINT32_C(0x00000001)
+#define RIN_GPU_DEVICE_CAP_RESET UINT32_C(0x00000002)
+#define RIN_GPU_DEVICE_CAP_POWER UINT32_C(0x00000004)
+#define RIN_GPU_DEVICE_CAP_KNOWN                                      \
+    (RIN_GPU_DEVICE_CAP_DMA_ISOLATED | RIN_GPU_DEVICE_CAP_RESET |     \
+     RIN_GPU_DEVICE_CAP_POWER)
+
+#define RIN_GPU_DEVICE_STATUS_ACTIVE UINT32_C(0x00000001)
+#define RIN_GPU_DEVICE_STATUS_SUSPENDED UINT32_C(0x00000002)
+#define RIN_GPU_DEVICE_STATUS_LOST UINT32_C(0x00000004)
+
+#define RIN_GPU_DEVICE_REPORT_RESET UINT32_C(0x00000001)
+#define RIN_GPU_DEVICE_REPORT_WATCHDOG UINT32_C(0x00000002)
+#define RIN_GPU_DEVICE_REPORT_DEVICE_FAULT UINT32_C(0x00000004)
+
+#define RIN_GPU_DEVICE_POWER_SUSPEND 1u
+#define RIN_GPU_DEVICE_POWER_RESUME 2u
+
+typedef enum RinGpuDeviceRuntimeResult {
+    RIN_GPU_DEVICE_OK = 0,
+    RIN_GPU_DEVICE_INVALID_ARGUMENT = -1,
+    RIN_GPU_DEVICE_STATE = -2,
+    RIN_GPU_DEVICE_BUSY = -3,
+    RIN_GPU_DEVICE_BACKEND_FAILED = -4,
+    RIN_GPU_DEVICE_PROTOCOL = -5,
+    RIN_GPU_DEVICE_LOST = -6,
+    RIN_GPU_DEVICE_TIMEOUT = -7,
+    RIN_GPU_DEVICE_LIMIT = -8,
+    RIN_GPU_DEVICE_STALE = -9,
+    RIN_GPU_DEVICE_UNSUPPORTED = -10
+} RinGpuDeviceRuntimeResult;
+
+typedef enum RinGpuDeviceCompletionStatus {
+    RIN_GPU_DEVICE_COMPLETION_OK = 0,
+    RIN_GPU_DEVICE_COMPLETION_FAULT = 1
+} RinGpuDeviceCompletionStatus;
+
+/* Vendor owners normalize hardware-specific fault reports to this common
+ * taxonomy before they enter the runtime.  The runtime still owns the
+ * escalation decision; a physical driver must not smuggle a register value
+ * through the generic completion ABI. */
+typedef enum RinGpuDeviceFaultTypeV1 {
+    RIN_GPU_DEVICE_FAULT_QUEUE_HANG = 1,
+    RIN_GPU_DEVICE_FAULT_ENGINE = 2,
+    RIN_GPU_DEVICE_FAULT_FIRMWARE = 3,
+    RIN_GPU_DEVICE_FAULT_MMU_PAGE = 4,
+    RIN_GPU_DEVICE_FAULT_DISPLAY = 5,
+    RIN_GPU_DEVICE_FAULT_TIMEOUT = 6,
+    RIN_GPU_DEVICE_FAULT_SURPRISE_REMOVAL = 7
+} RinGpuDeviceFaultTypeV1;
+
+typedef struct RinGpuDeviceSubmissionV1 {
+    uint32_t struct_size;
+    uint32_t version;
+    uint32_t queue_id;
+    uint32_t flags;
+    uint64_t sequence;
+    uint64_t command_cookie;
+    uint64_t completion_value;
+    uint64_t iommu_domain_cookie;
+    uint64_t iommu_map_generation;
+    uint64_t device_epoch;
+    uint64_t deadline_ns;
+    uint64_t reserved;
+} RinGpuDeviceSubmissionV1;
+
+typedef struct RinGpuDeviceSubmissionWaitV1 {
+    uint32_t struct_size;
+    uint32_t version;
+    uint32_t queue_id;
+    uint32_t flags;
+    uint64_t completion_value;
+} RinGpuDeviceSubmissionWaitV1;
+
+/* V2 carries queue-timeline dependencies to a backend that can submit native
+ * waits. Values identify already-admitted completion points in this device
+ * epoch; API-specific semaphore handles never cross this boundary. */
+typedef struct RinGpuDeviceSubmissionV2 {
+    uint32_t struct_size;
+    uint32_t version;
+    RinGpuDeviceSubmissionV1 base;
+    uint32_t wait_count;
+    uint32_t reserved0;
+    RinGpuDeviceSubmissionWaitV1 waits[RIN_GPU_DEVICE_MAX_SUBMISSION_WAITS];
+} RinGpuDeviceSubmissionV2;
+
+typedef struct RinGpuDeviceSubmissionWaitV2 {
+    uint32_t struct_size;
+    uint32_t version;
+    uint32_t queue_id;
+    uint32_t flags;
+    uint64_t completion_value;
+    uint64_t execution_scope_mask;
+} RinGpuDeviceSubmissionWaitV2;
+
+/* V3 preserves the V2 queue point and adds the consumer execution scope.
+ * V1/V2 layouts and callback contracts are unchanged. */
+typedef struct RinGpuDeviceSubmissionV3 {
+    uint32_t struct_size;
+    uint32_t version;
+    RinGpuDeviceSubmissionV1 base;
+    uint32_t wait_count;
+    uint32_t reserved0;
+    RinGpuDeviceSubmissionWaitV2 waits[RIN_GPU_DEVICE_MAX_SUBMISSION_WAITS];
+} RinGpuDeviceSubmissionV3;
+
+typedef struct RinGpuDeviceCompletionV1 {
+    uint32_t struct_size;
+    uint32_t version;
+    uint32_t queue_id;
+    uint32_t status;
+    uint64_t sequence;
+    uint64_t completion_value;
+    uint64_t device_epoch;
+    uint64_t reserved;
+} RinGpuDeviceCompletionV1;
+
+typedef uint64_t (*RinGpuDeviceNowNsFn)(void* context);
+/* A submit callback returns zero only after the device accepted the
+ * submission.  Any other failure result must guarantee it was not accepted,
+ * except OUTCOME_UNKNOWN: that means it may have been accepted, so the runtime
+ * marks the device lost and callers quarantine the command cookie. */
+#define RIN_GPU_DEVICE_BACKEND_SUBMIT_OUTCOME_UNKNOWN (-2)
+typedef int (*RinGpuDeviceSubmitFn)(
+    void* context, const RinGpuDeviceSubmissionV1* submission);
+typedef int (*RinGpuDevicePollFn)(
+    void* context, RinGpuDeviceCompletionV1* completions,
+    uint32_t capacity, uint32_t* completion_count);
+/* Returning success asserts that old-epoch execution and DMA have stopped.
+ * The returned mapping generation must be strictly newer. */
+typedef int (*RinGpuDeviceResetFn)(
+    void* context, uint64_t expected_epoch, uint64_t new_epoch,
+    uint64_t deadline_ns, uint64_t* iommu_map_generation_out);
+/* Suspend must preserve the mapping generation. Resume must publish a newer
+ * generation and stop all old-epoch DMA before returning success. */
+typedef int (*RinGpuDeviceSetPowerFn)(
+    void* context, uint32_t power_state, uint64_t expected_epoch,
+    uint64_t new_epoch, uint64_t deadline_ns,
+    uint64_t* iommu_map_generation_out);
+
+typedef struct RinGpuDeviceBackendV1 {
+    uint32_t struct_size;
+    uint32_t version;
+    uint32_t capabilities;
+    uint32_t queue_count;
+    uint32_t max_in_flight;
+    uint32_t max_reset_attempts;
+    uint64_t minimum_timeout_ns;
+    uint64_t maximum_timeout_ns;
+    uint64_t iommu_domain_cookie;
+    uint64_t iommu_map_generation;
+    void* context;
+    RinGpuDeviceNowNsFn now_ns;
+    RinGpuDeviceSubmitFn submit;
+    RinGpuDevicePollFn poll;
+    RinGpuDeviceResetFn reset;
+    RinGpuDeviceSetPowerFn set_power;
+    uint64_t reserved[RIN_GPU_DEVICE_BACKEND_RESERVED_QWORDS];
+} RinGpuDeviceBackendV1;
+
+#define RIN_GPU_DEVICE_BACKEND_V2_VERSION 2u
+typedef int (*RinGpuDeviceSubmitWithDependenciesV2Fn)(
+    void* context, const RinGpuDeviceSubmissionV2* submission);
+
+/* V2 is additive: the V1 backend contract remains byte-for-byte unchanged.
+ * submit_with_dependencies receives queue timeline waits and owns their
+ * native lowering; the V1 callback remains usable for callers that do not
+ * require cross-queue dependencies. */
+typedef struct RinGpuDeviceBackendV2 {
+    uint32_t struct_size;
+    uint32_t version;
+    RinGpuDeviceBackendV1 base;
+    RinGpuDeviceSubmitWithDependenciesV2Fn submit_with_dependencies;
+    uint64_t reserved[2];
+} RinGpuDeviceBackendV2;
+
+#define RIN_GPU_DEVICE_BACKEND_V3_VERSION 3u
+typedef int (*RinGpuDeviceSubmitWithScopedDependenciesV3Fn)(
+    void* context, const RinGpuDeviceSubmissionV3* submission);
+typedef struct RinGpuDeviceBackendV3 {
+    uint32_t struct_size;
+    uint32_t version;
+    RinGpuDeviceBackendV2 base;
+    RinGpuDeviceSubmitWithScopedDependenciesV3Fn
+        submit_with_scoped_dependencies;
+    uint64_t reserved[2];
+} RinGpuDeviceBackendV3;
+
+typedef struct RinGpuDeviceStatusV1 {
+    uint32_t struct_size;
+    uint32_t version;
+    uint32_t flags;
+    uint32_t queue_count;
+    uint64_t device_epoch;
+    uint64_t iommu_domain_cookie;
+    uint64_t iommu_map_generation;
+    uint64_t last_monotonic_ns;
+    uint32_t in_flight_count;
+    uint32_t reset_count;
+    uint32_t max_in_flight;
+    uint32_t max_reset_attempts;
+    uint64_t completed_values[RIN_GPU_DEVICE_MAX_QUEUES];
+} RinGpuDeviceStatusV1;
+
+typedef struct RinGpuDevicePollReportV1 {
+    uint32_t struct_size;
+    uint32_t version;
+    uint32_t flags;
+    uint32_t completed_count;
+    uint32_t failed_count;
+    uint32_t in_flight_count;
+    uint32_t reset_count;
+    uint32_t reserved0;
+    uint64_t device_epoch;
+    uint64_t observed_monotonic_ns;
+    uint64_t reserved[2];
+} RinGpuDevicePollReportV1;
+
+/* Opaque, fixed-size, allocation-free owner state. */
+typedef struct RinGpuDeviceRuntime {
+    uint64_t opaque[RIN_GPU_DEVICE_RUNTIME_STATE_QWORDS];
+} RinGpuDeviceRuntime;
+
+int rin_gpu_device_runtime_init(RinGpuDeviceRuntime* runtime,
+                                const RinGpuDeviceBackendV1* backend);
+int rin_gpu_device_runtime_init_v2(RinGpuDeviceRuntime* runtime,
+                                   const RinGpuDeviceBackendV2* backend);
+int rin_gpu_device_runtime_init_v3(RinGpuDeviceRuntime* runtime,
+                                   const RinGpuDeviceBackendV3* backend);
+int rin_gpu_device_runtime_submit(
+    RinGpuDeviceRuntime* runtime,
+    const RinGpuDeviceSubmissionV1* submission);
+int rin_gpu_device_runtime_submit_v2(
+    RinGpuDeviceRuntime* runtime,
+    const RinGpuDeviceSubmissionV2* submission);
+int rin_gpu_device_runtime_submit_v3(
+    RinGpuDeviceRuntime* runtime,
+    const RinGpuDeviceSubmissionV3* submission);
+/* Snapshots the next submission identity while the device is active.  The
+ * result is intentionally still submitted through rin_gpu_device_runtime_submit:
+ * a caller that races another producer receives STALE without issuing work. */
+int rin_gpu_device_runtime_prepare_submission(
+    RinGpuDeviceRuntime* runtime, uint32_t queue_id, uint64_t command_cookie,
+    RinGpuDeviceSubmissionV1* submission_out);
+int rin_gpu_device_runtime_prepare_submission_v2(
+    RinGpuDeviceRuntime* runtime, uint32_t queue_id, uint64_t command_cookie,
+    uint32_t wait_count, const RinGpuDeviceSubmissionWaitV1* waits,
+    RinGpuDeviceSubmissionV2* submission_out);
+int rin_gpu_device_runtime_prepare_submission_v3(
+    RinGpuDeviceRuntime* runtime, uint32_t queue_id, uint64_t command_cookie,
+    uint32_t wait_count, const RinGpuDeviceSubmissionWaitV2* waits,
+    RinGpuDeviceSubmissionV3* submission_out);
+int rin_gpu_device_runtime_poll(RinGpuDeviceRuntime* runtime,
+                               RinGpuDevicePollReportV1* report);
+/* Consume one completion already collected by an IRQ-safe vendor dispatcher.
+ * The dispatcher must not call this function from interrupt context: it only
+ * latches a versioned completion, and a normal-context owner calls this
+ * function to perform locking, generation validation, and recovery. */
+int rin_gpu_device_runtime_accept_irq(
+    RinGpuDeviceRuntime* runtime,
+    const RinGpuDeviceCompletionV1* completion,
+    RinGpuDevicePollReportV1* report);
+int rin_gpu_device_runtime_watchdog(RinGpuDeviceRuntime* runtime,
+                                   RinGpuDevicePollReportV1* report);
+/* Explicitly reset an active device through the same bounded backend and
+ * generation transition used by watchdog recovery.  All in-flight work is
+ * terminalized before success is returned; the report records the reset and
+ * the newer device/mapping generations. */
+int rin_gpu_device_runtime_reset(RinGpuDeviceRuntime* runtime,
+                                 RinGpuDevicePollReportV1* report);
+int rin_gpu_device_runtime_suspend(RinGpuDeviceRuntime* runtime);
+int rin_gpu_device_runtime_resume(RinGpuDeviceRuntime* runtime);
+/* Optional bounded diagnostic sink.  The sink must already be initialized
+ * for the current device epoch; reset and resume advance it together with the
+ * runtime mapping generation. */
+int rin_gpu_device_runtime_attach_diagnostics(
+    RinGpuDeviceRuntime* runtime, RinGpuDiagnosticsRuntime* diagnostics);
+int rin_gpu_device_runtime_get_status(RinGpuDeviceRuntime* runtime,
+                                     RinGpuDeviceStatusV1* status);
+/* Destroy succeeds only after every DMA-capable submission is terminal. */
+int rin_gpu_device_runtime_destroy(RinGpuDeviceRuntime* runtime);
+/* The physical owner must call this only after its backend quiesce callback
+ * proves that no submitted command can execute or issue DMA. It makes a lost
+ * runtime's outstanding submissions terminal so the owner can detach without
+ * reusing any old command cookie. */
+int rin_gpu_device_runtime_abandon_in_flight(RinGpuDeviceRuntime* runtime);
+
+#if defined(__cplusplus)
+static_assert(sizeof(RinGpuDeviceSubmissionV1) == 80u,
+              "RinGPU device submission drift");
+static_assert(sizeof(RinGpuDeviceSubmissionWaitV1) == 24u,
+              "RinGPU device submission wait drift");
+static_assert(sizeof(RinGpuDeviceSubmissionV2) == 288u,
+              "RinGPU device submission V2 drift");
+static_assert(sizeof(RinGpuDeviceSubmissionWaitV2) == 32u,
+              "RinGPU scoped submission wait drift");
+static_assert(sizeof(RinGpuDeviceSubmissionV3) == 352u,
+              "RinGPU device submission V3 drift");
+static_assert(sizeof(RinGpuDeviceCompletionV1) == 48u,
+              "RinGPU device completion drift");
+static_assert(sizeof(RinGpuDeviceBackendV1) == 144u,
+              "RinGPU device backend drift");
+static_assert(sizeof(RinGpuDeviceStatusV1) == 128u,
+              "RinGPU device status drift");
+static_assert(sizeof(RinGpuDevicePollReportV1) == 64u,
+              "RinGPU device report drift");
+#else
+_Static_assert(sizeof(RinGpuDeviceSubmissionV1) == 80u,
+               "RinGPU device submission drift");
+_Static_assert(sizeof(RinGpuDeviceSubmissionWaitV1) == 24u,
+               "RinGPU device submission wait drift");
+_Static_assert(sizeof(RinGpuDeviceSubmissionV2) == 288u,
+               "RinGPU device submission V2 drift");
+_Static_assert(sizeof(RinGpuDeviceSubmissionWaitV2) == 32u,
+               "RinGPU scoped submission wait drift");
+_Static_assert(sizeof(RinGpuDeviceSubmissionV3) == 352u,
+               "RinGPU device submission V3 drift");
+_Static_assert(sizeof(RinGpuDeviceCompletionV1) == 48u,
+               "RinGPU device completion drift");
+_Static_assert(sizeof(RinGpuDeviceBackendV1) == 144u,
+               "RinGPU device backend drift");
+_Static_assert(sizeof(RinGpuDeviceStatusV1) == 128u,
+               "RinGPU device status drift");
+_Static_assert(sizeof(RinGpuDevicePollReportV1) == 64u,
+               "RinGPU device report drift");
+#endif
+
+#endif /* RINGPU_PUBLIC_DEVICE_RUNTIME_H */
