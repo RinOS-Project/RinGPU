@@ -1194,6 +1194,111 @@ int rin_gpu_memory_runtime_init_v4(RinGpuMemoryRuntime* runtime,
         backend_copy.external_range_mapping_ops, backend, sizeof(*backend));
 }
 
+int rin_gpu_memory_set_external_mapping_provider_v1(
+    RinGpuMemoryRuntime* runtime,
+    const RinGpuMemoryExternalMappingOpsV1* external_mapping_ops,
+    const RinGpuMemoryExternalMappingOpsV2* external_range_mapping_ops) {
+    RinGpuMemoryExternalMappingOpsV1 external_mapping_copy;
+    RinGpuMemoryExternalMappingOpsV2 external_range_mapping_copy;
+    RinGpuMemoryExternalMappingProvider provider_copy;
+    RinGpuMemoryRuntimeState* state;
+    uint32_t index;
+    int result;
+
+    if (!runtime ||
+        (external_mapping_ops &&
+         ringpu_memory_overlap(runtime, sizeof(*runtime),
+                               external_mapping_ops,
+                               sizeof(*external_mapping_ops))) ||
+        (external_range_mapping_ops &&
+         ringpu_memory_overlap(runtime, sizeof(*runtime),
+                               external_range_mapping_ops,
+                               sizeof(*external_range_mapping_ops))) ||
+        (external_mapping_ops && external_range_mapping_ops &&
+         ringpu_memory_overlap(external_mapping_ops,
+                               sizeof(*external_mapping_ops),
+                               external_range_mapping_ops,
+                               sizeof(*external_range_mapping_ops)))) {
+        return RIN_GPU_MEMORY_INVALID_ARGUMENT;
+    }
+
+    memset(&external_mapping_copy, 0, sizeof(external_mapping_copy));
+    if (external_mapping_ops)
+        memcpy(&external_mapping_copy, external_mapping_ops,
+               sizeof(external_mapping_copy));
+    memset(&external_range_mapping_copy, 0,
+           sizeof(external_range_mapping_copy));
+    if (external_range_mapping_ops)
+        memcpy(&external_range_mapping_copy, external_range_mapping_ops,
+               sizeof(external_range_mapping_copy));
+
+    memset(&provider_copy, 0, sizeof(provider_copy));
+    if (external_mapping_ops) {
+        if (!ringpu_memory_external_ops_valid(&external_mapping_copy) ||
+            ringpu_memory_overlap(runtime, sizeof(*runtime),
+                                  external_mapping_copy.context, 1u))
+            return RIN_GPU_MEMORY_INVALID_ARGUMENT;
+        provider_copy.flags |= RIN_GPU_MEMORY_EXTERNAL_PROVIDER_MAP_V1;
+        provider_copy.context = external_mapping_copy.context;
+        provider_copy.map = external_mapping_copy.map;
+        provider_copy.unmap = external_mapping_copy.unmap;
+    }
+    if (external_range_mapping_ops) {
+        if (!ringpu_memory_external_range_ops_valid(
+                &external_range_mapping_copy) ||
+            ringpu_memory_overlap(runtime, sizeof(*runtime),
+                                  external_range_mapping_copy.context, 1u))
+            return RIN_GPU_MEMORY_INVALID_ARGUMENT;
+        provider_copy.flags |=
+            RIN_GPU_MEMORY_EXTERNAL_PROVIDER_MAP_RANGE_V2;
+        provider_copy.context = external_range_mapping_copy.context;
+        provider_copy.map_range = external_range_mapping_copy.map_range;
+        provider_copy.unmap = external_range_mapping_copy.unmap;
+    }
+    if ((external_mapping_ops && external_range_mapping_ops &&
+         (external_mapping_copy.context !=
+              external_range_mapping_copy.context ||
+          external_mapping_copy.unmap !=
+              external_range_mapping_copy.unmap)) ||
+        !ringpu_memory_external_provider_valid(&provider_copy)) {
+        return RIN_GPU_MEMORY_INVALID_ARGUMENT;
+    }
+
+    result = ringpu_memory_lock(runtime, &state);
+    if (result != RIN_GPU_MEMORY_OK) return result;
+    if (state->flags == RIN_GPU_MEMORY_STATUS_LOST) {
+        result = RIN_GPU_MEMORY_LOST;
+        goto done;
+    }
+    if (state->flags != RIN_GPU_MEMORY_STATUS_READY) {
+        result = RIN_GPU_MEMORY_STATE;
+        goto done;
+    }
+    if (state->callback_active != 0u) {
+        result = RIN_GPU_MEMORY_BUSY;
+        goto done;
+    }
+    for (index = 0u; index < RIN_GPU_MEMORY_MAX_LEASES; ++index) {
+        const uint32_t lease_state = state->leases[index].state;
+        if (lease_state == RIN_GPU_MEMORY_LEASE_EXTERNAL_ACTIVE ||
+            lease_state == RIN_GPU_MEMORY_LEASE_EXTERNAL_CLEANUP ||
+            lease_state == RIN_GPU_MEMORY_LEASE_EXTERNAL_LOST ||
+            lease_state == RIN_GPU_MEMORY_LEASE_EXTERNAL_RANGE_ACTIVE ||
+            lease_state == RIN_GPU_MEMORY_LEASE_EXTERNAL_RANGE_CLEANUP ||
+            lease_state == RIN_GPU_MEMORY_LEASE_EXTERNAL_RANGE_LOST) {
+            result = RIN_GPU_MEMORY_BUSY;
+            goto done;
+        }
+    }
+    state->external_mapping_provider = provider_copy;
+    state->admitted_external_mapping_provider = provider_copy;
+    result = RIN_GPU_MEMORY_OK;
+
+done:
+    ringpu_memory_unlock(state);
+    return result;
+}
+
 int rin_gpu_memory_allocate(RinGpuMemoryRuntime* runtime,
                             const RinGpuMemoryAllocationDescV1* descriptor,
                             uint64_t* allocation_handle_out) {

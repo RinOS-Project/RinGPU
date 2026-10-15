@@ -366,6 +366,16 @@ int rin_gpu_memory_runtime_init_v3(RinGpuMemoryRuntime* runtime,
                                    const RinGpuMemoryBackendV3* backend);
 int rin_gpu_memory_runtime_init_v4(RinGpuMemoryRuntime* runtime,
                                    const RinGpuMemoryBackendV4* backend);
+/* Installs, replaces, or detaches the external-address-space mapping
+ * provider after runtime initialization. Both tables may be NULL to detach.
+ * The provider context must remain alive while installed and until every
+ * mapping lease created by it has been released. Replacement/detach returns
+ * BUSY while a provider callback is running or any external mapping lease is
+ * active, awaiting cleanup, or lost. */
+int rin_gpu_memory_set_external_mapping_provider_v1(
+    RinGpuMemoryRuntime* runtime,
+    const RinGpuMemoryExternalMappingOpsV1* external_mapping_ops,
+    const RinGpuMemoryExternalMappingOpsV2* external_range_mapping_ops);
 int rin_gpu_memory_allocate(RinGpuMemoryRuntime* runtime,
                             const RinGpuMemoryAllocationDescV1* descriptor,
                             uint64_t* allocation_handle_out);
