@@ -82,7 +82,9 @@ int main(void)
     RinGpuImageReadbackV1 readback;
     RinGpuImageTransitionV1 transition;
     RinGpuHandle queue = 0u;
+    RinGpuHandle compute_queue = 0u;
     RinGpuHandle command_list = 0u;
+    RinGpuHandle compute_command_list = 0u;
     RinGpuHandle clear_command_list = 0u;
     RinGpuHandle blit_command_list = 0u;
     RinGpuHandle buffer = 0u;
@@ -91,6 +93,7 @@ int main(void)
     RinGpuHandle fence = 0u;
     uint8_t image_source[64u * 32u * 4u] = {0};
     uint8_t image_readback[64u * 32u * 4u] = {0};
+    uint32_t image_state = UINT32_MAX;
     int result = 1;
 
     memset(&core, 0, sizeof(core));
@@ -235,6 +238,55 @@ int main(void)
         ringpu_wait_fence(&core, fence, 1u, 0u) != RIN_GPU_OK) {
         goto done;
     }
+
+    /* Image-state transitions are recordable on a compute-only queue too.
+     * They carry no stage/access scopes; native synchronization remains the
+     * backend's explicit responsibility. */
+    queue_desc.capabilities = RIN_GPU_QUEUE_COMPUTE;
+    command_desc.capabilities = RIN_GPU_QUEUE_COMPUTE;
+    if (ringpu_create_queue(&core, &queue_desc, &compute_queue) != RIN_GPU_OK ||
+        ringpu_create_command_list(&core, &command_desc,
+                                   &compute_command_list) != RIN_GPU_OK) {
+        goto done;
+    }
+    transition.before_state = RIN_GPU_IMAGE_STATE_COPY_SOURCE;
+    transition.after_state = RIN_GPU_IMAGE_STATE_COLOR_TARGET;
+    if (ringpu_command_transition_image(&core, compute_command_list, image,
+                                        &transition) != RIN_GPU_OK ||
+        ringpu_command_list_close(&core, compute_command_list) != RIN_GPU_OK) {
+        goto done;
+    }
+    memset(&submit, 0, sizeof(submit));
+    submit.abi_version = RIN_GPU_ABI_VERSION;
+    submit.struct_size = sizeof(submit);
+    submit.command_list = compute_command_list;
+    submit.signal_fence = fence;
+    submit.signal_value = 2u;
+    if (ringpu_queue_submit(&core, compute_queue, &submit) != RIN_GPU_OK ||
+        ringpu_wait_fence(&core, fence, 2u, 0u) != RIN_GPU_OK ||
+        ringpu_get_image_state(&core, image, 0u, 0u, &image_state) !=
+            RIN_GPU_OK ||
+        image_state != RIN_GPU_IMAGE_STATE_COLOR_TARGET ||
+        ringpu_command_list_reset(&core, compute_command_list) != RIN_GPU_OK) {
+        goto done;
+    }
+    transition.before_state = RIN_GPU_IMAGE_STATE_COLOR_TARGET;
+    transition.after_state = RIN_GPU_IMAGE_STATE_COPY_SOURCE;
+    if (ringpu_command_transition_image(&core, compute_command_list, image,
+                                        &transition) != RIN_GPU_OK ||
+        ringpu_command_list_close(&core, compute_command_list) != RIN_GPU_OK) {
+        goto done;
+    }
+    submit.command_list = compute_command_list;
+    submit.signal_value = 3u;
+    if (ringpu_queue_submit(&core, compute_queue, &submit) != RIN_GPU_OK ||
+        ringpu_wait_fence(&core, fence, 3u, 0u) != RIN_GPU_OK ||
+        ringpu_get_image_state(&core, image, 0u, 0u, &image_state) !=
+            RIN_GPU_OK ||
+        image_state != RIN_GPU_IMAGE_STATE_COPY_SOURCE) {
+        goto done;
+    }
+
     memset(&readback, 0, sizeof(readback));
     readback.abi_version = RIN_GPU_ABI_VERSION;
     readback.struct_size = sizeof(readback);
@@ -266,6 +318,8 @@ int main(void)
     image_blit.destination_width = image_desc.width;
     image_blit.destination_height = image_desc.height;
     image_blit.filter = RIN_GPU_IMAGE_BLIT_LINEAR;
+    transition.before_state = RIN_GPU_IMAGE_STATE_COPY_DESTINATION;
+    transition.after_state = RIN_GPU_IMAGE_STATE_COPY_SOURCE;
     if (ringpu_command_blit_image(&core, blit_command_list, blit_image, image,
                                   &image_blit) != RIN_GPU_OK ||
         ringpu_command_transition_image(&core, blit_command_list, blit_image,
@@ -274,11 +328,11 @@ int main(void)
         goto done;
     }
     submit.command_list = blit_command_list;
-    submit.signal_value = 2u;
+    submit.signal_value = 4u;
     {
         int blit_submit_result = ringpu_queue_submit(&core, queue, &submit);
         int blit_wait_result = blit_submit_result == RIN_GPU_OK
-            ? ringpu_wait_fence(&core, fence, 2u, 0u)
+            ? ringpu_wait_fence(&core, fence, 4u, 0u)
             : blit_submit_result;
 
         if (blit_submit_result != RIN_GPU_OK ||
@@ -347,17 +401,17 @@ int main(void)
     submit_v2.base.struct_size = sizeof(submit_v2.base);
     submit_v2.base.command_list = command_list;
     submit_v2.base.signal_fence = fence;
-    submit_v2.base.signal_value = 3u;
+    submit_v2.base.signal_value = 5u;
     submit_v2.wait_count = 1u;
     submit_v2.waits[0].abi_version = RIN_GPU_ABI_VERSION;
     submit_v2.waits[0].struct_size = sizeof(submit_v2.waits[0]);
     submit_v2.waits[0].fence = fence;
-    submit_v2.waits[0].value = 1u;
+    submit_v2.waits[0].value = 3u;
     if (ringpu_queue_submit_v2(&core, queue, &submit_v2) != RIN_GPU_OK) {
         goto done;
     }
-    submit_v2.base.signal_value = 4u;
-    submit_v2.waits[0].value = 4u;
+    submit_v2.base.signal_value = 6u;
+    submit_v2.waits[0].value = 6u;
     if (ringpu_queue_submit_v2(&core, queue, &submit_v2) !=
         RIN_GPU_ERROR_BUSY) {
         goto done;

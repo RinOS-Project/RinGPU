@@ -46,7 +46,11 @@ is RGBA8/BGRA8 UNORM only.
   tracking.
 - A transition must have distinct states, a non-empty in-bounds range, and both
   states must be eligible for the image. Recording is allowed only outside a
-  render pass on a command list with COPY or GRAPHICS capability.
+  render pass on a command list with COPY, COMPUTE, or GRAPHICS capability.
+  This changes only RinGPU's tracked image state; it adds no pipeline-stage or
+  access scopes, queue ownership transfer, or native barrier lowering. A
+  backend must implement the requested transition and report unsupported
+  operations instead of treating them as successful no-ops.
 - At queue submission, every selected subresource must equal
   `before_state`. The submission's state changes are staged and become visible
   through `ringpu_get_image_state` only if backend submission succeeds. A

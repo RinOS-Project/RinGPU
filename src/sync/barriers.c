@@ -32,7 +32,8 @@ int ringpu_command_transition_image(
     if (list->value.command_list.state != RIN_GPU_COMMAND_RECORDING ||
         list->value.command_list.render_pass_active != 0u ||
         (list->value.command_list.capabilities &
-         (RIN_GPU_QUEUE_COPY | RIN_GPU_QUEUE_GRAPHICS)) == 0u) {
+         (RIN_GPU_QUEUE_COPY | RIN_GPU_QUEUE_COMPUTE |
+          RIN_GPU_QUEUE_GRAPHICS)) == 0u) {
         return RIN_GPU_ERROR_STATE;
     }
     result = ringpu_slot(core, image, RIN_GPU_OBJECT_IMAGE, NULL, &image_slot);
