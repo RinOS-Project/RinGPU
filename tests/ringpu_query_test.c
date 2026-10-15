@@ -7,6 +7,19 @@
 
 #define CHECK(condition) do { if (!(condition)) return 1; } while (0)
 
+static int fail_query_result(void* context, uint64_t query_cookie,
+                             uint32_t query_type, uint64_t* values,
+                             uint32_t* available)
+{
+    (void)context;
+    (void)query_cookie;
+    (void)query_type;
+    if (values)
+        memset(values, 0, RIN_GPU_QUERY_RESULT_VALUE_COUNT * sizeof(*values));
+    if (available) *available = 0u;
+    return RIN_GPU_ERROR_BACKEND;
+}
+
 static int make_core(RinGpuCore* core, RinGpuSoftwareBackend** backend_out)
 {
     RinGpuSoftwareBackendDescV1 backend_desc;
@@ -79,12 +92,16 @@ int main(void)
     RinGpuCommandListDescV1 command_desc;
     RinGpuQueryDescV1 query_desc;
     RinGpuQueryResultV1 query_result;
+    RinGpuImageDescV1 image_desc;
+    RinGpuImageTransitionV1 image_transition;
     RinGpuHandle queue = 0u;
     RinGpuHandle list = 0u;
     RinGpuHandle timestamp = 0u;
     RinGpuHandle occlusion = 0u;
     RinGpuHandle pipeline = 0u;
+    RinGpuHandle image = 0u;
     uint64_t period = 0u;
+    uint32_t image_state = UINT32_MAX;
 
     memset(&core, 0, sizeof(core));
     CHECK(make_core(&core, &backend));
@@ -146,6 +163,48 @@ int main(void)
     CHECK(record_submit(&core, queue, list) == RIN_GPU_OK);
     CHECK(ringpu_get_query_result(&core, timestamp, 0u, &query_result) ==
           RIN_GPU_OK && query_result.available != 0u);
+
+    memset(&image_desc, 0, sizeof(image_desc));
+    image_desc.abi_version = RIN_GPU_ABI_VERSION;
+    image_desc.struct_size = sizeof(image_desc);
+    image_desc.dimension = RIN_GPU_IMAGE_DIMENSION_2D;
+    image_desc.format = RIN_GPU_FORMAT_BGRA8_UNORM;
+    image_desc.width = 4u;
+    image_desc.height = 4u;
+    image_desc.depth = 1u;
+    image_desc.array_layers = 1u;
+    image_desc.mip_levels = 1u;
+    image_desc.sample_count = 1u;
+    image_desc.usage = RIN_GPU_IMAGE_COPY_DESTINATION;
+    CHECK(ringpu_create_image(&core, &image_desc, &image) == RIN_GPU_OK);
+
+    CHECK(ringpu_command_list_reset(&core, list) == RIN_GPU_OK);
+    CHECK(ringpu_command_reset_query(&core, list, timestamp) == RIN_GPU_OK);
+    CHECK(ringpu_command_begin_query(&core, list, timestamp) == RIN_GPU_OK);
+    CHECK(ringpu_command_end_query(&core, list, timestamp) == RIN_GPU_OK);
+    memset(&image_transition, 0, sizeof(image_transition));
+    image_transition.abi_version = RIN_GPU_ABI_VERSION;
+    image_transition.struct_size = sizeof(image_transition);
+    image_transition.mip_level_count = 1u;
+    image_transition.array_layer_count = 1u;
+    image_transition.before_state = RIN_GPU_IMAGE_STATE_UNDEFINED;
+    image_transition.after_state = RIN_GPU_IMAGE_STATE_COPY_DESTINATION;
+    CHECK(ringpu_command_transition_image(&core, list, image,
+                                          &image_transition) == RIN_GPU_OK);
+    CHECK(ringpu_command_list_close(&core, list) == RIN_GPU_OK);
+
+    /* Query-result retrieval is a later observation, not part of queue
+     * acceptance. The accepted transition and query reset/end state must be
+     * visible even when the backend later fails to read the query value. */
+    core.backend.get_query_result = fail_query_result;
+    CHECK(record_submit(&core, queue, list) == RIN_GPU_OK);
+    CHECK(ringpu_get_image_state(&core, image, 0u, 0u, &image_state) ==
+              RIN_GPU_OK &&
+          image_state == RIN_GPU_IMAGE_STATE_COPY_DESTINATION);
+    CHECK(ringpu_get_query_result(&core, timestamp, 0u, &query_result) ==
+          RIN_GPU_ERROR_BACKEND);
+    core.backend.get_query_result =
+        ringpu_software_backend_ops()->get_query_result;
 
     /* A backend without the query callbacks must reject query submission. */
     CHECK(ringpu_command_list_reset(&core, list) == RIN_GPU_OK);

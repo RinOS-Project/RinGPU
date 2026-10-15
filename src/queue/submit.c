@@ -221,8 +221,6 @@ static int ringpu_queue_submit_internal(
     uint8_t query_active[RIN_GPU_CORE_MAX_OBJECTS] = {0};
     uint8_t query_available[RIN_GPU_CORE_MAX_OBJECTS] = {0};
     uint8_t query_touched[RIN_GPU_CORE_MAX_OBJECTS] = {0};
-    uint8_t query_ended[RIN_GPU_CORE_MAX_OBJECTS] = {0};
-    RinGpuHandle query_handles[RIN_GPU_CORE_MAX_OBJECTS] = {0};
     uint8_t query_backend_required = 0u;
     uint8_t query_timestamp_required = 0u;
     int result = ringpu_core_ready(core);
@@ -890,7 +888,6 @@ static int ringpu_queue_submit_internal(
                 query_available[destination_index] =
                     (uint8_t)(destination->value.query.available != 0u);
                 query_touched[destination_index] = 1u;
-                query_handles[destination_index] = command->destination;
             }
             if (command->type == RIN_GPU_BACKEND_COMMAND_BEGIN_QUERY) {
                 if (query_active[destination_index] != 0u ||
@@ -900,21 +897,18 @@ static int ringpu_queue_submit_internal(
                 }
                 query_active[destination_index] = 1u;
                 query_available[destination_index] = 0u;
-                query_ended[destination_index] = 0u;
             } else if (command->type == RIN_GPU_BACKEND_COMMAND_END_QUERY) {
                 if (query_active[destination_index] == 0u) {
                     result = RIN_GPU_ERROR_STATE;
                     break;
                 }
                 query_active[destination_index] = 0u;
-                query_ended[destination_index] = 1u;
             } else {
                 if (query_active[destination_index] != 0u) {
                     result = RIN_GPU_ERROR_STATE;
                     break;
                 }
                 query_available[destination_index] = 0u;
-                query_ended[destination_index] = 0u;
             }
             backend_query->query_cookie = command->destination;
             backend_query->query_type = query_type;
@@ -2494,48 +2488,9 @@ static int ringpu_queue_submit_internal(
         if (fence) fence->value.fence.value = submit->signal_value;
         if (!core->backend.wait_for_completion)
             core->completed_serial = serial;
-    }
-    if (result == RIN_GPU_OK && query_backend_required != 0u) {
-        for (uint32_t index = 0u; index < RIN_GPU_CORE_MAX_OBJECTS; ++index) {
-            RinGpuObjectSlot* query;
-            uint64_t values[RIN_GPU_QUERY_RESULT_VALUE_COUNT] = {0};
-            uint32_t available = 0u;
-
-            if (query_touched[index] == 0u) continue;
-            query = &core->objects[index];
-            if (!query->occupied || query->type != RIN_GPU_OBJECT_QUERY) {
-                result = RIN_GPU_ERROR_STATE;
-                break;
-            }
-            if (query_ended[index] != 0u) {
-                result = core->backend.get_query_result(
-                    core->backend_context,
-                    query_handles[index],
-                    query->value.query.query_type, values, &available);
-                if (result != RIN_GPU_OK) break;
-                if (available != 0u) {
-                    memcpy(query->value.query.values, values,
-                           sizeof(query->value.query.values));
-                    query->value.query.available = 1u;
-                } else {
-                    query->value.query.available = 0u;
-                }
-            } else {
-                memset(query->value.query.values, 0,
-                       sizeof(query->value.query.values));
-                query->value.query.available = 0u;
-            }
-            query->value.query.active = 0u;
-        }
-    }
-    ringpu_core_diagnostic(core, RIN_GPU_DIAGNOSTIC_SUBMISSION,
-                           submit->command_list, queue,
-                           list->value.command_list.count,
-                           submit->signal_value, result);
-    for (uint32_t index = 0u; index < present_count; ++index)
-        ringpu_core_diagnostic(core, RIN_GPU_DIAGNOSTIC_PRESENT, 0u, queue,
-                               submit->signal_value, index, result);
-    if (result == RIN_GPU_OK) {
+        /* submit_commands accepted the work. Commit all logical effects now;
+         * query results are fetched later by ringpu_get_query_result and can
+         * no longer retroactively turn this accepted submission into failure. */
         for (uint32_t index = 0u; index < RIN_GPU_CORE_MAX_OBJECTS; index++) {
             if (!staged_states[index]) continue;
             memcpy(core->objects[index].value.image.subresource_states,
@@ -2550,7 +2505,25 @@ static int ringpu_queue_submit_internal(
             core->objects[index].value.image.owner_engine_index =
                 staged_owner_engine[index];
         }
+        for (uint32_t index = 0u; index < RIN_GPU_CORE_MAX_OBJECTS; index++) {
+            RinGpuObjectSlot* query;
+
+            if (query_touched[index] == 0u) continue;
+            query = &core->objects[index];
+            query->value.query.active = query_active[index];
+            query->value.query.available = query_available[index];
+            if (query_available[index] == 0u)
+                memset(query->value.query.values, 0,
+                       sizeof(query->value.query.values));
+        }
     }
+    ringpu_core_diagnostic(core, RIN_GPU_DIAGNOSTIC_SUBMISSION,
+                           submit->command_list, queue,
+                           list->value.command_list.count,
+                           submit->signal_value, result);
+    for (uint32_t index = 0u; index < present_count; ++index)
+        ringpu_core_diagnostic(core, RIN_GPU_DIAGNOSTIC_PRESENT, 0u, queue,
+                               submit->signal_value, index, result);
     for (uint32_t index = 0u; index < RIN_GPU_CORE_MAX_OBJECTS; index++) {
         free(staged_states[index]);
     }
