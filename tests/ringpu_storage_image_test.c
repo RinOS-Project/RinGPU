@@ -218,6 +218,7 @@ int main(void)
     RinGpuImageDescV1 color_desc = {0};
     RinGpuImageTransitionV1 transition = {0};
     RinGpuRenderPassDescV1 render_pass = {0};
+    RinGpuGraphicsBarrierV2 graphics_barrier_v2 = {0};
     RinGpuGraphicsBindingV1 binding = {0};
     RinGpuDrawV1 draw = {0};
     RinGpuQueueDescV1 queue_desc = {0};
@@ -389,6 +390,36 @@ int main(void)
         ringpu_command_bind_graphics_resources(&core, command_list, bind_group) !=
             RIN_GPU_OK)
         goto done;
+    graphics_barrier_v2.abi_version = RIN_GPU_ABI_VERSION;
+    graphics_barrier_v2.struct_size = sizeof(graphics_barrier_v2);
+    graphics_barrier_v2.source_stage =
+        RIN_GPU_PIPELINE_STAGE_COMPUTE_SHADER;
+    graphics_barrier_v2.destination_stage =
+        RIN_GPU_PIPELINE_STAGE_COLOR_OUTPUT;
+    graphics_barrier_v2.source_access = RIN_GPU_RESOURCE_READ;
+    graphics_barrier_v2.destination_access = RIN_GPU_RESOURCE_WRITE;
+    if (ringpu_command_graphics_barrier_v2(
+            &core, command_list, &graphics_barrier_v2) !=
+        RIN_GPU_ERROR_INVALID_ARGUMENT) {
+        goto done;
+    }
+    graphics_barrier_v2.source_stage =
+        RIN_GPU_PIPELINE_STAGE_COLOR_OUTPUT;
+    graphics_barrier_v2.destination_stage =
+        RIN_GPU_PIPELINE_STAGE_COMPUTE_SHADER;
+    if (ringpu_command_graphics_barrier_v2(
+            &core, command_list, &graphics_barrier_v2) !=
+        RIN_GPU_ERROR_INVALID_ARGUMENT) {
+        goto done;
+    }
+    graphics_barrier_v2.source_stage =
+        RIN_GPU_PIPELINE_STAGE_COLOR_OUTPUT;
+    graphics_barrier_v2.destination_stage =
+        RIN_GPU_PIPELINE_STAGE_FRAGMENT_SHADER;
+    if (ringpu_command_graphics_barrier_v2(
+            &core, command_list, &graphics_barrier_v2) != RIN_GPU_OK) {
+        goto done;
+    }
     draw.abi_version = RIN_GPU_ABI_VERSION;
     draw.struct_size = sizeof(draw);
     draw.pipeline = pipeline;

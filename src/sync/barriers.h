@@ -31,6 +31,29 @@ static inline int ringpu_sync2_barrier_scopes_valid(
            flags == 0u && reserved == 0u;
 }
 
+static inline int ringpu_sync2_barrier_stages_supported(
+    uint32_t stages, uint32_t queue_capabilities)
+{
+    const uint32_t graphics_stages =
+        RIN_GPU_PIPELINE_STAGE_VERTEX_INPUT |
+        RIN_GPU_PIPELINE_STAGE_VERTEX_SHADER |
+        RIN_GPU_PIPELINE_STAGE_FRAGMENT_SHADER |
+        RIN_GPU_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS |
+        RIN_GPU_PIPELINE_STAGE_LATE_FRAGMENT_TESTS |
+        RIN_GPU_PIPELINE_STAGE_COLOR_OUTPUT;
+
+    if ((stages & ~RIN_GPU_PIPELINE_STAGE_KNOWN) != 0u ||
+        ((stages & RIN_GPU_PIPELINE_STAGE_COPY) != 0u &&
+         (queue_capabilities & RIN_GPU_QUEUE_COPY) == 0u) ||
+        ((stages & RIN_GPU_PIPELINE_STAGE_COMPUTE_SHADER) != 0u &&
+         (queue_capabilities & RIN_GPU_QUEUE_COMPUTE) == 0u) ||
+        ((stages & graphics_stages) != 0u &&
+         (queue_capabilities & RIN_GPU_QUEUE_GRAPHICS) == 0u)) {
+        return 0;
+    }
+    return 1;
+}
+
 int ringpu_command_transition_image(
     RinGpuCore* core, RinGpuHandle command_list, RinGpuHandle image,
     const RinGpuImageTransitionV1* transition);

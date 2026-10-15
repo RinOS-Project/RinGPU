@@ -249,6 +249,19 @@ int main(void)
                                    &compute_command_list) != RIN_GPU_OK) {
         goto done;
     }
+    memset(&compute_barrier_v2, 0, sizeof(compute_barrier_v2));
+    compute_barrier_v2.abi_version = RIN_GPU_ABI_VERSION;
+    compute_barrier_v2.struct_size = sizeof(compute_barrier_v2);
+    compute_barrier_v2.source_stage = RIN_GPU_PIPELINE_STAGE_COPY;
+    compute_barrier_v2.destination_stage =
+        RIN_GPU_PIPELINE_STAGE_COMPUTE_SHADER;
+    compute_barrier_v2.source_access = RIN_GPU_RESOURCE_WRITE;
+    compute_barrier_v2.destination_access = RIN_GPU_RESOURCE_READ;
+    if (ringpu_command_compute_barrier_v2(
+            &core, compute_command_list, &compute_barrier_v2) !=
+        RIN_GPU_ERROR_INVALID_ARGUMENT) {
+        goto done;
+    }
     transition.before_state = RIN_GPU_IMAGE_STATE_COPY_SOURCE;
     transition.after_state = RIN_GPU_IMAGE_STATE_COLOR_TARGET;
     if (ringpu_command_transition_image(&core, compute_command_list, image,
@@ -364,6 +377,24 @@ int main(void)
         RIN_GPU_PIPELINE_STAGE_BOTTOM_OF_PIPE;
     compute_barrier_v2.source_access = RIN_GPU_RESOURCE_WRITE;
     compute_barrier_v2.destination_access = RIN_GPU_RESOURCE_READ;
+    if (ringpu_command_compute_barrier_v2(&core, command_list,
+                                          &compute_barrier_v2) !=
+        RIN_GPU_ERROR_INVALID_ARGUMENT) {
+        goto done;
+    }
+    compute_barrier_v2.source_stage =
+        RIN_GPU_PIPELINE_STAGE_VERTEX_SHADER;
+    compute_barrier_v2.destination_stage =
+        RIN_GPU_PIPELINE_STAGE_COMPUTE_SHADER;
+    if (ringpu_command_compute_barrier_v2(&core, command_list,
+                                          &compute_barrier_v2) !=
+        RIN_GPU_ERROR_INVALID_ARGUMENT) {
+        goto done;
+    }
+    compute_barrier_v2.source_stage =
+        RIN_GPU_PIPELINE_STAGE_COMPUTE_SHADER;
+    compute_barrier_v2.destination_stage =
+        RIN_GPU_PIPELINE_STAGE_VERTEX_SHADER;
     if (ringpu_command_compute_barrier_v2(&core, command_list,
                                           &compute_barrier_v2) !=
         RIN_GPU_ERROR_INVALID_ARGUMENT) {

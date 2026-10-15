@@ -186,6 +186,13 @@ int ringpu_command_compute_barrier_v2(
         (list->value.command_list.capabilities & RIN_GPU_QUEUE_COMPUTE) == 0u) {
         return RIN_GPU_ERROR_STATE;
     }
+    if (!ringpu_sync2_barrier_stages_supported(
+            barrier->source_stage, list->value.command_list.capabilities) ||
+        !ringpu_sync2_barrier_stages_supported(
+            barrier->destination_stage,
+            list->value.command_list.capabilities)) {
+        return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    }
     result = ringpu_record_command(list, &command);
     if (result != RIN_GPU_OK) return result;
     command->type = RIN_GPU_BACKEND_COMMAND_COMPUTE_BARRIER_V2;
@@ -258,6 +265,13 @@ int ringpu_command_graphics_barrier_v2(
         (list->value.command_list.capabilities & RIN_GPU_QUEUE_GRAPHICS) ==
             0u) {
         return RIN_GPU_ERROR_STATE;
+    }
+    if (!ringpu_sync2_barrier_stages_supported(
+            barrier->source_stage, list->value.command_list.capabilities) ||
+        !ringpu_sync2_barrier_stages_supported(
+            barrier->destination_stage,
+            list->value.command_list.capabilities)) {
+        return RIN_GPU_ERROR_INVALID_ARGUMENT;
     }
     result = ringpu_record_command(list, &command);
     if (result != RIN_GPU_OK) return result;
