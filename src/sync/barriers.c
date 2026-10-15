@@ -270,7 +270,11 @@ int ringpu_command_graphics_barrier_v2(
             barrier->source_stage, list->value.command_list.capabilities) ||
         !ringpu_sync2_barrier_stages_supported(
             barrier->destination_stage,
-            list->value.command_list.capabilities)) {
+            list->value.command_list.capabilities) ||
+        !ringpu_sync2_graphics_barrier_stages_supported(
+            barrier->source_stage) ||
+        !ringpu_sync2_graphics_barrier_stages_supported(
+            barrier->destination_stage)) {
         return RIN_GPU_ERROR_INVALID_ARGUMENT;
     }
     result = ringpu_record_command(list, &command);

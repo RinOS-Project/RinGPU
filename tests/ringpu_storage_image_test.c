@@ -404,6 +404,27 @@ int main(void)
         goto done;
     }
     graphics_barrier_v2.source_stage =
+        RIN_GPU_PIPELINE_STAGE_TOP_OF_PIPE;
+    graphics_barrier_v2.destination_stage =
+        RIN_GPU_PIPELINE_STAGE_COLOR_OUTPUT;
+    graphics_barrier_v2.source_access = 0u;
+    graphics_barrier_v2.destination_access = RIN_GPU_RESOURCE_WRITE;
+    if (ringpu_command_graphics_barrier_v2(
+            &core, command_list, &graphics_barrier_v2) !=
+        RIN_GPU_ERROR_INVALID_ARGUMENT) {
+        goto done;
+    }
+    graphics_barrier_v2.source_stage =
+        RIN_GPU_PIPELINE_STAGE_COLOR_OUTPUT;
+    graphics_barrier_v2.destination_stage = RIN_GPU_PIPELINE_STAGE_HOST;
+    graphics_barrier_v2.source_access = RIN_GPU_RESOURCE_READ;
+    graphics_barrier_v2.destination_access = RIN_GPU_RESOURCE_WRITE;
+    if (ringpu_command_graphics_barrier_v2(
+            &core, command_list, &graphics_barrier_v2) !=
+        RIN_GPU_ERROR_INVALID_ARGUMENT) {
+        goto done;
+    }
+    graphics_barrier_v2.source_stage =
         RIN_GPU_PIPELINE_STAGE_COLOR_OUTPUT;
     graphics_barrier_v2.destination_stage =
         RIN_GPU_PIPELINE_STAGE_COMPUTE_SHADER;

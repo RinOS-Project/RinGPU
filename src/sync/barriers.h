@@ -31,16 +31,21 @@ static inline int ringpu_sync2_barrier_scopes_valid(
            flags == 0u && reserved == 0u;
 }
 
+static inline uint32_t ringpu_sync2_graphics_pipeline_stages(void)
+{
+    return RIN_GPU_PIPELINE_STAGE_VERTEX_INPUT |
+           RIN_GPU_PIPELINE_STAGE_VERTEX_SHADER |
+           RIN_GPU_PIPELINE_STAGE_FRAGMENT_SHADER |
+           RIN_GPU_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS |
+           RIN_GPU_PIPELINE_STAGE_LATE_FRAGMENT_TESTS |
+           RIN_GPU_PIPELINE_STAGE_COLOR_OUTPUT;
+}
+
 static inline int ringpu_sync2_barrier_stages_supported(
     uint32_t stages, uint32_t queue_capabilities)
 {
     const uint32_t graphics_stages =
-        RIN_GPU_PIPELINE_STAGE_VERTEX_INPUT |
-        RIN_GPU_PIPELINE_STAGE_VERTEX_SHADER |
-        RIN_GPU_PIPELINE_STAGE_FRAGMENT_SHADER |
-        RIN_GPU_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS |
-        RIN_GPU_PIPELINE_STAGE_LATE_FRAGMENT_TESTS |
-        RIN_GPU_PIPELINE_STAGE_COLOR_OUTPUT;
+        ringpu_sync2_graphics_pipeline_stages();
 
     if ((stages & ~RIN_GPU_PIPELINE_STAGE_KNOWN) != 0u ||
         ((stages & RIN_GPU_PIPELINE_STAGE_COPY) != 0u &&
@@ -52,6 +57,12 @@ static inline int ringpu_sync2_barrier_stages_supported(
         return 0;
     }
     return 1;
+}
+
+static inline int ringpu_sync2_graphics_barrier_stages_supported(
+    uint32_t stages)
+{
+    return (stages & ~ringpu_sync2_graphics_pipeline_stages()) == 0u;
 }
 
 int ringpu_command_transition_image(
