@@ -1662,7 +1662,7 @@ static int ringpu_memory_map_external_internal(
     RinGpuMemoryRuntime* runtime, uint64_t allocation_handle,
     uint32_t required_access,
     const RinGpuMemoryAddressSpaceV1* address_space,
-    uint64_t allocation_offset, uint64_t range_size, int exact_range,
+    uint64_t allocation_offset, uint64_t range_size, int exact_gpu_range,
     uint64_t* address_in_space_out, uint64_t* lease_handle_out) {
     RinGpuMemoryCallbackSnapshot callback_snapshot;
     RinGpuMemoryAddressSpaceV1 space;
@@ -1683,7 +1683,7 @@ static int ringpu_memory_map_external_internal(
 
     if (!runtime || !address_space || !address_in_space_out ||
         !lease_handle_out || allocation_handle == 0u ||
-        (exact_range &&
+        (exact_gpu_range &&
          (range_size == 0u ||
           allocation_offset > UINT64_MAX - range_size)) ||
         ringpu_memory_overlap(runtime, sizeof(*runtime), address_space,
@@ -1722,11 +1722,11 @@ static int ringpu_memory_map_external_internal(
         space.kind == RIN_GPU_MEMORY_ADDRESS_SPACE_USER_PROCESS;
     gpu_process_mapping =
         space.kind == RIN_GPU_MEMORY_ADDRESS_SPACE_GPU_PROCESS;
-    if ((exact_range &&
+    if ((exact_gpu_range &&
          (state->external_mapping_provider.map_range == NULL ||
           (state->external_mapping_provider.flags &
            RIN_GPU_MEMORY_EXTERNAL_PROVIDER_MAP_RANGE_V2) == 0u)) ||
-        (!exact_range &&
+        (!exact_gpu_range &&
          (state->external_mapping_provider.map == NULL ||
           (state->external_mapping_provider.flags &
            RIN_GPU_MEMORY_EXTERNAL_PROVIDER_MAP_V1) == 0u))) {
@@ -1735,9 +1735,8 @@ static int ringpu_memory_map_external_internal(
     }
     if (space.struct_size != sizeof(space) ||
         space.version != RIN_GPU_MEMORY_ADDRESS_SPACE_VERSION ||
-        (exact_range
-             ? (!gpu_process_mapping &&
-                space.kind != RIN_GPU_MEMORY_ADDRESS_SPACE_DISPLAY_FETCH)
+        (exact_gpu_range
+             ? !gpu_process_mapping
              : (space.kind != RIN_GPU_MEMORY_ADDRESS_SPACE_DISPLAY_FETCH &&
                 !user_process_mapping)) ||
         space.flags != 0u || space.owner_cookie == 0u ||
@@ -1767,7 +1766,7 @@ static int ringpu_memory_map_external_internal(
         result = RIN_GPU_MEMORY_INVALID_ARGUMENT;
         goto done;
     }
-    if (exact_range &&
+    if (exact_gpu_range &&
         (allocation_offset > allocation->allocation_size ||
          range_size > allocation->allocation_size - allocation_offset)) {
         result = RIN_GPU_MEMORY_INVALID_ARGUMENT;
@@ -1803,7 +1802,7 @@ static int ringpu_memory_map_external_internal(
         ringpu_memory_release_lease_slot(lease);
         goto done;
     }
-    backend_result = exact_range
+    backend_result = exact_gpu_range
         ? state->external_mapping_provider.map_range(
               state->external_mapping_provider.context,
               allocation->backing_cookie, allocation->allocation_size,
@@ -1825,16 +1824,16 @@ static int ringpu_memory_map_external_internal(
         lease->external_mapping_cookie = mapping_cookie;
         if (callback_result == RIN_GPU_MEMORY_OK && backend_result == 0 &&
             address <= UINT64_MAX -
-                           (exact_range ? range_size
+                           (exact_gpu_range ? range_size
                                             : allocation->allocation_size)) {
-            lease->state = exact_range
+            lease->state = exact_gpu_range
                 ? RIN_GPU_MEMORY_LEASE_EXTERNAL_RANGE_ACTIVE
                 : RIN_GPU_MEMORY_LEASE_EXTERNAL_ACTIVE;
             *address_in_space_out = address;
             *lease_handle_out = lease_handle;
             result = RIN_GPU_MEMORY_OK;
         } else {
-            lease->state = exact_range
+            lease->state = exact_gpu_range
                 ? RIN_GPU_MEMORY_LEASE_EXTERNAL_RANGE_CLEANUP
                 : RIN_GPU_MEMORY_LEASE_EXTERNAL_CLEANUP;
             *lease_handle_out = lease_handle;
@@ -1849,7 +1848,7 @@ static int ringpu_memory_map_external_internal(
         /* Success without a release cookie, or an error that returned an
          * address without a cookie, cannot be safely unwound. Keep the
          * allocation pinned and close the runtime instead of losing it. */
-        lease->state = exact_range
+        lease->state = exact_gpu_range
             ? RIN_GPU_MEMORY_LEASE_EXTERNAL_RANGE_LOST
             : RIN_GPU_MEMORY_LEASE_EXTERNAL_LOST;
         *lease_handle_out = lease_handle;
