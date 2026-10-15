@@ -23,6 +23,8 @@ int ringpu_image_readback_destination_valid(
     const RinGpuImageDescV1* desc, RinGpuImageReadbackV1* readback,
     uint64_t destination_size);
 int ringpu_image_state_allowed(const RinGpuImageDescV1* desc, uint32_t state);
+int ringpu_image_state_satisfies_use(uint32_t state,
+                                     uint32_t required_state);
 uint32_t ringpu_image_format_aspects(uint32_t format);
 int ringpu_multiply_u64(uint64_t left, uint64_t right, uint64_t* result);
 uint32_t ringpu_image_format_bytes(uint32_t format);

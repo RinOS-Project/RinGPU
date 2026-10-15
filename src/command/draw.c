@@ -200,7 +200,8 @@ static int ringpu_validate_graphics_sampled_record(
                     return RIN_GPU_ERROR_STATE;
                 state = transition->after_state;
             }
-            if (state != RIN_GPU_IMAGE_STATE_SHADER_READ)
+            if (!ringpu_image_state_satisfies_use(
+                    state, RIN_GPU_IMAGE_STATE_SHADER_READ))
                 return RIN_GPU_ERROR_STATE;
         }
     }

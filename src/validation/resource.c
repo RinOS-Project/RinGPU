@@ -403,6 +403,9 @@ int ringpu_image_state_allowed(const RinGpuImageDescV1* desc, uint32_t state)
 {
     if (!desc) return 0;
     if (state == RIN_GPU_IMAGE_STATE_UNDEFINED) return 1;
+    if (state == RIN_GPU_IMAGE_STATE_GENERAL)
+        return desc->usage != 0u &&
+               ringpu_image_format_aspects(desc->format) != 0u;
     if (state == RIN_GPU_IMAGE_STATE_COPY_SOURCE)
         return (desc->usage & RIN_GPU_IMAGE_COPY_SOURCE) != 0u;
     if (state == RIN_GPU_IMAGE_STATE_COPY_DESTINATION)
@@ -424,4 +427,21 @@ int ringpu_image_state_allowed(const RinGpuImageDescV1* desc, uint32_t state)
                  desc->dimension == RIN_GPU_IMAGE_DIMENSION_2D &&
                  desc->format == RIN_GPU_FORMAT_R8_UNORM));
     return 0;
+}
+
+int ringpu_image_state_satisfies_use(uint32_t state,
+                                     uint32_t required_state)
+{
+    if (state == required_state) return 1;
+    if (state != RIN_GPU_IMAGE_STATE_GENERAL) return 0;
+    switch (required_state) {
+    case RIN_GPU_IMAGE_STATE_COPY_SOURCE:
+    case RIN_GPU_IMAGE_STATE_COPY_DESTINATION:
+    case RIN_GPU_IMAGE_STATE_COLOR_TARGET:
+    case RIN_GPU_IMAGE_STATE_DEPTH_TARGET:
+    case RIN_GPU_IMAGE_STATE_SHADER_READ:
+        return 1;
+    default:
+        return 0;
+    }
 }

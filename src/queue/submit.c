@@ -96,9 +96,10 @@ static int ringpu_validate_graphics_sampled_submit(
                  depth_mip_level == mip && depth_array_layer == binding->array_layer) ||
                 (stencil_target == binding->resource &&
                  stencil_mip_level == mip && stencil_array_layer == binding->array_layer) ||
-                states[binding->array_layer *
-                           image->value.image.descriptor.mip_levels + mip] !=
-                    RIN_GPU_IMAGE_STATE_SHADER_READ) {
+                !ringpu_image_state_satisfies_use(
+                    states[binding->array_layer *
+                               image->value.image.descriptor.mip_levels + mip],
+                    RIN_GPU_IMAGE_STATE_SHADER_READ)) {
                 return RIN_GPU_ERROR_STATE;
             }
         }
@@ -362,19 +363,21 @@ static int ringpu_queue_submit_internal(
                 if (result != RIN_GPU_OK) break;
                 source_states = staged_states[source_index];
             }
-            if (destination_states[
-                    command->value.image_copy.destination_array_layer *
-                        destination->value.image.descriptor.mip_levels +
-                    command->value.image_copy.destination_mip_level] !=
-                RIN_GPU_IMAGE_STATE_COPY_DESTINATION) {
+            if (!ringpu_image_state_satisfies_use(
+                    destination_states[
+                        command->value.image_copy.destination_array_layer *
+                            destination->value.image.descriptor.mip_levels +
+                        command->value.image_copy.destination_mip_level],
+                    RIN_GPU_IMAGE_STATE_COPY_DESTINATION)) {
                 result = RIN_GPU_ERROR_STATE;
                 break;
             }
-            if (source_states[
-                    command->value.image_copy.source_array_layer *
-                        source->value.image.descriptor.mip_levels +
-                    command->value.image_copy.source_mip_level] !=
-                    RIN_GPU_IMAGE_STATE_COPY_SOURCE) {
+            if (!ringpu_image_state_satisfies_use(
+                    source_states[
+                        command->value.image_copy.source_array_layer *
+                            source->value.image.descriptor.mip_levels +
+                        command->value.image_copy.source_mip_level],
+                    RIN_GPU_IMAGE_STATE_COPY_SOURCE)) {
                 result = RIN_GPU_ERROR_STATE;
                 break;
             }
@@ -408,15 +411,18 @@ static int ringpu_queue_submit_internal(
                 if (result != RIN_GPU_OK) break;
                 source_states = staged_states[source_index];
             }
-            if (destination_states[
-                    blit->destination_array_layer *
-                        destination->value.image.descriptor.mip_levels +
-                    blit->destination_mip_level] !=
-                    RIN_GPU_IMAGE_STATE_COPY_DESTINATION ||
-                source_states[
-                    blit->source_array_layer *
-                        source->value.image.descriptor.mip_levels +
-                    blit->source_mip_level] != RIN_GPU_IMAGE_STATE_COPY_SOURCE) {
+            if (!ringpu_image_state_satisfies_use(
+                    destination_states[
+                        blit->destination_array_layer *
+                            destination->value.image.descriptor.mip_levels +
+                        blit->destination_mip_level],
+                    RIN_GPU_IMAGE_STATE_COPY_DESTINATION) ||
+                !ringpu_image_state_satisfies_use(
+                    source_states[
+                        blit->source_array_layer *
+                            source->value.image.descriptor.mip_levels +
+                        blit->source_mip_level],
+                    RIN_GPU_IMAGE_STATE_COPY_SOURCE)) {
                 result = RIN_GPU_ERROR_STATE;
                 break;
             }
@@ -486,15 +492,17 @@ static int ringpu_queue_submit_internal(
                 if (result != RIN_GPU_OK) break;
                 source_states = staged_states[source_index];
             }
-            if (destination_states[
-                    resolve->destination_array_layer *
-                        destination->value.image.descriptor.mip_levels +
-                    resolve->destination_mip_level] !=
-                    RIN_GPU_IMAGE_STATE_COPY_DESTINATION ||
-                source_states[resolve->source_array_layer *
-                                  source->value.image.descriptor.mip_levels +
-                              resolve->source_mip_level] !=
-                    RIN_GPU_IMAGE_STATE_COPY_SOURCE) {
+            if (!ringpu_image_state_satisfies_use(
+                    destination_states[
+                        resolve->destination_array_layer *
+                            destination->value.image.descriptor.mip_levels +
+                        resolve->destination_mip_level],
+                    RIN_GPU_IMAGE_STATE_COPY_DESTINATION) ||
+                !ringpu_image_state_satisfies_use(
+                    source_states[resolve->source_array_layer *
+                                      source->value.image.descriptor.mip_levels +
+                                  resolve->source_mip_level],
+                    RIN_GPU_IMAGE_STATE_COPY_SOURCE)) {
                 result = RIN_GPU_ERROR_STATE;
                 break;
             }
@@ -549,8 +557,9 @@ static int ringpu_queue_submit_internal(
             subresource = clear->array_layer *
                 destination->value.image.descriptor.mip_levels +
                 clear->mip_level;
-            if (destination_states[subresource] !=
-                RIN_GPU_IMAGE_STATE_COPY_DESTINATION) {
+            if (!ringpu_image_state_satisfies_use(
+                    destination_states[subresource],
+                    RIN_GPU_IMAGE_STATE_COPY_DESTINATION)) {
                 result = RIN_GPU_ERROR_STATE;
                 break;
             }
@@ -983,9 +992,11 @@ static int ringpu_queue_submit_internal(
                         color_desc->format, pass->color_load_op,
                         pass->clear_red, pass->clear_green, pass->clear_blue,
                         pass->clear_alpha, pass->color_write_mask) ||
-                    color_states[attachment->array_layer * color_desc->mip_levels +
-                                 attachment->mip_level] !=
-                        RIN_GPU_IMAGE_STATE_COLOR_TARGET) {
+                    !ringpu_image_state_satisfies_use(
+                        color_states[attachment->array_layer *
+                                         color_desc->mip_levels +
+                                     attachment->mip_level],
+                        RIN_GPU_IMAGE_STATE_COLOR_TARGET)) {
                     result = RIN_GPU_ERROR_STATE;
                     break;
                 }
@@ -1070,9 +1081,11 @@ static int ringpu_queue_submit_internal(
                     ringpu_mip_dimension(depth_desc->height,
                                          pass->depth_mip_level) !=
                         ringpu_mip_dimension(first_desc->height, first_mip) ||
-                    source_states[pass->depth_array_layer * depth_desc->mip_levels +
-                                  pass->depth_mip_level] !=
-                        RIN_GPU_IMAGE_STATE_DEPTH_TARGET) {
+                    !ringpu_image_state_satisfies_use(
+                        source_states[pass->depth_array_layer *
+                                          depth_desc->mip_levels +
+                                      pass->depth_mip_level],
+                        RIN_GPU_IMAGE_STATE_DEPTH_TARGET)) {
                     result = RIN_GPU_ERROR_STATE;
                     break;
                 }
@@ -1115,9 +1128,12 @@ static int ringpu_queue_submit_internal(
                     ringpu_mip_dimension(stencil_desc->height,
                                          pass->stencil_mip_level) !=
                         ringpu_mip_dimension(first_desc->height, first_mip) ||
-                    auxiliary_states[
-                        pass->stencil_array_layer * stencil_desc->mip_levels +
-                        pass->stencil_mip_level] != RIN_GPU_IMAGE_STATE_DEPTH_TARGET) {
+                    !ringpu_image_state_satisfies_use(
+                        auxiliary_states[
+                            pass->stencil_array_layer *
+                                stencil_desc->mip_levels +
+                            pass->stencil_mip_level],
+                        RIN_GPU_IMAGE_STATE_DEPTH_TARGET)) {
                     result = RIN_GPU_ERROR_STATE;
                     break;
                 }
@@ -1208,10 +1224,12 @@ static int ringpu_queue_submit_internal(
                     ringpu_mip_dimension(
                         destination->value.image.descriptor.height,
                         pass->mip_level)) ||
-                destination_states[
-                    pass->array_layer *
-                        destination->value.image.descriptor.mip_levels +
-                    pass->mip_level] != RIN_GPU_IMAGE_STATE_COLOR_TARGET) {
+                !ringpu_image_state_satisfies_use(
+                    destination_states[
+                        pass->array_layer *
+                            destination->value.image.descriptor.mip_levels +
+                        pass->mip_level],
+                    RIN_GPU_IMAGE_STATE_COLOR_TARGET)) {
                 result = RIN_GPU_ERROR_STATE;
                 break;
             }
@@ -1339,16 +1357,18 @@ static int ringpu_queue_submit_internal(
                     ringpu_mip_dimension(
                         source->value.image.descriptor.height,
                         pass->depth_mip_level) ||
-                destination_states[
-                    pass->color_array_layer *
-                        destination->value.image.descriptor.mip_levels +
-                    pass->color_mip_level] !=
-                    RIN_GPU_IMAGE_STATE_COLOR_TARGET ||
-                source_states[
-                    pass->depth_array_layer *
-                        source->value.image.descriptor.mip_levels +
-                    pass->depth_mip_level] !=
-                    RIN_GPU_IMAGE_STATE_DEPTH_TARGET) {
+                !ringpu_image_state_satisfies_use(
+                    destination_states[
+                        pass->color_array_layer *
+                            destination->value.image.descriptor.mip_levels +
+                        pass->color_mip_level],
+                    RIN_GPU_IMAGE_STATE_COLOR_TARGET) ||
+                !ringpu_image_state_satisfies_use(
+                    source_states[
+                        pass->depth_array_layer *
+                            source->value.image.descriptor.mip_levels +
+                        pass->depth_mip_level],
+                    RIN_GPU_IMAGE_STATE_DEPTH_TARGET)) {
                 result = RIN_GPU_ERROR_STATE;
                 break;
             }
@@ -1527,18 +1547,24 @@ static int ringpu_queue_submit_internal(
                     ringpu_mip_dimension(
                         auxiliary->value.image.descriptor.height,
                         pass->stencil_mip_level) ||
-                destination_states[
-                    pass->color_array_layer *
-                        destination->value.image.descriptor.mip_levels +
-                    pass->color_mip_level] != RIN_GPU_IMAGE_STATE_COLOR_TARGET ||
-                source_states[
-                    pass->depth_array_layer *
-                        source->value.image.descriptor.mip_levels +
-                    pass->depth_mip_level] != RIN_GPU_IMAGE_STATE_DEPTH_TARGET ||
-                auxiliary_states[
-                    pass->stencil_array_layer *
-                        auxiliary->value.image.descriptor.mip_levels +
-                    pass->stencil_mip_level] != RIN_GPU_IMAGE_STATE_DEPTH_TARGET) {
+                !ringpu_image_state_satisfies_use(
+                    destination_states[
+                        pass->color_array_layer *
+                            destination->value.image.descriptor.mip_levels +
+                        pass->color_mip_level],
+                    RIN_GPU_IMAGE_STATE_COLOR_TARGET) ||
+                !ringpu_image_state_satisfies_use(
+                    source_states[
+                        pass->depth_array_layer *
+                            source->value.image.descriptor.mip_levels +
+                        pass->depth_mip_level],
+                    RIN_GPU_IMAGE_STATE_DEPTH_TARGET) ||
+                !ringpu_image_state_satisfies_use(
+                    auxiliary_states[
+                        pass->stencil_array_layer *
+                            auxiliary->value.image.descriptor.mip_levels +
+                        pass->stencil_mip_level],
+                    RIN_GPU_IMAGE_STATE_DEPTH_TARGET)) {
                 result = RIN_GPU_ERROR_STATE;
                 break;
             }
@@ -1705,11 +1731,11 @@ static int ringpu_queue_submit_internal(
                                                 staged_states);
             if (result != RIN_GPU_OK) break;
             source_states = staged_states[source_index];
-            if (source_states[
-                    command->value.draw.array_layer *
-                        source->value.image.descriptor.mip_levels +
-                    command->value.draw.mip_level] !=
-                    RIN_GPU_IMAGE_STATE_COLOR_TARGET ||
+            if (!ringpu_image_state_satisfies_use(
+                    source_states[command->value.draw.array_layer *
+                                      source->value.image.descriptor.mip_levels +
+                                  command->value.draw.mip_level],
+                    RIN_GPU_IMAGE_STATE_COLOR_TARGET) ||
                 destination->value.graphics_pipeline.vertex_input_count != 0u ||
                 destination->value.graphics_pipeline.vertex_stride != 0u ||
                 (destination->value.graphics_pipeline.depth_format != 0u &&
@@ -1810,10 +1836,11 @@ static int ringpu_queue_submit_internal(
                  (active_depth_target == 0u ||
                   active_depth_format !=
                       destination->value.graphics_pipeline.depth_format)) ||
-                source_states[
-                    draw->array_layer *
-                        source->value.image.descriptor.mip_levels +
-                    draw->mip_level] != RIN_GPU_IMAGE_STATE_COLOR_TARGET ||
+                !ringpu_image_state_satisfies_use(
+                    source_states[draw->array_layer *
+                                      source->value.image.descriptor.mip_levels +
+                                  draw->mip_level],
+                    RIN_GPU_IMAGE_STATE_COLOR_TARGET) ||
                 source->value.image.descriptor.format !=
                     destination->value.graphics_pipeline.color_format) {
                 result = RIN_GPU_ERROR_STATE;
@@ -1889,10 +1916,11 @@ static int ringpu_queue_submit_internal(
                  (active_depth_target == 0u ||
                   active_depth_format !=
                       destination->value.graphics_pipeline.depth_format)) ||
-                source_states[
-                    draw->array_layer *
-                        source->value.image.descriptor.mip_levels +
-                    draw->mip_level] != RIN_GPU_IMAGE_STATE_COLOR_TARGET ||
+                !ringpu_image_state_satisfies_use(
+                    source_states[draw->array_layer *
+                                      source->value.image.descriptor.mip_levels +
+                                  draw->mip_level],
+                    RIN_GPU_IMAGE_STATE_COLOR_TARGET) ||
                 source->value.image.descriptor.format !=
                     destination->value.graphics_pipeline.color_format) {
                 result = RIN_GPU_ERROR_STATE;
@@ -1980,10 +2008,11 @@ static int ringpu_queue_submit_internal(
                  (active_depth_target == 0u ||
                   active_depth_format !=
                       destination->value.graphics_pipeline.depth_format)) ||
-                source_states[draw->array_layer *
-                                  source->value.image.descriptor.mip_levels +
-                                  draw->mip_level] !=
-                    RIN_GPU_IMAGE_STATE_COLOR_TARGET ||
+                !ringpu_image_state_satisfies_use(
+                    source_states[draw->array_layer *
+                                      source->value.image.descriptor.mip_levels +
+                                  draw->mip_level],
+                    RIN_GPU_IMAGE_STATE_COLOR_TARGET) ||
                 source->value.image.descriptor.format !=
                     destination->value.graphics_pipeline.color_format ||
                 (indirect_buffer->value.buffer.usage & RIN_GPU_BUFFER_INDIRECT) == 0u ||
@@ -2082,10 +2111,11 @@ static int ringpu_queue_submit_internal(
                  (active_depth_target == 0u ||
                   active_depth_format !=
                       destination->value.graphics_pipeline.depth_format)) ||
-                source_states[draw->array_layer *
-                                  source->value.image.descriptor.mip_levels +
-                                  draw->mip_level] !=
-                    RIN_GPU_IMAGE_STATE_COLOR_TARGET ||
+                !ringpu_image_state_satisfies_use(
+                    source_states[draw->array_layer *
+                                      source->value.image.descriptor.mip_levels +
+                                  draw->mip_level],
+                    RIN_GPU_IMAGE_STATE_COLOR_TARGET) ||
                 source->value.image.descriptor.format !=
                     destination->value.graphics_pipeline.color_format) {
                 result = RIN_GPU_ERROR_STATE;
@@ -2222,10 +2252,11 @@ static int ringpu_queue_submit_internal(
                  (active_depth_target == 0u ||
                   active_depth_format !=
                       destination->value.graphics_pipeline.depth_format)) ||
-                source_states[
-                    draw->array_layer *
-                        source->value.image.descriptor.mip_levels +
-                    draw->mip_level] != RIN_GPU_IMAGE_STATE_COLOR_TARGET ||
+                !ringpu_image_state_satisfies_use(
+                    source_states[draw->array_layer *
+                                      source->value.image.descriptor.mip_levels +
+                                  draw->mip_level],
+                    RIN_GPU_IMAGE_STATE_COLOR_TARGET) ||
                 source->value.image.descriptor.format !=
                     destination->value.graphics_pipeline.color_format) {
                 result = RIN_GPU_ERROR_STATE;
@@ -2335,10 +2366,11 @@ static int ringpu_queue_submit_internal(
                  (active_depth_target == 0u ||
                   active_depth_format !=
                       destination->value.graphics_pipeline.depth_format)) ||
-                source_states[
-                    draw->array_layer *
-                        source->value.image.descriptor.mip_levels +
-                    draw->mip_level] != RIN_GPU_IMAGE_STATE_COLOR_TARGET ||
+                !ringpu_image_state_satisfies_use(
+                    source_states[draw->array_layer *
+                                      source->value.image.descriptor.mip_levels +
+                                  draw->mip_level],
+                    RIN_GPU_IMAGE_STATE_COLOR_TARGET) ||
                 source->value.image.descriptor.format !=
                     destination->value.graphics_pipeline.color_format) {
                 result = RIN_GPU_ERROR_STATE;

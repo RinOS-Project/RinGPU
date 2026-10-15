@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include "../src/core/core.h"
+#include "../src/validation/resource.h"
 #include <ringpu/software.h>
 
 static int make_core(RinGpuCore* core, RinGpuSoftwareBackend** backend_out)
@@ -299,6 +300,28 @@ int main(void)
         image_state != RIN_GPU_IMAGE_STATE_COPY_SOURCE) {
         goto done;
     }
+    if (ringpu_command_list_reset(&core, compute_command_list) != RIN_GPU_OK)
+        goto done;
+    transition.before_state = RIN_GPU_IMAGE_STATE_COPY_SOURCE;
+    transition.after_state = RIN_GPU_IMAGE_STATE_GENERAL;
+    if (ringpu_command_transition_image(&core, compute_command_list, image,
+                                        &transition) != RIN_GPU_OK ||
+        ringpu_command_list_close(&core, compute_command_list) != RIN_GPU_OK) {
+        goto done;
+    }
+    submit.command_list = compute_command_list;
+    submit.signal_value = 4u;
+    if (ringpu_queue_submit(&core, compute_queue, &submit) != RIN_GPU_OK ||
+        ringpu_wait_fence(&core, fence, 4u, 0u) != RIN_GPU_OK ||
+        ringpu_get_image_state(&core, image, 0u, 0u, &image_state) !=
+            RIN_GPU_OK ||
+        image_state != RIN_GPU_IMAGE_STATE_GENERAL ||
+        ringpu_image_state_satisfies_use(
+            RIN_GPU_IMAGE_STATE_GENERAL, RIN_GPU_IMAGE_STATE_PRESENT) ||
+        ringpu_image_state_satisfies_use(
+            RIN_GPU_IMAGE_STATE_GENERAL, RIN_GPU_IMAGE_STATE_UNDEFINED)) {
+        goto done;
+    }
 
     memset(&readback, 0, sizeof(readback));
     readback.abi_version = RIN_GPU_ABI_VERSION;
@@ -332,20 +355,26 @@ int main(void)
     image_blit.destination_height = image_desc.height;
     image_blit.filter = RIN_GPU_IMAGE_BLIT_LINEAR;
     transition.before_state = RIN_GPU_IMAGE_STATE_COPY_DESTINATION;
+    transition.after_state = RIN_GPU_IMAGE_STATE_GENERAL;
+    if (ringpu_command_transition_image(&core, blit_command_list, blit_image,
+                                        &transition) != RIN_GPU_OK ||
+        ringpu_command_blit_image(&core, blit_command_list, blit_image, image,
+                                  &image_blit) != RIN_GPU_OK) {
+        goto done;
+    }
+    transition.before_state = RIN_GPU_IMAGE_STATE_GENERAL;
     transition.after_state = RIN_GPU_IMAGE_STATE_COPY_SOURCE;
-    if (ringpu_command_blit_image(&core, blit_command_list, blit_image, image,
-                                  &image_blit) != RIN_GPU_OK ||
-        ringpu_command_transition_image(&core, blit_command_list, blit_image,
+    if (ringpu_command_transition_image(&core, blit_command_list, blit_image,
                                         &transition) != RIN_GPU_OK ||
         ringpu_command_list_close(&core, blit_command_list) != RIN_GPU_OK) {
         goto done;
     }
     submit.command_list = blit_command_list;
-    submit.signal_value = 4u;
+    submit.signal_value = 5u;
     {
         int blit_submit_result = ringpu_queue_submit(&core, queue, &submit);
         int blit_wait_result = blit_submit_result == RIN_GPU_OK
-            ? ringpu_wait_fence(&core, fence, 4u, 0u)
+            ? ringpu_wait_fence(&core, fence, 5u, 0u)
             : blit_submit_result;
 
         if (blit_submit_result != RIN_GPU_OK ||
@@ -432,7 +461,7 @@ int main(void)
     submit_v2.base.struct_size = sizeof(submit_v2.base);
     submit_v2.base.command_list = command_list;
     submit_v2.base.signal_fence = fence;
-    submit_v2.base.signal_value = 5u;
+    submit_v2.base.signal_value = 6u;
     submit_v2.wait_count = 1u;
     submit_v2.waits[0].abi_version = RIN_GPU_ABI_VERSION;
     submit_v2.waits[0].struct_size = sizeof(submit_v2.waits[0]);
@@ -441,8 +470,8 @@ int main(void)
     if (ringpu_queue_submit_v2(&core, queue, &submit_v2) != RIN_GPU_OK) {
         goto done;
     }
-    submit_v2.base.signal_value = 6u;
-    submit_v2.waits[0].value = 6u;
+    submit_v2.base.signal_value = 7u;
+    submit_v2.waits[0].value = 7u;
     if (ringpu_queue_submit_v2(&core, queue, &submit_v2) !=
         RIN_GPU_ERROR_BUSY) {
         goto done;

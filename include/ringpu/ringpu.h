@@ -117,7 +117,10 @@ typedef enum RinGpuImageState {
     RIN_GPU_IMAGE_STATE_COLOR_TARGET = 3,
     RIN_GPU_IMAGE_STATE_PRESENT = 4,
     RIN_GPU_IMAGE_STATE_DEPTH_TARGET = 5,
-    RIN_GPU_IMAGE_STATE_SHADER_READ = 6
+    RIN_GPU_IMAGE_STATE_SHADER_READ = 6,
+    /* Broad access layout; each command still checks its usage and format.
+     * Presentation still requires the dedicated PRESENT state. */
+    RIN_GPU_IMAGE_STATE_GENERAL = 7
 } RinGpuImageState;
 
 #define RIN_GPU_IMAGE_COPY_SOURCE       0x00000001u

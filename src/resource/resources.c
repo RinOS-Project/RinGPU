@@ -897,7 +897,9 @@ int ringpu_readback_image(RinGpuCore* core, RinGpuHandle image,
         canonical_readback.array_layer *
             slot->value.image.descriptor.mip_levels +
         canonical_readback.mip_level];
-    if (state != RIN_GPU_IMAGE_STATE_COPY_SOURCE) return RIN_GPU_ERROR_STATE;
+    if (!ringpu_image_state_satisfies_use(
+            state, RIN_GPU_IMAGE_STATE_COPY_SOURCE))
+        return RIN_GPU_ERROR_STATE;
     if ((uint64_t)(size_t)destination_size != destination_size)
         return RIN_GPU_ERROR_LIMIT;
     staging = (uint8_t*)malloc((size_t)destination_size);
