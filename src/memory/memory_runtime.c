@@ -1290,6 +1290,13 @@ int rin_gpu_memory_set_external_mapping_provider_v1(
             goto done;
         }
     }
+    if (provider_copy.flags != 0u &&
+        state->external_mapping_provider.flags != 0u &&
+        !ringpu_memory_external_provider_equal(
+            &state->external_mapping_provider, &provider_copy)) {
+        result = RIN_GPU_MEMORY_BUSY;
+        goto done;
+    }
     state->external_mapping_provider = provider_copy;
     state->admitted_external_mapping_provider = provider_copy;
     result = RIN_GPU_MEMORY_OK;

@@ -242,6 +242,7 @@ int main(void) {
     RinGpuMemoryBackendV4 range_backend;
     RinGpuMemoryBackendV1 dynamic_backend;
     RinGpuMemoryExternalMappingOpsV1 external_ops;
+    RinGpuMemoryExternalMappingOpsV1 replacement_ops;
     RinGpuMemoryExternalMappingOpsV1 range_external_ops_v1;
     RinGpuMemoryExternalMappingOpsV2 range_external_ops_v2;
     RinGpuMemoryAllocationDescV1 descriptor;
@@ -249,6 +250,7 @@ int main(void) {
     RinGpuMemoryAllocationInfoV1 allocation_info;
     RinGpuMemoryRebindV1 rebind;
     RinGpuMemoryStatusV1 status;
+    MappingFixture replacement_fixture;
     uint64_t allocation = 0u;
     uint64_t address = 0u;
     uint64_t lease = 0u;
@@ -262,6 +264,7 @@ int main(void) {
     int result = 1;
 
     memset(&fixture, 0, sizeof(fixture));
+    memset(&replacement_fixture, 0, sizeof(replacement_fixture));
     memset(&runtime, 0, sizeof(runtime));
     memset(&range_runtime, 0, sizeof(range_runtime));
     memset(&dynamic_runtime, 0, sizeof(dynamic_runtime));
@@ -442,6 +445,12 @@ int main(void) {
         rin_gpu_memory_set_external_mapping_provider_v1(
             &dynamic_runtime, &external_ops, NULL) != RIN_GPU_MEMORY_OK)
         goto done;
+    replacement_ops = external_ops;
+    replacement_ops.context = &replacement_fixture;
+    if (rin_gpu_memory_set_external_mapping_provider_v1(
+            &dynamic_runtime, &replacement_ops, NULL) !=
+        RIN_GPU_MEMORY_BUSY)
+        goto done;
     fixture.provider_update_runtime = &dynamic_runtime;
     fixture.provider_update_ops = &external_ops;
     fixture.try_provider_replace_on_map = 1u;
@@ -454,7 +463,9 @@ int main(void) {
         rin_gpu_memory_set_external_mapping_provider_v1(
             &dynamic_runtime, NULL, NULL) != RIN_GPU_MEMORY_BUSY ||
         rin_gpu_memory_unmap_external(&dynamic_runtime, dynamic_lease) !=
-            RIN_GPU_MEMORY_OK)
+            RIN_GPU_MEMORY_OK ||
+        rin_gpu_memory_set_external_mapping_provider_v1(
+            &dynamic_runtime, NULL, NULL) != RIN_GPU_MEMORY_OK)
         goto done;
 
     if (rin_gpu_memory_set_external_mapping_provider_v1(
