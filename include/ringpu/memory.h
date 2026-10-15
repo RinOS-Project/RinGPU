@@ -286,12 +286,13 @@ typedef struct RinGpuMemoryExternalMappingOpsV1 {
 } RinGpuMemoryExternalMappingOpsV1;
 #define RIN_GPU_MEMORY_EXTERNAL_MAPPING_OPS_VERSION 1u
 
-/* V2 maps only the explicitly authorized backing byte range. It is reserved
- * for a process GPU address space; the callback must not map bytes before or
- * after [allocation_offset, allocation_offset + range_size). The returned
- * address is meaningful only in the exact supplied address-space identity,
- * and is not implicitly a GPUVA or IOVA. `mapping_cookie_out` owns the exact
- * range mapping and is released through the paired unmap callback. */
+/* V2 maps only the explicitly authorized backing byte range in a GPU_PROCESS
+ * or DISPLAY_FETCH address space; it must not map bytes before or after
+ * [allocation_offset, allocation_offset + range_size). USER_PROCESS mappings
+ * use the CPU-visible V1 contract. The returned address is meaningful only
+ * in the exact supplied address-space identity, and is not implicitly a GPUVA
+ * or IOVA. `mapping_cookie_out` owns the exact range mapping and is released
+ * through the paired unmap callback. */
 typedef int (*RinGpuMemoryMapExternalRangeFn)(
     void* context, uint64_t backing_cookie, uint64_t allocation_size,
     uint64_t allocation_offset, uint64_t range_size, uint32_t access,
@@ -320,8 +321,8 @@ typedef struct RinGpuMemoryBackendV3 {
     uint64_t reserved[2];
 } RinGpuMemoryBackendV3;
 
-/* V4 adds an exact-range process-GPU mapper independently of V3's
- * whole-allocation DISPLAY_FETCH/CPU mapping provider. */
+/* V4 adds an exact-range GPU_PROCESS/DISPLAY_FETCH mapper independently of
+ * V3's whole-allocation DISPLAY_FETCH/CPU mapping provider. */
 typedef struct RinGpuMemoryBackendV4 {
     uint32_t struct_size;
     uint32_t version;
@@ -397,8 +398,9 @@ int rin_gpu_memory_map_external(
     uint32_t required_access,
     const RinGpuMemoryAddressSpaceV1* address_space,
     uint64_t* address_in_space_out, uint64_t* lease_handle_out);
-/* Exact-range process GPU mapping. Unlike map_external(), this requires a V2
- * range provider and never maps the complete allocation as a fallback. */
+/* Exact-range GPU_PROCESS or DISPLAY_FETCH mapping. Unlike map_external(),
+ * this requires a V2 range provider and never maps the complete allocation
+ * as a fallback. */
 int rin_gpu_memory_map_external_range_v2(
     RinGpuMemoryRuntime* runtime, uint64_t allocation_handle,
     uint32_t required_access,

@@ -21,6 +21,7 @@ typedef struct MappingFixture {
     uint64_t last_address_space_cookie;
     uint64_t last_address_space_generation;
     uint64_t last_device_generation;
+    uint32_t last_address_space_kind;
     uint64_t last_range_offset;
     uint64_t last_range_size;
     RinGpuMemoryRuntime* provider_update_runtime;
@@ -153,7 +154,8 @@ static int map_external_range(
         range_size == 0u || allocation_offset > allocation_size ||
         range_size > allocation_size - allocation_offset ||
         access != RIN_GPU_MEMORY_GPU_READ || !address_space ||
-        address_space->kind != RIN_GPU_MEMORY_ADDRESS_SPACE_GPU_PROCESS ||
+        (address_space->kind != RIN_GPU_MEMORY_ADDRESS_SPACE_GPU_PROCESS &&
+         address_space->kind != RIN_GPU_MEMORY_ADDRESS_SPACE_DISPLAY_FETCH) ||
         address_space->owner_cookie == 0u || address_space->generation == 0u ||
         address_space->device_generation == 0u || !address_out ||
         !mapping_cookie_out)
@@ -163,6 +165,7 @@ static int map_external_range(
     fixture->last_address_space_cookie = address_space->owner_cookie;
     fixture->last_address_space_generation = address_space->generation;
     fixture->last_device_generation = address_space->device_generation;
+    fixture->last_address_space_kind = address_space->kind;
     fixture->last_range_offset = allocation_offset;
     fixture->last_range_size = range_size;
     if (fixture->fail_external_range_map_with_cookie != 0u) {
@@ -411,9 +414,44 @@ int main(void) {
         fixture.last_address_space_cookie != address_space.owner_cookie ||
         fixture.last_address_space_generation != address_space.generation ||
         fixture.last_device_generation != address_space.device_generation ||
+        fixture.last_address_space_kind != address_space.kind ||
         fixture.external_live_count != 1u)
         goto done;
     if (rin_gpu_memory_unmap_external(&range_runtime, range_lease) !=
+            RIN_GPU_MEMORY_OK ||
+        fixture.external_live_count != 0u)
+        goto done;
+
+    /* OS-Core display-present V2 needs an exact allocation range in the
+     * DISPLAY_FETCH address space; do not relabel it as a process mapping. */
+    address_space.kind = RIN_GPU_MEMORY_ADDRESS_SPACE_USER_PROCESS;
+    if (rin_gpu_memory_map_external_range_v2(
+            &range_runtime, range_allocation, RIN_GPU_MEMORY_GPU_READ,
+            &address_space, 256u, 4096u, &range_address,
+            &range_lease) != RIN_GPU_MEMORY_INVALID_ARGUMENT ||
+        range_address != 0u || range_lease != 0u ||
+        fixture.external_range_map_count != 2u)
+        goto done;
+
+    address_space.kind = RIN_GPU_MEMORY_ADDRESS_SPACE_DISPLAY_FETCH;
+    address_space.owner_cookie = 17u;
+    address_space.generation = 37u;
+    address_space.device_generation = 41u;
+    if (rin_gpu_memory_map_external_range_v2(
+            &range_runtime, range_allocation, RIN_GPU_MEMORY_GPU_READ,
+            &address_space, 256u, 4096u, &range_address,
+            &range_lease) != RIN_GPU_MEMORY_OK ||
+        range_address != UINT64_C(0x90000000) || range_lease == 0u ||
+        fixture.external_range_map_count != 3u ||
+        fixture.last_range_offset != 256u ||
+        fixture.last_range_size != 4096u ||
+        fixture.last_address_space_kind !=
+            RIN_GPU_MEMORY_ADDRESS_SPACE_DISPLAY_FETCH ||
+        fixture.last_address_space_cookie != address_space.owner_cookie ||
+        fixture.last_address_space_generation != address_space.generation ||
+        fixture.last_device_generation != address_space.device_generation ||
+        fixture.external_live_count != 1u ||
+        rin_gpu_memory_unmap_external(&range_runtime, range_lease) !=
             RIN_GPU_MEMORY_OK ||
         fixture.external_live_count != 0u ||
         rin_gpu_memory_destroy_allocation(&range_runtime,
