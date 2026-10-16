@@ -4,96 +4,108 @@ inc = include_directories('include', '../rinresource/include',
                           '../../RinOS-SDK/include', 'src/core',
                           'src/validation', 'src/device', 'src/memory',
                           'src/software', 'src/capability')
-ringpu_sources = files(
-  'src/command/commands.c',
-  'src/command/draw.c',
-  'src/command/record.c',
-  'src/core/core.c',
-  'src/core/object_lifetime.c',
-  'src/core/object_table.c',
-  'src/platform/backend_bridge.c',
-  'src/platform/thread.c',
-  'src/runtime.c',
-  'src/validation/diagnostics.c',
-  'src/validation/graphics_layout.c',
-  'src/validation/pipeline.c',
-  'src/validation/resource.c',
-  'src/validation/shader.c',
-  'src/software/software_backend.c',
-  'src/sync/barriers.c',
-  'src/sync/fences.c',
-  'src/device/device_runtime.c',
-  'src/device/fault_policy.c',
-  'src/memory/memory_runtime.c',
-  'src/presentation/presentation.c',
-  'src/presentation/present.c',
-  'src/presentation/render_pass.c',
-  'src/pipeline/cache.c',
-  'src/pipeline/pipelines.c',
-  'src/queue/submit.c',
-  'src/pipeline/graphics.c',
-  'src/resource/resources.c',
-  'src/shader/modules.c',
-  'src/shader/spirv_frontend.c',
-  'src/query/queries.c',
-  'src/capability/cross_process_capability.c',
-)
 
-ringpu = library('RinGPU', ringpu_sources, include_directories: inc,
-                 install: true,
-                 pic: true,
-                 version: '1.0.0')
-ringpu_dep = declare_dependency(link_with: ringpu,
-                                include_directories: include_directories('include'))
-pkgconfig = import('pkgconfig')
-pkgconfig.generate(ringpu,
-                   name: 'RinGPU',
-                   filebase: 'ringpu',
-                   description: 'RinGPU graphics runtime')
-install_subdir('include/ringpu', install_dir: get_option('includedir'))
-install_data('../rinresource/include/rinresource/catalog.h',
-             '../rinresource/include/rinresource/loader.h',
-             install_dir: join_paths(get_option('includedir'), 'rinresource'))
+rinos_kernel_target = get_option('rinos_kernel_target')
+if rinos_kernel_target == 'kernel64'
+  ringpu_kernel64_c_args = get_option('rinos_kernel_c_args')
+  subdir('meson/kernel64')
+elif rinos_kernel_target == 'kernel32'
+  ringpu_kernel32_c_args = get_option('rinos_kernel_c_args')
+  subdir('meson/kernel32')
+elif rinos_kernel_target != 'none'
+  error('unsupported RinGPU kernel target: ' + rinos_kernel_target)
+else
+  ringpu_sources = files(
+    'src/command/commands.c',
+    'src/command/draw.c',
+    'src/command/record.c',
+    'src/core/core.c',
+    'src/core/object_lifetime.c',
+    'src/core/object_table.c',
+    'src/platform/backend_bridge.c',
+    'src/platform/thread.c',
+    'src/runtime.c',
+    'src/validation/diagnostics.c',
+    'src/validation/graphics_layout.c',
+    'src/validation/pipeline.c',
+    'src/validation/resource.c',
+    'src/validation/shader.c',
+    'src/software/software_backend.c',
+    'src/sync/barriers.c',
+    'src/sync/fences.c',
+    'src/device/device_runtime.c',
+    'src/device/fault_policy.c',
+    'src/memory/memory_runtime.c',
+    'src/presentation/presentation.c',
+    'src/presentation/present.c',
+    'src/presentation/render_pass.c',
+    'src/pipeline/cache.c',
+    'src/pipeline/pipelines.c',
+    'src/queue/submit.c',
+    'src/pipeline/graphics.c',
+    'src/resource/resources.c',
+    'src/shader/modules.c',
+    'src/shader/spirv_frontend.c',
+    'src/query/queries.c',
+    'src/capability/cross_process_capability.c',
+  )
 
-if get_option('build_rinos_ipc_adapter')
-  ringpu_ipc = static_library('RinGPUIpc',
-                              'src/capability/cross_process_capability_ipc.c',
-                              include_directories: inc,
-                              install: true)
-  ringpu_ipc_dep = declare_dependency(link_with: [ringpu_ipc, ringpu],
-                                      include_directories: inc)
-endif
+  ringpu = library('RinGPU', ringpu_sources, include_directories: inc,
+                   install: true,
+                   pic: true,
+                   version: '1.0.0')
+  ringpu_dep = declare_dependency(link_with: ringpu,
+                                  include_directories: include_directories('include'))
+  pkgconfig = import('pkgconfig')
+  pkgconfig.generate(ringpu,
+                     name: 'RinGPU',
+                     filebase: 'ringpu',
+                     description: 'RinGPU graphics runtime')
+  install_subdir('include/ringpu', install_dir: get_option('includedir'))
+  install_data('../rinresource/include/rinresource/catalog.h',
+               '../rinresource/include/rinresource/loader.h',
+               install_dir: join_paths(get_option('includedir'), 'rinresource'))
 
-if get_option('buildtype') != 'plain'
-  test('ringpu-platform-thread',
-       executable('ringpu-platform-thread-test',
-                  'tests/ringpu_platform_thread_test.c',
-                  'src/platform/thread.c',
-                  include_directories: include_directories('src/platform'),
-                  dependencies: dependency('threads')))
-  test('ringpu-abi', executable('ringpu-abi-test', 'tests/ringpu_abi_test.c',
-                                dependencies: ringpu_dep))
-  test('ringpu-shader', executable('ringpu-shader-test', 'tests/ringpu_shader_test.c',
-                                   dependencies: ringpu_dep))
-  test('ringpu-shader-resource',
-       executable('ringpu-shader-resource-test',
-                  'tests/ringpu_shader_resource_test.c', dependencies: ringpu_dep))
-  test('ringpu-runtime', executable('ringpu-runtime-test', 'tests/ringpu_runtime_test.c',
-                                   dependencies: ringpu_dep))
-  test('ringpu-result-mapping',
-       executable('ringpu-result-mapping-test',
-                  'tests/ringpu_result_mapping_test.c', dependencies: ringpu_dep))
   if get_option('build_rinos_ipc_adapter')
-    test('ringpu-cross-process-ipc',
-         executable('ringpu-cross-process-ipc-test',
-                    'tests/ringpu_cross_process_ipc_test.c',
-                    dependencies: ringpu_ipc_dep))
+    ringpu_ipc = static_library('RinGPUIpc',
+                                'src/capability/cross_process_capability_ipc.c',
+                                include_directories: inc,
+                                install: true)
+    ringpu_ipc_dep = declare_dependency(link_with: [ringpu_ipc, ringpu],
+                                        include_directories: inc)
   endif
-  if get_option('build_differential_tests')
-    test('ringpu-differential', executable('ringpu-differential-test',
-                                          'tests/differential/differential_test.c',
-                                          'tests/differential/differential.c',
-                                          include_directories: inc,
-                                          dependencies: ringpu_dep))
+
+  if get_option('buildtype') != 'plain'
+    test('ringpu-platform-thread',
+         executable('ringpu-platform-thread-test',
+                    'tests/ringpu_platform_thread_test.c',
+                    'src/platform/thread.c',
+                    include_directories: include_directories('src/platform'),
+                    dependencies: dependency('threads')))
+    test('ringpu-abi', executable('ringpu-abi-test', 'tests/ringpu_abi_test.c',
+                                  dependencies: ringpu_dep))
+    test('ringpu-shader', executable('ringpu-shader-test', 'tests/ringpu_shader_test.c',
+                                     dependencies: ringpu_dep))
+    test('ringpu-shader-resource',
+         executable('ringpu-shader-resource-test',
+                    'tests/ringpu_shader_resource_test.c', dependencies: ringpu_dep))
+    test('ringpu-runtime', executable('ringpu-runtime-test', 'tests/ringpu_runtime_test.c',
+                                     dependencies: ringpu_dep))
+    test('ringpu-result-mapping',
+         executable('ringpu-result-mapping-test',
+                    'tests/ringpu_result_mapping_test.c', dependencies: ringpu_dep))
+    if get_option('build_rinos_ipc_adapter')
+      test('ringpu-cross-process-ipc',
+           executable('ringpu-cross-process-ipc-test',
+                      'tests/ringpu_cross_process_ipc_test.c',
+                      dependencies: ringpu_ipc_dep))
+    endif
+    if get_option('build_differential_tests')
+      test('ringpu-differential', executable('ringpu-differential-test',
+                                            'tests/differential/differential_test.c',
+                                            'tests/differential/differential.c',
+                                            include_directories: inc,
+                                            dependencies: ringpu_dep))
+    endif
   endif
 endif

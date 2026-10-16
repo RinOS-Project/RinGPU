@@ -6,3 +6,12 @@ option('build_rinos_ipc_adapter',
        type: 'boolean',
        value: true,
        description: 'Build the separate RinOS SDK IPC adapter library')
+option('rinos_kernel_target',
+       type: 'combo',
+       choices: ['none', 'kernel32', 'kernel64'],
+       value: 'none',
+       description: 'Build the RinOS freestanding kernel archive owned by this submodule')
+option('rinos_kernel_c_args',
+       type: 'array',
+       value: [],
+       description: 'Compiler arguments supplied by the consuming RinOS kernel profile')
