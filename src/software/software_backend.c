@@ -9960,7 +9960,7 @@ static int sw_draw_indexed_with_base_vertex_in_pass(
     uint32_t fragment_inputs;
     uint32_t fragment_outputs;
     uint32_t index_bytes;
-    uint32_t triangle_count;
+    uint32_t triangle_count = 0u;
     uint32_t restart_index = 0u;
     int restart_enabled;
     int result;
