@@ -153,7 +153,9 @@ static int map_external_range(
         range_size == 0u || allocation_offset > allocation_size ||
         range_size > allocation_size - allocation_offset ||
         access != RIN_GPU_MEMORY_GPU_READ || !address_space ||
-        address_space->kind != RIN_GPU_MEMORY_ADDRESS_SPACE_GPU_PROCESS ||
+        (address_space->kind != RIN_GPU_MEMORY_ADDRESS_SPACE_GPU_PROCESS &&
+         address_space->kind !=
+             RIN_GPU_MEMORY_ADDRESS_SPACE_DISPLAY_FETCH) ||
         address_space->owner_cookie == 0u || address_space->generation == 0u ||
         address_space->device_generation == 0u || !address_out ||
         !mapping_cookie_out)
@@ -415,8 +417,28 @@ int main(void) {
         goto done;
     if (rin_gpu_memory_unmap_external(&range_runtime, range_lease) !=
             RIN_GPU_MEMORY_OK ||
-        fixture.external_live_count != 0u ||
-        rin_gpu_memory_destroy_allocation(&range_runtime,
+        fixture.external_live_count != 0u)
+        goto done;
+    address_space.kind = RIN_GPU_MEMORY_ADDRESS_SPACE_DISPLAY_FETCH;
+    address_space.owner_cookie = 37u;
+    address_space.generation = 41u;
+    address_space.device_generation = 43u;
+    if (rin_gpu_memory_map_external_range_v2(
+            &range_runtime, range_allocation, RIN_GPU_MEMORY_GPU_READ,
+            &address_space, 2048u, 1024u, &range_address,
+            &range_lease) != RIN_GPU_MEMORY_OK ||
+        range_address != UINT64_C(0x90000000) || range_lease == 0u ||
+        fixture.external_range_map_count != 3u ||
+        fixture.last_range_offset != 2048u ||
+        fixture.last_range_size != 1024u ||
+        fixture.last_address_space_cookie != address_space.owner_cookie ||
+        fixture.last_address_space_generation != address_space.generation ||
+        fixture.last_device_generation != address_space.device_generation ||
+        rin_gpu_memory_unmap_external(&range_runtime, range_lease) !=
+            RIN_GPU_MEMORY_OK ||
+        fixture.external_live_count != 0u)
+        goto done;
+    if (rin_gpu_memory_destroy_allocation(&range_runtime,
                                           range_allocation) !=
             RIN_GPU_MEMORY_OK ||
         rin_gpu_memory_runtime_destroy(&range_runtime) != RIN_GPU_MEMORY_OK)

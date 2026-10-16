@@ -1671,6 +1671,7 @@ static int ringpu_memory_map_external_internal(
     RinGpuMemoryAllocationSlot* allocation;
     int user_process_mapping;
     int gpu_process_mapping;
+    int display_fetch_mapping;
     RinGpuMemoryLeaseSlot* lease;
     uint64_t address = 0u;
     uint64_t mapping_cookie = 0u;
@@ -1722,6 +1723,8 @@ static int ringpu_memory_map_external_internal(
         space.kind == RIN_GPU_MEMORY_ADDRESS_SPACE_USER_PROCESS;
     gpu_process_mapping =
         space.kind == RIN_GPU_MEMORY_ADDRESS_SPACE_GPU_PROCESS;
+    display_fetch_mapping =
+        space.kind == RIN_GPU_MEMORY_ADDRESS_SPACE_DISPLAY_FETCH;
     if ((exact_gpu_range &&
          (state->external_mapping_provider.map_range == NULL ||
           (state->external_mapping_provider.flags &
@@ -1736,7 +1739,7 @@ static int ringpu_memory_map_external_internal(
     if (space.struct_size != sizeof(space) ||
         space.version != RIN_GPU_MEMORY_ADDRESS_SPACE_VERSION ||
         (exact_gpu_range
-             ? !gpu_process_mapping
+             ? (!gpu_process_mapping && !display_fetch_mapping)
              : (space.kind != RIN_GPU_MEMORY_ADDRESS_SPACE_DISPLAY_FETCH &&
                 !user_process_mapping)) ||
         space.flags != 0u || space.owner_cookie == 0u ||

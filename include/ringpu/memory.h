@@ -286,8 +286,9 @@ typedef struct RinGpuMemoryExternalMappingOpsV1 {
 } RinGpuMemoryExternalMappingOpsV1;
 #define RIN_GPU_MEMORY_EXTERNAL_MAPPING_OPS_VERSION 1u
 
-/* V2 maps only the explicitly authorized backing byte range. It is reserved
- * for a process GPU address space; the callback must not map bytes before or
+/* V2 maps only the explicitly authorized backing byte range for either a
+ * process GPU address space or DISPLAY_FETCH. The callback must validate the
+ * supplied address-space kind and generation and must not map bytes before or
  * after [allocation_offset, allocation_offset + range_size). The returned
  * address is meaningful only in the exact supplied address-space identity,
  * and is not implicitly a GPUVA or IOVA. `mapping_cookie_out` owns the exact
