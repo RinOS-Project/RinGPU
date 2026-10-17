@@ -47,6 +47,7 @@ enum {
     SPV_OP_COMPOSITE_CONSTRUCT = 80,
     SPV_OP_COMPOSITE_EXTRACT = 81,
     SPV_OP_COPY_OBJECT = 83,
+    SPV_OP_CONVERT_S_TO_F = 111,
     SPV_OP_IMAGE_SAMPLE_IMPLICIT_LOD = 87,
     SPV_OP_F_NEGATE = 127,
     SPV_OP_I_ADD = 128,
@@ -98,7 +99,8 @@ enum {
 };
 
 enum {
-    SPV_BUILTIN_POSITION = 0
+    SPV_BUILTIN_POSITION = 0,
+    SPV_BUILTIN_VERTEX_INDEX = 42
 };
 
 enum SpvTypeKind {
@@ -123,6 +125,7 @@ typedef struct SpvType {
     uint32_t element;
     uint32_t length;
     uint32_t width;
+    uint32_t signedness;
     uint32_t columns;
     uint32_t rows;
     uint32_t storage_class;
@@ -886,6 +889,32 @@ static int translate_function_instruction(
             values[words[2]].type_id = words[1];
             return 1;
         }
+        if (variable->defined &&
+            variable->storage_class == SPV_STORAGE_INPUT &&
+            decorations[pointer_id].has_builtin) {
+            uint32_t value_type;
+            if (info->stage != RIN_SHADER_STAGE_VERTEX ||
+                decorations[pointer_id].builtin !=
+                    SPV_BUILTIN_VERTEX_INDEX ||
+                !id_valid(variable->type_id, bound) ||
+                types[variable->type_id].kind != SPV_TYPE_POINTER_KIND ||
+                types[variable->type_id].storage_class !=
+                    SPV_STORAGE_INPUT ||
+                types[variable->type_id].element != words[1] ||
+                !type_scalar(types, bound, words[1], &value_type) ||
+                value_type != 1u ||
+                types[words[1]].signedness != 1u ||
+                values[words[2]].type_id != 0u ||
+                values[words[2]].component_count != 0u ||
+                !alloc_register(builder, words[2], &dst))
+                return 0;
+            emitted = instruction(RIN_SHADER_OP_LOAD_BUILTIN_I32, dst,
+                                  RIN_SHADER_UNUSED, RIN_SHADER_UNUSED,
+                                  RIN_SHADER_BUILTIN_VERTEX_INDEX);
+            if (!append_instruction(builder, emitted)) return 0;
+            values[words[2]].type_id = words[1];
+            return 1;
+        }
         if (!variable->defined || variable->storage_class != SPV_STORAGE_INPUT ||
             !find_io_location(info, SPV_STORAGE_INPUT, pointer_id, &location) ||
             !id_valid(variable->type_id, bound) ||
@@ -1037,6 +1066,26 @@ static int translate_function_instruction(
         if (!append_instruction(builder, instruction(RIN_SHADER_OP_SUB_F32,
                                                      dst, zero, source0, 0u)))
             return 0;
+        values[words[2]].type_id = words[1];
+        return 1;
+    }
+    if (opcode == SPV_OP_CONVERT_S_TO_F) {
+        uint32_t source_type;
+        uint32_t destination_type;
+        if (current->word_count != 4u || !id_valid(words[1], bound) ||
+            !id_valid(words[2], bound) || !id_valid(words[3], bound) ||
+            !type_scalar(types, bound, words[1], &destination_type) ||
+            destination_type != 2u ||
+            !type_scalar(types, bound, values[words[3]].type_id,
+                         &source_type) ||
+            source_type != 1u ||
+            types[values[words[3]].type_id].signedness != 1u ||
+            !source_register(builder, words[3], &source0) ||
+            !alloc_register(builder, words[2], &dst))
+            return 0;
+        emitted = instruction(RIN_SHADER_OP_I32_TO_F32, dst, source0,
+                              RIN_SHADER_UNUSED, 0u);
+        if (!append_instruction(builder, emitted)) return 0;
         values[words[2]].type_id = words[1];
         return 1;
     }
@@ -1311,10 +1360,11 @@ bad_decor:
             case SPV_OP_TYPE_INT:
                 if (word_count_instruction != 4u ||
                     !id_valid(instruction_words[1], bound) ||
-                    instruction_words[2] != 32u) goto bad_type;
+                    instruction_words[2] != 32u ||
+                    instruction_words[3] > 1u) goto bad_type;
                 types[instruction_words[1]].kind = SPV_TYPE_INT_KIND;
                 types[instruction_words[1]].width = 32u;
-                types[instruction_words[1]].rows = instruction_words[3];
+                types[instruction_words[1]].signedness = instruction_words[3];
                 break;
             case SPV_OP_TYPE_FLOAT:
                 if (word_count_instruction != 3u ||
