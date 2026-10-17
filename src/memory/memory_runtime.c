@@ -1547,6 +1547,54 @@ done:
     return result;
 }
 
+int rin_gpu_memory_get_backing_v1(
+    RinGpuMemoryRuntime* runtime, uint64_t allocation_handle,
+    RinGpuMemoryBackingInfoV1* backing_out) {
+    RinGpuMemoryRuntimeState* state;
+    RinGpuMemoryAllocationSlot* slot;
+    int result;
+
+    if (!runtime || !backing_out || allocation_handle == 0u ||
+        ringpu_memory_overlap(runtime, sizeof(*runtime), backing_out,
+                              sizeof(*backing_out))) {
+        return RIN_GPU_MEMORY_INVALID_ARGUMENT;
+    }
+    memset(backing_out, 0, sizeof(*backing_out));
+    result = ringpu_memory_lock(runtime, &state);
+    if (result != RIN_GPU_MEMORY_OK) return result;
+    if (state->flags != RIN_GPU_MEMORY_STATUS_READY) {
+        result = state->flags == RIN_GPU_MEMORY_STATUS_LOST
+                     ? RIN_GPU_MEMORY_LOST
+                     : RIN_GPU_MEMORY_STATE;
+        goto done;
+    }
+    slot = ringpu_memory_lookup_allocation(state, allocation_handle, NULL);
+    if (!slot) {
+        result = RIN_GPU_MEMORY_STALE;
+        goto done;
+    }
+    if (slot->lease_count == 0u || slot->backing_cookie == 0u ||
+        slot->allocation_size == 0u) {
+        result = RIN_GPU_MEMORY_BUSY;
+        goto done;
+    }
+    backing_out->struct_size = sizeof(*backing_out);
+    backing_out->version = RIN_GPU_MEMORY_BACKING_INFO_V1_VERSION;
+    backing_out->heap = slot->heap;
+    backing_out->flags = slot->flags;
+    backing_out->allocation_handle = allocation_handle;
+    backing_out->backing_cookie = slot->backing_cookie;
+    backing_out->allocation_size_bytes = slot->allocation_size;
+    backing_out->alignment = slot->alignment;
+    backing_out->iommu_map_generation = state->iommu_map_generation;
+    backing_out->device_epoch = state->device_epoch;
+    result = RIN_GPU_MEMORY_OK;
+
+done:
+    ringpu_memory_unlock(state);
+    return result;
+}
+
 int rin_gpu_memory_acquire(RinGpuMemoryRuntime* runtime,
                            uint64_t allocation_handle,
                            uint32_t required_gpu_access,

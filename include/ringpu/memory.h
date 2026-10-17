@@ -107,6 +107,26 @@ typedef struct RinGpuMemoryAllocationInfoV1 {
     uint64_t reserved;
 } RinGpuMemoryAllocationInfoV1;
 
+/* Kernel/OS-Core-only view of the allocator's opaque backing identity. This
+ * is not a GPUVA, IOVA, CPU address, or application-visible resource cookie.
+ * Callers must first authenticate a live process resource binding and keep
+ * its memory lease alive until the backend has retained the imported range. */
+typedef struct RinGpuMemoryBackingInfoV1 {
+    uint32_t struct_size;
+    uint32_t version;
+    uint32_t heap;
+    uint32_t flags;
+    uint64_t allocation_handle;
+    uint64_t backing_cookie;
+    uint64_t allocation_size_bytes;
+    uint64_t alignment;
+    uint64_t iommu_map_generation;
+    uint64_t device_epoch;
+    uint64_t reserved[2];
+} RinGpuMemoryBackingInfoV1;
+
+#define RIN_GPU_MEMORY_BACKING_INFO_V1_VERSION 1u
+
 typedef struct RinGpuMemoryRebindV1 {
     uint32_t struct_size;
     uint32_t version;
@@ -384,6 +404,13 @@ int rin_gpu_memory_allocate(RinGpuMemoryRuntime* runtime,
 int rin_gpu_memory_query(RinGpuMemoryRuntime* runtime,
                          uint64_t allocation_handle,
                          RinGpuMemoryAllocationInfoV1* info);
+/* Returns the opaque backing only for a live allocation that already has a
+ * memory lease. Intended for a trusted OS-Core backend import adapter after
+ * process ownership/range validation; never expose this through the public
+ * application SDK. */
+int rin_gpu_memory_get_backing_v1(
+    RinGpuMemoryRuntime* runtime, uint64_t allocation_handle,
+    RinGpuMemoryBackingInfoV1* backing_out);
 int rin_gpu_memory_acquire(RinGpuMemoryRuntime* runtime,
                            uint64_t allocation_handle,
                            uint32_t required_gpu_access,
