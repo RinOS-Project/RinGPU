@@ -2231,6 +2231,8 @@ int rin_gpu_memory_destroy_allocation(RinGpuMemoryRuntime* runtime,
                                       uint64_t allocation_handle) {
     RinGpuMemoryRuntimeState* state;
     RinGpuMemoryAllocationSlot* slot;
+    uint32_t allocation_index;
+    uint32_t allocation_generation;
     int result;
 
     result = ringpu_memory_lock(runtime, &state);
@@ -2239,8 +2241,24 @@ int rin_gpu_memory_destroy_allocation(RinGpuMemoryRuntime* runtime,
         result = RIN_GPU_MEMORY_LOST;
         goto done;
     }
-    slot = ringpu_memory_lookup_allocation(state, allocation_handle, NULL);
-    if (!slot) {
+    if (!ringpu_memory_decode(state, allocation_handle,
+                              RIN_GPU_MEMORY_ALLOCATION_TAG,
+                              state->backend.max_allocations,
+                              &allocation_index, &allocation_generation)) {
+        result = RIN_GPU_MEMORY_STALE;
+        goto done;
+    }
+    slot = &state->allocations[allocation_index];
+    if (slot->generation != allocation_generation) {
+        result = RIN_GPU_MEMORY_STALE;
+        goto done;
+    }
+    if (slot->state == RIN_GPU_MEMORY_SLOT_CLEANUP_UNMAP ||
+        slot->state == RIN_GPU_MEMORY_SLOT_CLEANUP_DESTROY) {
+        result = ringpu_memory_cleanup_slot(state, slot);
+        goto done;
+    }
+    if (slot->state != RIN_GPU_MEMORY_SLOT_ACTIVE) {
         result = RIN_GPU_MEMORY_STALE;
         goto done;
     }
