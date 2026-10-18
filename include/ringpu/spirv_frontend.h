@@ -87,6 +87,25 @@ typedef struct RinSpirvTranslationInfoV1 {
     char diagnostic[RIN_SPIRV_DIAGNOSTIC_MAX];
 } RinSpirvTranslationInfoV1;
 
+typedef enum RinSpirvInterpolationV2 {
+    RIN_SPIRV_INTERPOLATION_UNSPECIFIED_V2 = 0,
+    RIN_SPIRV_INTERPOLATION_PERSPECTIVE_V2 = 1,
+    RIN_SPIRV_INTERPOLATION_NO_PERSPECTIVE_V2 = 2,
+    RIN_SPIRV_INTERPOLATION_FLAT_V2 = 3
+} RinSpirvInterpolationV2;
+
+/* V2 preserves per-interface interpolation decorations without changing the
+ * V1 metadata ABI. Values are indexed in parallel with base.inputs/outputs.
+ * UNSPECIFIED means the SPIR-V object had no Flat/NoPerspective decoration;
+ * the consuming API applies its specified default. */
+typedef struct RinSpirvTranslationInfoV2 {
+    uint32_t struct_size;
+    uint32_t api_version;
+    RinSpirvTranslationInfoV1 base;
+    uint32_t input_interpolation[RIN_SPIRV_MAX_IO];
+    uint32_t output_interpolation[RIN_SPIRV_MAX_IO];
+} RinSpirvTranslationInfoV2;
+
 typedef struct RinSpirvSpecializationValueV1 {
     uint32_t spec_id;
     uint32_t bits;
@@ -101,5 +120,15 @@ int ringpu_spirv_translate(const uint32_t* words, size_t word_count,
                            uint32_t override_count,
                            void* rin_shader_out, size_t rin_shader_capacity,
                            RinSpirvTranslationInfoV1* info);
+
+/* V2 accepts and preserves Flat/NoPerspective on scalar/vector IO. V1
+ * remains unchanged and rejects decorations it cannot represent. */
+int ringpu_spirv_translate_v2(const uint32_t* words, size_t word_count,
+                              uint32_t expected_stage,
+                              const RinSpirvSpecializationValueV1* overrides,
+                              uint32_t override_count,
+                              void* rin_shader_out,
+                              size_t rin_shader_capacity,
+                              RinSpirvTranslationInfoV2* info);
 
 #endif /* RINGPU_PUBLIC_SPIRV_FRONTEND_H */

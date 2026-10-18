@@ -72,6 +72,8 @@ enum {
     SPV_DECORATION_BLOCK = 2,
     SPV_DECORATION_BUFFER_BLOCK = 3,
     SPV_DECORATION_BUILT_IN = 11,
+    SPV_DECORATION_NO_PERSPECTIVE = 13,
+    SPV_DECORATION_FLAT = 14,
     SPV_DECORATION_LOCATION = 30,
     SPV_DECORATION_BINDING = 33,
     SPV_DECORATION_DESCRIPTOR_SET = 34,
@@ -151,6 +153,8 @@ typedef struct SpvDecorations {
     uint32_t has_descriptor_set;
     uint32_t builtin;
     uint32_t has_builtin;
+    uint32_t has_no_perspective;
+    uint32_t has_flat;
     uint32_t spec_id;
     uint32_t has_spec_id;
 } SpvDecorations;
@@ -454,14 +458,19 @@ static RinShaderInstructionV1 instruction(uint16_t opcode, uint16_t dst,
 static int record_io(RinSpirvTranslationInfoV1* info, const SpvDecorations* dec,
                      const SpvType* types, uint32_t bound, uint32_t id,
                      uint32_t storage, uint32_t type_id,
-                     const char* name)
+                     const char* name, uint32_t* interpolation,
+                     int accept_interpolation)
 {
     RinSpirvIoV1* io;
     uint32_t base;
     uint32_t width;
+    uint32_t io_index;
 
     if (!info || !dec || !dec->has_location ||
         dec->location >= RIN_SPIRV_MAX_IO ||
+        (dec->has_no_perspective && dec->has_flat) ||
+        ((dec->has_no_perspective || dec->has_flat) &&
+         (!accept_interpolation || !interpolation)) ||
         !type_scalar_or_vector(types, bound, type_id, &base, &width)) {
         return 0;
     }
@@ -470,14 +479,22 @@ static int record_io(RinSpirvTranslationInfoV1* info, const SpvDecorations* dec,
     if (storage == SPV_STORAGE_INPUT) {
         if (info->input_count >= RIN_SPIRV_MAX_IO)
             return 0;
-        io = &info->inputs[info->input_count];
+        io_index = info->input_count;
+        io = &info->inputs[io_index];
         ++info->input_count;
     } else {
         if (info->output_count >= RIN_SPIRV_MAX_IO)
             return 0;
-        io = &info->outputs[info->output_count];
+        io_index = info->output_count;
+        io = &info->outputs[io_index];
         ++info->output_count;
     }
+    if (interpolation)
+        interpolation[io_index] = dec->has_flat
+            ? RIN_SPIRV_INTERPOLATION_FLAT_V2
+            : dec->has_no_perspective
+                ? RIN_SPIRV_INTERPOLATION_NO_PERSPECTIVE_V2
+                : RIN_SPIRV_INTERPOLATION_UNSPECIFIED_V2;
     memset(io, 0, sizeof(*io));
     io->id = id;
     io->storage = storage == SPV_STORAGE_INPUT ? RIN_SPIRV_IO_INPUT
@@ -1288,12 +1305,16 @@ static int translate_function_instruction(
     return 1;
 }
 
-int ringpu_spirv_translate(const uint32_t* words, size_t word_count,
+static int spirv_translate_impl(
+                           const uint32_t* words, size_t word_count,
                            uint32_t expected_stage,
                            const RinSpirvSpecializationValueV1* overrides,
                            uint32_t override_count,
                            void* rin_shader_out, size_t rin_shader_capacity,
-                           RinSpirvTranslationInfoV1* info)
+                           RinSpirvTranslationInfoV1* info,
+                           uint32_t* input_interpolation,
+                           uint32_t* output_interpolation,
+                           int accept_interpolation)
 {
     uint32_t bound;
     SpvType* types = NULL;
@@ -1478,6 +1499,20 @@ int ringpu_spirv_translate(const uint32_t* words, size_t word_count,
                         if (word_count_instruction != 4u) goto bad_decor;
                         decorations[id].builtin = instruction_words[3];
                         decorations[id].has_builtin = 1u;
+                        break;
+                    case SPV_DECORATION_NO_PERSPECTIVE:
+                        if (word_count_instruction != 3u ||
+                            decorations[id].has_no_perspective ||
+                            decorations[id].has_flat)
+                            goto bad_decor;
+                        decorations[id].has_no_perspective = 1u;
+                        break;
+                    case SPV_DECORATION_FLAT:
+                        if (word_count_instruction != 3u ||
+                            decorations[id].has_flat ||
+                            decorations[id].has_no_perspective)
+                            goto bad_decor;
+                        decorations[id].has_flat = 1u;
                         break;
                     case SPV_DECORATION_SPEC_ID:
                         if (word_count_instruction != 4u) goto bad_decor;
@@ -1811,6 +1846,20 @@ bad_type:
         result = RIN_SPIRV_ERROR_UNSUPPORTED;
         goto done;
     }
+    for (index = 1u; index < bound; ++index) {
+        if (!decorations[index].has_flat &&
+            !decorations[index].has_no_perspective)
+            continue;
+        if (!accept_interpolation || !variables[index].defined ||
+            !interface_ids[index] || !decorations[index].has_location ||
+            decorations[index].has_builtin ||
+            (variables[index].storage_class != SPV_STORAGE_INPUT &&
+             variables[index].storage_class != SPV_STORAGE_OUTPUT)) {
+            diag(info, "SPIR-V interpolation decoration is not representable by this translation version");
+            result = RIN_SPIRV_ERROR_UNSUPPORTED;
+            goto done;
+        }
+    }
     info->stage = stage;
     info->entry_id = entry_id;
 
@@ -1843,7 +1892,11 @@ bad_type:
             }
             if (!record_io(info, &decorations[index], types, bound, index,
                            variables[index].storage_class, pointed,
-                           names[index]))
+                           names[index],
+                           variables[index].storage_class == SPV_STORAGE_INPUT
+                               ? input_interpolation
+                               : output_interpolation,
+                           accept_interpolation))
                 goto bad_interface;
         }
         if (!collect_descriptor(info, &decorations[index], types, bound, index,
@@ -2009,5 +2062,37 @@ done:
     free(values);
     free(decorations);
     free(types);
+    return result;
+}
+
+int ringpu_spirv_translate(const uint32_t* words, size_t word_count,
+                           uint32_t expected_stage,
+                           const RinSpirvSpecializationValueV1* overrides,
+                           uint32_t override_count,
+                           void* rin_shader_out, size_t rin_shader_capacity,
+                           RinSpirvTranslationInfoV1* info)
+{
+    return spirv_translate_impl(words, word_count, expected_stage, overrides,
+                                override_count, rin_shader_out,
+                                rin_shader_capacity, info, NULL, NULL, 0);
+}
+
+int ringpu_spirv_translate_v2(
+        const uint32_t* words, size_t word_count, uint32_t expected_stage,
+        const RinSpirvSpecializationValueV1* overrides,
+        uint32_t override_count, void* rin_shader_out,
+        size_t rin_shader_capacity, RinSpirvTranslationInfoV2* info)
+{
+    int result;
+
+    if (!info)
+        return RIN_SPIRV_ERROR_INVALID_ARGUMENT;
+    memset(info, 0, sizeof(*info));
+    info->struct_size = sizeof(*info);
+    info->api_version = 2u;
+    result = spirv_translate_impl(
+        words, word_count, expected_stage, overrides, override_count,
+        rin_shader_out, rin_shader_capacity, &info->base,
+        info->input_interpolation, info->output_interpolation, 1);
     return result;
 }
