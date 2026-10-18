@@ -47,6 +47,7 @@ enum {
     SPV_OP_COMPOSITE_CONSTRUCT = 80,
     SPV_OP_COMPOSITE_EXTRACT = 81,
     SPV_OP_COPY_OBJECT = 83,
+    SPV_OP_SAMPLED_IMAGE = 86,
     SPV_OP_CONVERT_S_TO_F = 111,
     SPV_OP_IMAGE_SAMPLE_IMPLICIT_LOD = 87,
     SPV_OP_F_NEGATE = 127,
@@ -133,6 +134,12 @@ typedef struct SpvType {
     uint32_t members[16];
     uint32_t member_offsets[16];
     uint32_t member_offsets_set;
+    uint32_t image_dimension;
+    uint32_t image_depth;
+    uint32_t image_arrayed;
+    uint32_t image_multisampled;
+    uint32_t image_sampled;
+    uint32_t image_format;
 } SpvType;
 
 typedef struct SpvDecorations {
@@ -155,7 +162,17 @@ typedef struct SpvValue {
     uint32_t specialization;
     uint32_t component_count;
     uint16_t component_registers[4];
+    uint32_t opaque_kind;
+    uint32_t image_resource_index;
+    uint32_t sampler_resource_index;
 } SpvValue;
+
+enum {
+    SPV_VALUE_OPAQUE_NONE = 0,
+    SPV_VALUE_OPAQUE_IMAGE,
+    SPV_VALUE_OPAQUE_SAMPLER,
+    SPV_VALUE_OPAQUE_SAMPLED_IMAGE
+};
 
 typedef struct SpvVariable {
     uint32_t type_id;
@@ -547,6 +564,26 @@ static int collect_descriptor(RinSpirvTranslationInfoV1* info,
     return 1;
 }
 
+static int descriptor_resource_index(
+    const RinSpirvTranslationInfoV1* info, uint32_t descriptor_id,
+    uint32_t expected_kind, uint32_t* resource_index_out)
+{
+    uint32_t index;
+
+    if (!info || !resource_index_out || descriptor_id == 0u)
+        return 0;
+    for (index = 0u; index < info->descriptor_count; ++index) {
+        const RinSpirvDescriptorV1* descriptor = &info->descriptors[index];
+        if (descriptor->id != descriptor_id) continue;
+        if (descriptor->resource_kind != expected_kind ||
+            descriptor->resource_index >= RIN_SHADER_MAX_RESOURCES)
+            return 0;
+        *resource_index_out = descriptor->resource_index;
+        return 1;
+    }
+    return 0;
+}
+
 static int resource_pointer_info(const RinSpirvTranslationInfoV1* info,
                                  const SpvVariable* variables,
                                  uint32_t bound, uint32_t pointer_id,
@@ -830,6 +867,102 @@ static int translate_function_instruction(
         values[words[2]].type_id = words[1];
         return 1;
     }
+    if (opcode == SPV_OP_SAMPLED_IMAGE) {
+        const SpvValue* image;
+        const SpvValue* sampler;
+        if (current->word_count != 5u || !id_valid(words[1], bound) ||
+            !id_valid(words[2], bound) || !id_valid(words[3], bound) ||
+            !id_valid(words[4], bound) ||
+            types[words[1]].kind != SPV_TYPE_SAMPLED_IMAGE_KIND ||
+            values[words[2]].type_id != 0u ||
+            values[words[2]].opaque_kind != SPV_VALUE_OPAQUE_NONE)
+            return 0;
+        image = &values[words[3]];
+        sampler = &values[words[4]];
+        if (image->opaque_kind != SPV_VALUE_OPAQUE_IMAGE ||
+            sampler->opaque_kind != SPV_VALUE_OPAQUE_SAMPLER ||
+            types[words[1]].element != image->type_id)
+            return 0;
+        values[words[2]].type_id = words[1];
+        values[words[2]].opaque_kind = SPV_VALUE_OPAQUE_SAMPLED_IMAGE;
+        values[words[2]].image_resource_index =
+            image->image_resource_index;
+        values[words[2]].sampler_resource_index =
+            sampler->sampler_resource_index;
+        return 1;
+    }
+    if (opcode == SPV_OP_IMAGE_SAMPLE_IMPLICIT_LOD) {
+        const SpvValue* sampled_image;
+        const SpvValue* coordinate;
+        const SpvType* sampled_image_type;
+        const SpvType* image_type;
+        uint32_t coordinate_base;
+        uint32_t coordinate_width;
+        uint32_t result_base;
+        uint32_t result_width;
+        if (current->word_count != 5u || !id_valid(words[1], bound) ||
+            !id_valid(words[2], bound) || !id_valid(words[3], bound) ||
+            !id_valid(words[4], bound) ||
+            values[words[2]].type_id != 0u ||
+            values[words[2]].component_count != 0u ||
+            values[words[2]].opaque_kind != SPV_VALUE_OPAQUE_NONE)
+            return 0;
+        sampled_image = &values[words[3]];
+        coordinate = &values[words[4]];
+        if (sampled_image->opaque_kind !=
+                SPV_VALUE_OPAQUE_SAMPLED_IMAGE ||
+            sampled_image->image_resource_index >= RIN_SHADER_MAX_RESOURCES ||
+            sampled_image->sampler_resource_index >=
+                RIN_SHADER_MAX_RESOURCES ||
+            coordinate->component_count != 2u ||
+            !id_valid(sampled_image->type_id, bound))
+            return 0;
+        sampled_image_type = &types[sampled_image->type_id];
+        if (sampled_image_type->kind != SPV_TYPE_SAMPLED_IMAGE_KIND ||
+            !id_valid(sampled_image_type->element, bound))
+            return 0;
+        image_type = &types[sampled_image_type->element];
+        if (image_type->kind != SPV_TYPE_IMAGE_KIND ||
+            image_type->image_dimension != 1u ||
+            image_type->image_depth != 0u ||
+            image_type->image_arrayed != 0u ||
+            image_type->image_multisampled != 0u ||
+            image_type->image_sampled != 1u || image_type->image_format != 0u ||
+            !type_scalar_or_vector(types, bound, words[1], &result_base,
+                                   &result_width) ||
+            result_base != 2u || result_width != 4u ||
+            !id_valid(coordinate->type_id, bound) ||
+            types[coordinate->type_id].kind != SPV_TYPE_VECTOR_KIND ||
+            types[coordinate->type_id].length != 2u ||
+            !type_scalar_or_vector(types, bound, coordinate->type_id,
+                                   &coordinate_base, &coordinate_width) ||
+            coordinate_base != 2u || coordinate_width != 2u)
+            return 0;
+        for (uint32_t component = 0u; component < 4u; ++component) {
+            if (!alloc_temporary_register(builder, &dst)) return 0;
+            emitted = instruction(RIN_SHADER_OP_SAMPLE_IMAGE_2D_F32, dst,
+                                 coordinate->component_registers[0],
+                                 coordinate->component_registers[1], 0u);
+            emitted.resource = (uint16_t)
+                sampled_image->image_resource_index;
+            emitted.immediate =
+                sampled_image->sampler_resource_index;
+            emitted.flags = (uint16_t)component;
+            if (!append_instruction(builder, emitted)) return 0;
+            values[words[2]].component_registers[component] = dst;
+        }
+        values[words[2]].type_id = words[1];
+        values[words[2]].component_count = 4u;
+        if (builder->resource_count <=
+            sampled_image->image_resource_index)
+            builder->resource_count =
+                sampled_image->image_resource_index + 1u;
+        if (builder->resource_count <=
+            sampled_image->sampler_resource_index)
+            builder->resource_count =
+                sampled_image->sampler_resource_index + 1u;
+        return 1;
+    }
     if (opcode == SPV_OP_COPY_OBJECT) {
         if (current->word_count != 4u || !id_valid(words[1], bound) ||
             !id_valid(words[2], bound) ||
@@ -854,6 +987,38 @@ static int translate_function_instruction(
             return 0;
         pointer_id = words[3];
         variable = &variables[pointer_id];
+        if (variable->defined &&
+            variable->storage_class == SPV_STORAGE_UNIFORM_CONSTANT &&
+            id_valid(variable->type_id, bound) &&
+            types[variable->type_id].kind == SPV_TYPE_POINTER_KIND &&
+            types[variable->type_id].storage_class ==
+                SPV_STORAGE_UNIFORM_CONSTANT &&
+            types[variable->type_id].element == words[1] &&
+            values[words[2]].type_id == 0u &&
+            values[words[2]].opaque_kind == SPV_VALUE_OPAQUE_NONE) {
+            uint32_t expected_kind;
+            uint32_t resource_index;
+            uint32_t opaque_kind;
+            if (types[words[1]].kind == SPV_TYPE_IMAGE_KIND) {
+                expected_kind = RIN_SHADER_RESOURCE_SAMPLED_IMAGE;
+                opaque_kind = SPV_VALUE_OPAQUE_IMAGE;
+            } else if (types[words[1]].kind == SPV_TYPE_SAMPLER_KIND) {
+                expected_kind = RIN_SHADER_RESOURCE_SAMPLER;
+                opaque_kind = SPV_VALUE_OPAQUE_SAMPLER;
+            } else {
+                return 0;
+            }
+            if (!descriptor_resource_index(info, pointer_id, expected_kind,
+                                           &resource_index))
+                return 0;
+            values[words[2]].type_id = words[1];
+            values[words[2]].opaque_kind = opaque_kind;
+            if (opaque_kind == SPV_VALUE_OPAQUE_IMAGE)
+                values[words[2]].image_resource_index = resource_index;
+            else
+                values[words[2]].sampler_resource_index = resource_index;
+            return 1;
+        }
         if ((variable->pointer_defined ||
              (variable->defined &&
               variable->storage_class == SPV_STORAGE_STORAGE_BUFFER))) {
@@ -1394,9 +1559,24 @@ bad_decor:
                 types[instruction_words[1]].columns = instruction_words[3];
                 break;
             case SPV_OP_TYPE_IMAGE:
-                if (word_count_instruction < 2u ||
-                    !id_valid(instruction_words[1], bound)) goto bad_type;
+                if ((word_count_instruction != 9u &&
+                     word_count_instruction != 10u) ||
+                    !id_valid(instruction_words[1], bound) ||
+                    !id_valid(instruction_words[2], bound)) goto bad_type;
                 types[instruction_words[1]].kind = SPV_TYPE_IMAGE_KIND;
+                types[instruction_words[1]].element = instruction_words[2];
+                types[instruction_words[1]].image_dimension =
+                    instruction_words[3];
+                types[instruction_words[1]].image_depth =
+                    instruction_words[4];
+                types[instruction_words[1]].image_arrayed =
+                    instruction_words[5];
+                types[instruction_words[1]].image_multisampled =
+                    instruction_words[6];
+                types[instruction_words[1]].image_sampled =
+                    instruction_words[7];
+                types[instruction_words[1]].image_format =
+                    instruction_words[8];
                 break;
             case SPV_OP_TYPE_SAMPLER:
                 if (word_count_instruction != 2u ||
@@ -1526,7 +1706,68 @@ bad_type:
                 if (!collect_storage_access_chain(
                         instruction_words, word_count_instruction, types,
                         values, variables, bound)) {
-                    diag(info, "SPIR-V access chain is outside the bounded storage-buffer profile");
+                    const uint32_t pointer_id =
+                        word_count_instruction > 1u
+                            ? instruction_words[1] : 0u;
+                    const uint32_t result_id =
+                        word_count_instruction > 2u
+                            ? instruction_words[2] : 0u;
+                    const uint32_t base_id =
+                        word_count_instruction > 3u
+                            ? instruction_words[3] : 0u;
+                    const uint32_t index_id =
+                        word_count_instruction > 4u
+                            ? instruction_words[4] : 0u;
+                    const uint32_t pointer_kind =
+                        id_valid(pointer_id, bound)
+                            ? types[pointer_id].kind : SPV_TYPE_NONE;
+                    const uint32_t pointer_storage =
+                        pointer_kind == SPV_TYPE_POINTER_KIND
+                            ? types[pointer_id].storage_class : UINT32_MAX;
+                    const uint32_t pointer_element =
+                        pointer_kind == SPV_TYPE_POINTER_KIND
+                            ? types[pointer_id].element : 0u;
+                    const uint32_t base_type_id =
+                        id_valid(base_id, bound)
+                            ? variables[base_id].type_id : 0u;
+                    const uint32_t base_pointer_storage =
+                        id_valid(base_type_id, bound) &&
+                                types[base_type_id].kind ==
+                                    SPV_TYPE_POINTER_KIND
+                            ? types[base_type_id].storage_class : UINT32_MAX;
+                    const uint32_t base_element =
+                        id_valid(base_type_id, bound) &&
+                                types[base_type_id].kind ==
+                                    SPV_TYPE_POINTER_KIND
+                            ? types[base_type_id].element : 0u;
+                    const uint32_t index_type_id =
+                        id_valid(index_id, bound)
+                            ? values[index_id].type_id : 0u;
+                    const uint32_t aggregate_kind =
+                        id_valid(base_element, bound)
+                            ? types[base_element].kind : SPV_TYPE_NONE;
+                    diag(info,
+                         "SPIR-V access chain outside bounded profile: ptr=%u/%u storage=%u elem=%u base=%u defined=%u storage=%u type=%u ptr-storage=%u elem=%u index=%u defined=%u type=%u bits=%u aggregate=%u members=%u offsets=0x%x result-defined=%u",
+                         pointer_id, pointer_kind, pointer_storage,
+                         pointer_element, base_id,
+                         id_valid(base_id, bound)
+                             ? variables[base_id].defined : 0u,
+                         id_valid(base_id, bound)
+                             ? variables[base_id].storage_class : UINT32_MAX,
+                         base_type_id, base_pointer_storage, base_element,
+                         index_id,
+                         id_valid(index_id, bound)
+                             ? values[index_id].defined : 0u,
+                         index_type_id,
+                         id_valid(index_id, bound)
+                             ? values[index_id].bits : 0u,
+                         aggregate_kind,
+                         aggregate_kind == SPV_TYPE_STRUCT_KIND
+                             ? types[base_element].member_count : 0u,
+                         aggregate_kind == SPV_TYPE_STRUCT_KIND
+                             ? types[base_element].member_offsets_set : 0u,
+                         id_valid(result_id, bound)
+                             ? variables[result_id].defined : 0u);
                     result = RIN_SPIRV_ERROR_UNSUPPORTED;
                     goto done;
                 }
@@ -1537,7 +1778,6 @@ bad_type:
             case SPV_OP_SPEC_CONSTANT_FALSE:
             case SPV_OP_FUNCTION_PARAMETER:
             case SPV_OP_VECTOR_SHUFFLE:
-            case SPV_OP_IMAGE_SAMPLE_IMPLICIT_LOD:
             case SPV_OP_UNREACHABLE:
                 diag(info, "SPIR-V instruction %u is outside the bounded profile",
                      opcode);
