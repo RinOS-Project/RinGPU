@@ -452,6 +452,10 @@ int rin_gpu_memory_upload(RinGpuMemoryRuntime* runtime,
 int rin_gpu_memory_readback(RinGpuMemoryRuntime* runtime,
                             uint64_t allocation_handle, uint64_t offset,
                             void* destination, uint64_t length);
+/* Destroy the exact generation-bound handle. If backing destruction fails
+ * while the runtime remains available, the same handle retries that cleanup
+ * without repeating active-allocation accounting. rin_gpu_memory_maintain()
+ * also retries pending cleanup slots when no individual handle is available. */
 int rin_gpu_memory_destroy_allocation(RinGpuMemoryRuntime* runtime,
                                       uint64_t allocation_handle);
 /* Revokes every allocation and GPU lease owned by the runtime.  The caller
