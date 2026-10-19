@@ -157,16 +157,19 @@ typedef int (*RinGpuMemoryMapFn)(
 typedef int (*RinGpuMemoryUnmapFn)(
     void* context, uint64_t iommu_domain_cookie,
     uint64_t iommu_map_generation, uint64_t mapping_cookie);
-/* CPU_TO_DEVICE flushes CPU writes; DEVICE_TO_CPU invalidates stale CPU cache
- * lines after device completion. The backend may expand the requested range
- * to its cache-maintenance granularity, but must stay inside the allocation.
- * Success guarantees visibility for the requested bytes. */
+/* CPU_TO_DEVICE flushes CPU writes for an allocation admitted with
+ * RIN_GPU_MEMORY_GPU_READ; DEVICE_TO_CPU invalidates stale CPU cache lines
+ * after device completion for an allocation admitted with
+ * RIN_GPU_MEMORY_GPU_WRITE. The backend may expand the requested range to its
+ * cache-maintenance granularity, but must stay inside the allocation. Success
+ * guarantees visibility for the requested bytes. */
 typedef int (*RinGpuMemorySyncFn)(
     void* context, uint64_t backing_cookie, uint32_t action,
     uint64_t offset, uint64_t length);
-/* A successful upload has copied every source byte into the CPU-visible
- * backing.  On failure the runtime performs no device cache sync and blocks
- * new GPU leases until a successful full-allocation upload retries it. */
+/* Upload is valid only for allocations admitted with GPU_READ. A successful
+ * upload has copied every source byte into the CPU-visible backing. On failure
+ * the runtime performs no device cache sync and blocks new GPU leases until a
+ * successful full-allocation upload retries it. */
 typedef int (*RinGpuMemoryCpuUploadFn)(
     void* context, uint64_t backing_cookie, uint64_t offset,
     const void* source, uint64_t length);
@@ -216,9 +219,10 @@ typedef struct RinGpuMemoryBackendV1 {
 } RinGpuMemoryBackendV1;
 
 /* Optional CPU readback is a separate, versioned extension so V1 backend
- * layout and its CPU-upload contract remain unchanged. The caller must wait
- * for device writes to complete before requesting readback. The runtime
- * performs DEVICE_TO_CPU synchronization before invoking this callback. */
+ * layout and its CPU-upload contract remain unchanged. It is valid only for
+ * allocations admitted with GPU_WRITE. The caller must wait for device writes
+ * to complete before requesting readback. The runtime performs DEVICE_TO_CPU
+ * synchronization before invoking this callback. */
 typedef int (*RinGpuMemoryCpuReadbackFn)(
     void* context, uint64_t backing_cookie, uint64_t offset,
     void* destination, uint64_t length);

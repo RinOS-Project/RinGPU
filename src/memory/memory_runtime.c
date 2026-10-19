@@ -2042,7 +2042,11 @@ int rin_gpu_memory_sync(RinGpuMemoryRuntime* runtime,
         (action != RIN_GPU_MEMORY_SYNC_CPU_TO_DEVICE &&
          action != RIN_GPU_MEMORY_SYNC_DEVICE_TO_CPU) ||
         length == 0u || offset > slot->requested_size ||
-        length > slot->requested_size - offset) {
+        length > slot->requested_size - offset ||
+        (action == RIN_GPU_MEMORY_SYNC_CPU_TO_DEVICE &&
+         (slot->flags & RIN_GPU_MEMORY_GPU_READ) == 0u) ||
+        (action == RIN_GPU_MEMORY_SYNC_DEVICE_TO_CPU &&
+         (slot->flags & RIN_GPU_MEMORY_GPU_WRITE) == 0u)) {
         result = RIN_GPU_MEMORY_INVALID_ARGUMENT;
         goto done;
     }
@@ -2095,6 +2099,7 @@ int rin_gpu_memory_upload(RinGpuMemoryRuntime* runtime,
         goto done;
     }
     if ((slot->flags & RIN_GPU_MEMORY_CPU_VISIBLE) == 0u ||
+        (slot->flags & RIN_GPU_MEMORY_GPU_READ) == 0u ||
         offset > slot->requested_size ||
         length > slot->requested_size - offset) {
         result = RIN_GPU_MEMORY_INVALID_ARGUMENT;
@@ -2176,6 +2181,7 @@ int rin_gpu_memory_readback(RinGpuMemoryRuntime* runtime,
         goto done;
     }
     if ((slot->flags & RIN_GPU_MEMORY_CPU_VISIBLE) == 0u ||
+        (slot->flags & RIN_GPU_MEMORY_GPU_WRITE) == 0u ||
         offset > slot->requested_size ||
         length > slot->requested_size - offset) {
         result = RIN_GPU_MEMORY_INVALID_ARGUMENT;
