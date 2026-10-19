@@ -133,8 +133,13 @@ typedef struct SwVertexBindings {
 
 typedef struct SwGraphicsBindGroup {
     const SwPipeline* pipeline;
+    struct RinGpuSoftwareBackend* backend;
+    const SwBuffer* buffers[RIN_SHADER_MAX_RESOURCES];
     const SwImage* images[RIN_SHADER_MAX_RESOURCES];
     const SwSampler* samplers[RIN_SHADER_MAX_RESOURCES];
+    uint64_t buffer_offsets[RIN_SHADER_MAX_RESOURCES];
+    uint64_t buffer_sizes[RIN_SHADER_MAX_RESOURCES];
+    uint32_t buffer_access[RIN_SHADER_MAX_RESOURCES];
     /* A sampled binding can name either one exact mip or, when the public
      * chain flag is present, the remaining contiguous mips.  Keep this
      * metadata in the backend object rather than changing SwImage's selected
@@ -145,6 +150,18 @@ typedef struct SwGraphicsBindGroup {
     uint32_t kinds[RIN_SHADER_MAX_RESOURCES];
     uint32_t binding_count;
 } SwGraphicsBindGroup;
+
+typedef struct SwGraphicsStorageSnapshotEntry {
+    uint8_t* memory;
+    uint64_t size_bytes;
+    uint8_t* bytes;
+} SwGraphicsStorageSnapshotEntry;
+
+typedef struct SwGraphicsStorageSnapshot {
+    struct RinGpuSoftwareBackend* backend;
+    SwGraphicsStorageSnapshotEntry entries[RIN_SHADER_MAX_RESOURCES];
+    uint32_t entry_count;
+} SwGraphicsStorageSnapshot;
 
 typedef struct SwClipVertex {
     float f32[SW_MAX_IO];
@@ -3031,7 +3048,9 @@ static int sw_shader_storage_access(const SwShader* shader,
         return RIN_GPU_ERROR_INVALID_ARGUMENT;
     }
     header = (const RinShaderHeaderV1*)shader->ir;
-    if (header->stage != RIN_SHADER_STAGE_COMPUTE ||
+    if ((header->stage != RIN_SHADER_STAGE_COMPUTE &&
+         header->stage != RIN_SHADER_STAGE_VERTEX &&
+         header->stage != RIN_SHADER_STAGE_FRAGMENT) ||
         resource >= header->resource_count ||
         header->header_size < sizeof(*header) ||
         header->instruction_count >
@@ -3058,8 +3077,48 @@ static int sw_shader_storage_access(const SwShader* shader,
             access |= RIN_GPU_RESOURCE_READ | RIN_GPU_RESOURCE_WRITE;
         }
     }
-    if (access == 0u)
+    *access_out = access;
+    return RIN_GPU_OK;
+}
+
+static int sw_graphics_shader_storage_access(const SwPipeline* pipeline,
+                                             uint32_t resource,
+                                             uint32_t* access_out)
+{
+    const SwShader* shaders[2];
+    const uint32_t stages[2] = {
+        RIN_SHADER_STAGE_VERTEX, RIN_SHADER_STAGE_FRAGMENT
+    };
+    uint32_t access = 0u;
+
+    if (!pipeline || !pipeline->vertex || !pipeline->fragment || !access_out)
         return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    shaders[0] = pipeline->vertex;
+    shaders[1] = pipeline->fragment;
+    for (uint32_t stage = 0u; stage < 2u; ++stage) {
+        const SwShader* shader = shaders[stage];
+        const RinShaderHeaderV1* header;
+        uint32_t stage_access = 0u;
+        int result;
+
+        if (!shader->ir || shader->ir_size < sizeof(*header))
+            return RIN_GPU_ERROR_INVALID_ARGUMENT;
+        header = (const RinShaderHeaderV1*)shader->ir;
+        if (header->stage != stages[stage] ||
+            header->header_size < sizeof(*header) ||
+            header->header_size > shader->ir_size ||
+            header->instruction_count >
+                (shader->ir_size - header->header_size) /
+                    sizeof(RinShaderInstructionV1)) {
+            return RIN_GPU_ERROR_INVALID_ARGUMENT;
+        }
+        if (resource >= header->resource_count)
+            continue;
+        result = sw_shader_storage_access(shader, resource, &stage_access);
+        if (result != RIN_GPU_OK)
+            return result;
+        access |= stage_access;
+    }
     *access_out = access;
     return RIN_GPU_OK;
 }
@@ -3094,7 +3153,8 @@ static int sw_create_compute_bind_group(
 
         result = sw_shader_storage_access(pipeline->shader, binding,
                                           &expected_access);
-        if (result != RIN_GPU_OK || !buffer || source->reserved != 0u ||
+        if (result != RIN_GPU_OK || expected_access == 0u || !buffer ||
+            source->reserved != 0u ||
             source->access != expected_access ||
             (source->offset & 3u) != 0u || (source->size_bytes & 3u) != 0u ||
             source->offset > buffer->size_bytes ||
@@ -3137,6 +3197,7 @@ static int sw_create_graphics_bind_group(
     group = sw_alloc(backend, sizeof(*group), 1);
     if (!group) return RIN_GPU_ERROR_NO_MEMORY;
     group->pipeline = pipeline;
+    group->backend = backend;
     group->binding_count = binding_count;
     for (uint32_t index = 0u; index < binding_count; ++index) {
         const RinGpuBackendGraphicsBindingV1* binding = &bindings[index];
@@ -3148,7 +3209,33 @@ static int sw_create_graphics_bind_group(
             sw_free(backend, group, sizeof(*group));
             return RIN_GPU_ERROR_INVALID_ARGUMENT;
         }
-        if (binding->kind == RIN_SHADER_RESOURCE_STORAGE_IMAGE) {
+        if (binding->kind == RIN_SHADER_RESOURCE_STORAGE_BUFFER) {
+            const SwBuffer* buffer =
+                (const SwBuffer*)(uintptr_t)binding->resource_cookie;
+            uint32_t expected_access = 0u;
+            int access_result = sw_graphics_shader_storage_access(
+                pipeline, binding->binding, &expected_access);
+
+            if (access_result != RIN_GPU_OK || expected_access == 0u ||
+                binding->access != expected_access || !buffer ||
+                !buffer->bytes || binding->access == 0u ||
+                (binding->access & ~RIN_GPU_RESOURCE_KNOWN_ACCESS) != 0u ||
+                binding->flags != 0u || binding->mip_level != 0u ||
+                binding->array_layer != 0u ||
+                (binding->offset & 3u) != 0u ||
+                binding->size_bytes == 0u ||
+                (binding->size_bytes & 3u) != 0u ||
+                binding->offset > buffer->size_bytes ||
+                binding->size_bytes >
+                    buffer->size_bytes - binding->offset) {
+                sw_free(backend, group, sizeof(*group));
+                return RIN_GPU_ERROR_INVALID_ARGUMENT;
+            }
+            group->buffers[binding->binding] = buffer;
+            group->buffer_offsets[binding->binding] = binding->offset;
+            group->buffer_sizes[binding->binding] = binding->size_bytes;
+            group->buffer_access[binding->binding] = binding->access;
+        } else if (binding->kind == RIN_SHADER_RESOURCE_STORAGE_IMAGE) {
             const SwImage* image =
                 (const SwImage*)(uintptr_t)binding->resource_cookie;
             SwImage image_view;
@@ -3271,6 +3358,137 @@ static void sw_destroy_graphics_bind_group(void* opaque, uint64_t cookie)
 {
     sw_free((RinGpuSoftwareBackend*)opaque, (void*)(uintptr_t)cookie,
             sizeof(SwGraphicsBindGroup));
+}
+
+/* Graphics commands execute a validation pass before publishing color/depth
+ * output. Storage writes must participate in that deterministic pass so
+ * read-after-write behavior is identical, then be rolled back before the
+ * publication pass. Snapshot only the bound writable ranges, coalescing
+ * aliases so overlapping bindings restore the original bytes exactly once. */
+static int sw_graphics_storage_snapshot_begin(
+    const SwGraphicsBindGroup* group, SwGraphicsStorageSnapshot* snapshot)
+{
+    uint32_t count = 0u;
+
+    if (!snapshot)
+        return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    memset(snapshot, 0, sizeof(*snapshot));
+    if (!group)
+        return RIN_GPU_OK;
+    snapshot->backend = group->backend;
+    for (uint32_t binding = 0u; binding < group->binding_count; ++binding) {
+        const SwBuffer* buffer = group->buffers[binding];
+        uint64_t offset = group->buffer_offsets[binding];
+        uint64_t size_bytes = group->buffer_sizes[binding];
+
+        if ((group->buffer_access[binding] & RIN_GPU_RESOURCE_WRITE) == 0u)
+            continue;
+        if (group->kinds[binding] != RIN_SHADER_RESOURCE_STORAGE_BUFFER ||
+            !buffer || !buffer->bytes || size_bytes == 0u ||
+            offset > buffer->size_bytes ||
+            size_bytes > buffer->size_bytes - offset ||
+            count >= RIN_SHADER_MAX_RESOURCES) {
+            return RIN_GPU_ERROR_INVALID_ARGUMENT;
+        }
+        snapshot->entries[count].memory =
+            buffer->bytes + (size_t)offset;
+        snapshot->entries[count].size_bytes = size_bytes;
+        ++count;
+    }
+
+    /* The resource table is small and fixed, so insertion sort keeps this
+     * canonicalization bounded without another allocation. */
+    for (uint32_t index = 1u; index < count; ++index) {
+        SwGraphicsStorageSnapshotEntry entry = snapshot->entries[index];
+        uint32_t position = index;
+        while (position != 0u) {
+            const SwGraphicsStorageSnapshotEntry* previous =
+                &snapshot->entries[position - 1u];
+            uintptr_t previous_memory = (uintptr_t)previous->memory;
+            uintptr_t entry_memory = (uintptr_t)entry.memory;
+            if (previous_memory < entry_memory ||
+                (previous_memory == entry_memory &&
+                 previous->size_bytes >= entry.size_bytes)) {
+                break;
+            }
+            snapshot->entries[position] = *previous;
+            --position;
+        }
+        snapshot->entries[position] = entry;
+    }
+
+    uint32_t merged_count = 0u;
+    for (uint32_t index = 0u; index < count; ++index) {
+        SwGraphicsStorageSnapshotEntry* entry = &snapshot->entries[index];
+        if (merged_count != 0u) {
+            SwGraphicsStorageSnapshotEntry* previous =
+                &snapshot->entries[merged_count - 1u];
+            uintptr_t previous_start = (uintptr_t)previous->memory;
+            uintptr_t entry_start = (uintptr_t)entry->memory;
+            uintptr_t distance = entry_start - previous_start;
+            if (entry_start >= previous_start &&
+                distance <= previous->size_bytes) {
+                uint64_t extended_size;
+                if (entry->size_bytes > UINT64_MAX - distance)
+                    return RIN_GPU_ERROR_BOUNDS;
+                extended_size = (uint64_t)distance + entry->size_bytes;
+                if (extended_size > previous->size_bytes)
+                    previous->size_bytes = extended_size;
+                continue;
+            }
+        }
+        if (merged_count != index)
+            snapshot->entries[merged_count] = *entry;
+        ++merged_count;
+    }
+    snapshot->entry_count = merged_count;
+
+    for (uint32_t index = 0u; index < snapshot->entry_count; ++index) {
+        SwGraphicsStorageSnapshotEntry* entry = &snapshot->entries[index];
+        entry->bytes = sw_alloc(snapshot->backend, entry->size_bytes, 0);
+        if (!entry->bytes) {
+            for (uint32_t release = 0u; release < snapshot->entry_count;
+                 ++release) {
+                if (snapshot->entries[release].bytes) {
+                    sw_free(snapshot->backend,
+                            snapshot->entries[release].bytes,
+                            snapshot->entries[release].size_bytes);
+                }
+                snapshot->entries[release].bytes = NULL;
+            }
+            snapshot->entry_count = 0u;
+            return RIN_GPU_ERROR_NO_MEMORY;
+        }
+        memcpy(entry->bytes, entry->memory,
+               (size_t)entry->size_bytes);
+    }
+    return RIN_GPU_OK;
+}
+
+static void sw_graphics_storage_snapshot_restore(
+    const SwGraphicsStorageSnapshot* snapshot)
+{
+    if (!snapshot)
+        return;
+    for (uint32_t index = 0u; index < snapshot->entry_count; ++index) {
+        const SwGraphicsStorageSnapshotEntry* entry =
+            &snapshot->entries[index];
+        if (entry->bytes && entry->memory)
+            memcpy(entry->memory, entry->bytes, (size_t)entry->size_bytes);
+    }
+}
+
+static void sw_graphics_storage_snapshot_end(
+    SwGraphicsStorageSnapshot* snapshot)
+{
+    if (!snapshot)
+        return;
+    for (uint32_t index = 0u; index < snapshot->entry_count; ++index) {
+        sw_free(snapshot->backend, snapshot->entries[index].bytes,
+                snapshot->entries[index].size_bytes);
+        snapshot->entries[index].bytes = NULL;
+    }
+    snapshot->entry_count = 0u;
 }
 
 enum SwShaderValueType {
@@ -4257,6 +4475,39 @@ static int sw_compute_resource_address(const SwShaderIo* io,
     return RIN_GPU_OK;
 }
 
+static int sw_graphics_resource_address(const SwShaderIo* io,
+                                        uint16_t resource,
+                                        int32_t byte_offset,
+                                        uint32_t required_access,
+                                        uint8_t** address_out)
+{
+    const SwGraphicsBindGroup* group;
+    const SwBuffer* buffer;
+    uint64_t offset;
+
+    if (!io || !address_out || byte_offset < 0 ||
+        ((uint32_t)byte_offset & 3u) != 0u) {
+        return RIN_GPU_ERROR_BOUNDS;
+    }
+    group = io->graphics_bind_group;
+    if (!group || resource >= group->binding_count ||
+        group->kinds[resource] != RIN_SHADER_RESOURCE_STORAGE_BUFFER ||
+        (group->buffer_access[resource] & required_access) != required_access ||
+        !(buffer = group->buffers[resource]) || !buffer->bytes) {
+        return RIN_GPU_ERROR_UNSUPPORTED;
+    }
+    offset = (uint32_t)byte_offset;
+    if (group->buffer_offsets[resource] > buffer->size_bytes ||
+        group->buffer_sizes[resource] >
+            buffer->size_bytes - group->buffer_offsets[resource] ||
+        offset > group->buffer_sizes[resource] ||
+        sizeof(uint32_t) > group->buffer_sizes[resource] - offset) {
+        return RIN_GPU_ERROR_BOUNDS;
+    }
+    *address_out = buffer->bytes + group->buffer_offsets[resource] + offset;
+    return RIN_GPU_OK;
+}
+
 static int sw_compute_shared_address(const SwShaderIo* io, int32_t byte_offset,
                                      uint8_t** address_out)
 {
@@ -4536,12 +4787,18 @@ static int sw_run_shader_typed(const SwShader* shader, const SwShaderIo* io)
                 in->source1 != RIN_SHADER_UNUSED || in->immediate != 0u ||
                 in->resource >= header->resource_count ||
                 register_types[in->source0] != SW_SHADER_VALUE_I32 ||
-                header->stage != RIN_SHADER_STAGE_COMPUTE) {
+                (header->stage != RIN_SHADER_STAGE_COMPUTE &&
+                 header->stage != RIN_SHADER_STAGE_VERTEX &&
+                 header->stage != RIN_SHADER_STAGE_FRAGMENT)) {
                 return RIN_GPU_ERROR_UNSUPPORTED;
             }
-            result = sw_compute_resource_address(
-                io, in->resource, i32_registers[in->source0],
-                RIN_GPU_RESOURCE_READ, &address);
+            result = header->stage == RIN_SHADER_STAGE_COMPUTE
+                ? sw_compute_resource_address(
+                      io, in->resource, i32_registers[in->source0],
+                      RIN_GPU_RESOURCE_READ, &address)
+                : sw_graphics_resource_address(
+                      io, in->resource, i32_registers[in->source0],
+                      RIN_GPU_RESOURCE_READ, &address);
             if (result != RIN_GPU_OK)
                 return result;
             if (in->opcode == RIN_SHADER_OP_LOAD_RESOURCE_I32) {
@@ -4568,15 +4825,21 @@ static int sw_run_shader_typed(const SwShader* shader, const SwShaderIo* io)
                 in->source1 == RIN_SHADER_UNUSED || in->immediate != 0u ||
                 in->resource >= header->resource_count ||
                 register_types[in->source0] != SW_SHADER_VALUE_I32 ||
-                header->stage != RIN_SHADER_STAGE_COMPUTE ||
+                (header->stage != RIN_SHADER_STAGE_COMPUTE &&
+                 header->stage != RIN_SHADER_STAGE_VERTEX &&
+                 header->stage != RIN_SHADER_STAGE_FRAGMENT) ||
                 (in->opcode == RIN_SHADER_OP_STORE_RESOURCE_I32
                      ? register_types[in->source1] != SW_SHADER_VALUE_I32
                      : register_types[in->source1] != SW_SHADER_VALUE_F32)) {
                 return RIN_GPU_ERROR_UNSUPPORTED;
             }
-            result = sw_compute_resource_address(
-                io, in->resource, i32_registers[in->source0],
-                RIN_GPU_RESOURCE_WRITE, &address);
+            result = header->stage == RIN_SHADER_STAGE_COMPUTE
+                ? sw_compute_resource_address(
+                      io, in->resource, i32_registers[in->source0],
+                      RIN_GPU_RESOURCE_WRITE, &address)
+                : sw_graphics_resource_address(
+                      io, in->resource, i32_registers[in->source0],
+                      RIN_GPU_RESOURCE_WRITE, &address);
             if (result != RIN_GPU_OK)
                 return result;
             if (in->opcode == RIN_SHADER_OP_STORE_RESOURCE_I32) {
@@ -9637,6 +9900,7 @@ static int sw_draw_vertices_in_pass(const RinGpuBackendDrawVerticesV1* draw,
     uint32_t triangle_count;
     uint32_t phase;
     uint32_t vertex;
+    SwGraphicsStorageSnapshot storage_snapshot;
     int result;
 
     if (!draw) return RIN_GPU_ERROR_INVALID_ARGUMENT;
@@ -9692,10 +9956,12 @@ static int sw_draw_vertices_in_pass(const RinGpuBackendDrawVerticesV1* draw,
     result = sw_render_pass_fragment_outputs_supported(render_pass,
                                                        fragment_outputs);
     if (result != RIN_GPU_OK) return result;
-    /* The preflight pass evaluates every vertex and every covered fragment
-     * before publication.  RSH1 in this profile has no side effects, so the
-     * second pass is deterministic and a late shader/input error cannot
-     * leave an earlier triangle in the target. */
+    result = sw_graphics_storage_snapshot_begin(bind_group,
+                                                &storage_snapshot);
+    if (result != RIN_GPU_OK)
+        return result;
+    /* Preflight executes storage side effects in deterministic invocation
+     * order so read-after-write observes the same values as publication. */
     for (phase = 0u; phase < 2u; ++phase) {
         uint64_t fragment_invocations = 0u;
 
@@ -9708,11 +9974,20 @@ static int sw_draw_vertices_in_pass(const RinGpuBackendDrawVerticesV1* draw,
                     draw->first_instance, bind_group, vertex_outputs,
                     fragment_inputs, fragment_outputs, phase != 0u,
                     &fragment_invocations);
-                if (result != RIN_GPU_OK) return result;
+                if (result != RIN_GPU_OK) goto storage_failure;
             }
         }
+        if (phase == 0u)
+            sw_graphics_storage_snapshot_restore(&storage_snapshot);
     }
-    return RIN_GPU_OK;
+    result = RIN_GPU_OK;
+    goto storage_done;
+
+storage_failure:
+    sw_graphics_storage_snapshot_restore(&storage_snapshot);
+storage_done:
+    sw_graphics_storage_snapshot_end(&storage_snapshot);
+    return result;
 }
 
 static int sw_draw_vertices_v2_in_pass(const RinGpuBackendDrawVerticesV2* draw,
@@ -9728,6 +10003,7 @@ static int sw_draw_vertices_v2_in_pass(const RinGpuBackendDrawVerticesV2* draw,
     uint32_t fragment_inputs;
     uint32_t fragment_outputs;
     uint32_t triangle_count;
+    SwGraphicsStorageSnapshot storage_snapshot;
     int result;
 
     if (!draw) return RIN_GPU_ERROR_INVALID_ARGUMENT;
@@ -9780,6 +10056,10 @@ static int sw_draw_vertices_v2_in_pass(const RinGpuBackendDrawVerticesV2* draw,
     result = sw_render_pass_fragment_outputs_supported(render_pass,
                                                        fragment_outputs);
     if (result != RIN_GPU_OK) return result;
+    result = sw_graphics_storage_snapshot_begin(bind_group,
+                                                &storage_snapshot);
+    if (result != RIN_GPU_OK)
+        return result;
     for (uint32_t pass = 0u; pass < 2u; ++pass) {
         uint64_t fragment_invocations = 0u;
 
@@ -9792,11 +10072,20 @@ static int sw_draw_vertices_v2_in_pass(const RinGpuBackendDrawVerticesV2* draw,
                     draw->first_instance, bind_group, vertex_outputs,
                     fragment_inputs, fragment_outputs, pass != 0u,
                     &fragment_invocations);
-                if (result != RIN_GPU_OK) return result;
+                if (result != RIN_GPU_OK) goto storage_failure;
             }
         }
+        if (pass == 0u)
+            sw_graphics_storage_snapshot_restore(&storage_snapshot);
     }
-    return RIN_GPU_OK;
+    result = RIN_GPU_OK;
+    goto storage_done;
+
+storage_failure:
+    sw_graphics_storage_snapshot_restore(&storage_snapshot);
+storage_done:
+    sw_graphics_storage_snapshot_end(&storage_snapshot);
+    return result;
 }
 
 static uint32_t sw_index_format_bytes(uint32_t format)
@@ -9963,6 +10252,7 @@ static int sw_draw_indexed_with_base_vertex_in_pass(
     uint32_t triangle_count = 0u;
     uint32_t restart_index = 0u;
     int restart_enabled;
+    SwGraphicsStorageSnapshot storage_snapshot;
     int result;
 
     if (!draw) return RIN_GPU_ERROR_INVALID_ARGUMENT;
@@ -10058,6 +10348,10 @@ static int sw_draw_indexed_with_base_vertex_in_pass(
             if (result != RIN_GPU_OK) return result;
         }
     }
+    result = sw_graphics_storage_snapshot_begin(bind_group,
+                                                &storage_snapshot);
+    if (result != RIN_GPU_OK)
+        return result;
     for (uint32_t pass = 0u; pass < 2u; ++pass) {
         uint64_t fragment_invocations = 0u;
 
@@ -10073,7 +10367,7 @@ static int sw_draw_indexed_with_base_vertex_in_pass(
                         draw->first_instance, bind_group, vertex_outputs,
                         fragment_inputs, fragment_outputs, pass != 0u,
                         &fragment_invocations);
-                    if (result != RIN_GPU_OK) return result;
+                    if (result != RIN_GPU_OK) goto storage_failure;
                 }
             } else {
                 uint32_t segment_start = 0u;
@@ -10088,7 +10382,7 @@ static int sw_draw_indexed_with_base_vertex_in_pass(
                             index_buffer, draw->index_format,
                             draw->index_offset, draw->first_index, scan,
                             &raw_index);
-                        if (result != RIN_GPU_OK) return result;
+                        if (result != RIN_GPU_OK) goto storage_failure;
                         boundary = raw_index == restart_index;
                     }
                     if (!boundary) continue;
@@ -10096,7 +10390,7 @@ static int sw_draw_indexed_with_base_vertex_in_pass(
                         result = sw_primitive_count(
                             pipeline->desc.primitive_topology,
                             scan - segment_start, &segment_count);
-                        if (result != RIN_GPU_OK) return result;
+                        if (result != RIN_GPU_OK) goto storage_failure;
                         for (uint32_t index = 0u; index < segment_count;
                              ++index) {
                             result = sw_draw_indexed_primitive(
@@ -10110,15 +10404,24 @@ static int sw_draw_indexed_with_base_vertex_in_pass(
                                 vertex_outputs, fragment_inputs,
                                 fragment_outputs, pass != 0u,
                                 &fragment_invocations);
-                            if (result != RIN_GPU_OK) return result;
+                            if (result != RIN_GPU_OK) goto storage_failure;
                         }
                     }
                     segment_start = scan + 1u;
                 }
             }
         }
+        if (pass == 0u)
+            sw_graphics_storage_snapshot_restore(&storage_snapshot);
     }
-    return RIN_GPU_OK;
+    result = RIN_GPU_OK;
+    goto storage_done;
+
+storage_failure:
+    sw_graphics_storage_snapshot_restore(&storage_snapshot);
+storage_done:
+    sw_graphics_storage_snapshot_end(&storage_snapshot);
+    return result;
 }
 
 static int sw_draw_indexed_in_pass(const RinGpuBackendDrawIndexedV1* draw,
@@ -10173,6 +10476,7 @@ static int sw_draw_indexed_v2_in_pass(const RinGpuBackendDrawIndexedV2* draw,
     uint32_t fragment_outputs;
     uint32_t index_bytes;
     uint32_t triangle_count;
+    SwGraphicsStorageSnapshot storage_snapshot;
     int result;
 
     if (!draw) return RIN_GPU_ERROR_INVALID_ARGUMENT;
@@ -10249,6 +10553,10 @@ static int sw_draw_indexed_v2_in_pass(const RinGpuBackendDrawIndexedV2* draw,
             if (result != RIN_GPU_OK) return result;
         }
     }
+    result = sw_graphics_storage_snapshot_begin(bind_group,
+                                                &storage_snapshot);
+    if (result != RIN_GPU_OK)
+        return result;
     for (uint32_t pass = 0u; pass < 2u; ++pass) {
         uint64_t fragment_invocations = 0u;
 
@@ -10262,11 +10570,20 @@ static int sw_draw_indexed_v2_in_pass(const RinGpuBackendDrawIndexedV2* draw,
                     draw->first_instance, bind_group, vertex_outputs,
                     fragment_inputs,
                     fragment_outputs, pass != 0u, &fragment_invocations);
-                if (result != RIN_GPU_OK) return result;
+                if (result != RIN_GPU_OK) goto storage_failure;
             }
         }
+        if (pass == 0u)
+            sw_graphics_storage_snapshot_restore(&storage_snapshot);
     }
-    return RIN_GPU_OK;
+    result = RIN_GPU_OK;
+    goto storage_done;
+
+storage_failure:
+    sw_graphics_storage_snapshot_restore(&storage_snapshot);
+storage_done:
+    sw_graphics_storage_snapshot_end(&storage_snapshot);
+    return result;
 }
 
 /* Direct entry points remain useful for deterministic unit tests, which
@@ -10363,6 +10680,7 @@ static int sw_dispatch_compute(RinGpuSoftwareBackend* backend,
     const RinShaderHeaderV1* header;
     SwComputeShadow shadows[RIN_SHADER_MAX_RESOURCES];
     SwComputeExecution execution;
+    SwComputeBindGroup empty_group;
     uint64_t workgroup_invocations;
     uint64_t dispatch_invocations;
     uint64_t shadow_bytes = 0u;
@@ -10372,21 +10690,30 @@ static int sw_dispatch_compute(RinGpuSoftwareBackend* backend,
 
     if (invocation_count_out != NULL) *invocation_count_out = 0u;
     if (!dispatch || dispatch->pipeline_cookie == 0u ||
-        dispatch->bind_group_cookie == 0u || dispatch->group_count_x == 0u ||
+        dispatch->group_count_x == 0u ||
         dispatch->group_count_y == 0u || dispatch->group_count_z == 0u ||
         dispatch->reserved != 0u) {
         return RIN_GPU_ERROR_INVALID_ARGUMENT;
     }
     pipeline = (const SwComputePipeline*)(uintptr_t)dispatch->pipeline_cookie;
-    group = (const SwComputeBindGroup*)(uintptr_t)dispatch->bind_group_cookie;
-    if (!pipeline || !group || group->pipeline != pipeline ||
-        !pipeline->shader || !pipeline->shader->ir ||
+    if (!pipeline || !pipeline->shader || !pipeline->shader->ir ||
         pipeline->shader->ir_size < sizeof(*header)) {
         return RIN_GPU_ERROR_INVALID_ARGUMENT;
     }
     shader = pipeline->shader;
     header = (const RinShaderHeaderV1*)shader->ir;
+    if (dispatch->bind_group_cookie == 0u) {
+        if (header->resource_count != 0u)
+            return RIN_GPU_ERROR_INVALID_ARGUMENT;
+        memset(&empty_group, 0, sizeof(empty_group));
+        empty_group.pipeline = pipeline;
+        group = &empty_group;
+    } else {
+        group = (const SwComputeBindGroup*)(uintptr_t)
+            dispatch->bind_group_cookie;
+    }
     if (header->stage != RIN_SHADER_STAGE_COMPUTE ||
+        !group || group->pipeline != pipeline ||
         group->binding_count != header->resource_count ||
         header->workgroup_x == 0u || header->workgroup_y == 0u ||
         header->workgroup_z == 0u ||

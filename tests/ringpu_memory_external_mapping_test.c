@@ -250,6 +250,7 @@ int main(void) {
     RinGpuMemoryAllocationDescV1 descriptor;
     RinGpuMemoryAddressSpaceV1 address_space;
     RinGpuMemoryAllocationInfoV1 allocation_info;
+    RinGpuMemoryBackingInfoV1 backing_info;
     RinGpuMemoryRebindV1 rebind;
     RinGpuMemoryStatusV1 status;
     MappingFixture replacement_fixture;
@@ -302,6 +303,18 @@ int main(void) {
         fixture.last_address_space_generation != address_space.generation ||
         fixture.last_device_generation != address_space.device_generation ||
         fixture.last_backing_cookie == 0u ||
+        rin_gpu_memory_get_backing_v1(&runtime, allocation, &backing_info) !=
+            RIN_GPU_MEMORY_OK ||
+        backing_info.struct_size != sizeof(backing_info) ||
+        backing_info.version != RIN_GPU_MEMORY_BACKING_INFO_V1_VERSION ||
+        backing_info.allocation_handle != allocation ||
+        backing_info.backing_cookie != fixture.last_backing_cookie ||
+        backing_info.allocation_size_bytes < descriptor.size_bytes ||
+        backing_info.iommu_map_generation != 1u ||
+        backing_info.device_epoch != 1u ||
+        rin_gpu_memory_get_backing_v1(&runtime, allocation,
+                                      (RinGpuMemoryBackingInfoV1*)&runtime) !=
+            RIN_GPU_MEMORY_INVALID_ARGUMENT ||
         rin_gpu_memory_release(&runtime, lease) != RIN_GPU_MEMORY_BUSY ||
         rin_gpu_memory_destroy_allocation(&runtime, allocation) !=
             RIN_GPU_MEMORY_BUSY)
