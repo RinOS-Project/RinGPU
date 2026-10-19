@@ -571,6 +571,9 @@ typedef struct RinGpuBufferClearV1 {
     uint32_t pattern;
     uint32_t flags;
     uint32_t reserved;
+    /* Explicitly fills the 32-bit ABI tail; x64 V1 callers may leave this
+     * historical tail padding unspecified, so consumers must ignore it. */
+    uint32_t abi_padding;
 } RinGpuBufferClearV1;
 
 typedef struct RinGpuImageClearV1 {
