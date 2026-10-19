@@ -414,8 +414,16 @@ _Static_assert(sizeof(RinGpuBackendDrawIndexedBaseVertexV1) == 96u,
                "RinGPU backend base-vertex indexed draw drift");
 _Static_assert(sizeof(RinGpuBackendDrawIndirectV1) == 832u,
                "RinGPU backend indirect draw drift");
+/* SysV i386 aligns uint64_t to four bytes, so the vertex-binding array starts
+ * four bytes earlier than on x86_64 and MinGW i686. The enclosing public
+ * command record reserves the canonical payload size independently. */
+#if UINTPTR_MAX == UINT64_MAX || defined(__MINGW32__)
 _Static_assert(sizeof(RinGpuBackendDrawIndexedIndirectV1) == 864u,
                "RinGPU backend indirect indexed draw drift");
+#else
+_Static_assert(sizeof(RinGpuBackendDrawIndexedIndirectV1) == 860u,
+               "RinGPU backend indirect indexed draw drift");
+#endif
 #if UINTPTR_MAX == UINT64_MAX || defined(__MINGW32__)
 _Static_assert(sizeof(RinGpuBackendRenderPassDepthBeginV1) == 136u,
                "RinGPU backend depth render-pass begin drift");
