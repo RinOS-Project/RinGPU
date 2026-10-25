@@ -69,6 +69,40 @@ typedef struct PlatformBackendBridgeMock {
     uint32_t submit_count;
 } PlatformBackendBridgeMock;
 
+typedef struct QueueSubmitV2Fixture {
+    const RinGpuBackendOpsV1* delegate_ops;
+    void* delegate_context;
+    uint32_t calls;
+    uint32_t family_index;
+    uint32_t engine_index;
+    uint32_t command_count;
+    uint32_t first_command_type;
+    uint32_t fail_next;
+} QueueSubmitV2Fixture;
+
+static int submit_commands_for_queue_v2(
+    void* context, uint32_t family_index, uint32_t engine_index,
+    const RinGpuBackendCommandV1* commands, uint32_t command_count)
+{
+    QueueSubmitV2Fixture* fixture = (QueueSubmitV2Fixture*)context;
+    if (!fixture || !fixture->delegate_ops ||
+        !fixture->delegate_ops->submit_commands ||
+        (command_count != 0u && !commands))
+        return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    ++fixture->calls;
+    fixture->family_index = family_index;
+    fixture->engine_index = engine_index;
+    fixture->command_count = command_count;
+    fixture->first_command_type =
+        command_count != 0u ? commands[0].type : 0u;
+    if (fixture->fail_next != 0u) {
+        fixture->fail_next = 0u;
+        return RIN_GPU_ERROR_BUSY;
+    }
+    return fixture->delegate_ops->submit_commands(
+        fixture->delegate_context, commands, command_count);
+}
+
 typedef struct PlatformBackendBridgeResolverState {
     const RinGpuPlatformBackendBridgeV1* bridge;
     void* bridge_context;
@@ -709,6 +743,8 @@ int main(void)
     RinGpuAdapterCapabilitiesV1 capabilities = {0};
     RinGpuRuntimeDescV1 headless_desc = {0};
     RinGpuRuntimeDescV1 external_desc = {0};
+    RinGpuRuntimeDescV2 queue_route_desc = {0};
+    RinGpuBackendOpsV1 queue_route_ops;
     RinGpuBufferDescV1 buffer_desc = {0};
     RinGpuMemoryDescV1 external_memory_desc = {0};
     RinGpuResourceMemoryBindingV1 external_buffer_binding = {0};
@@ -720,6 +756,7 @@ int main(void)
     RinGpuPlatformServicesV2 external_services = {0};
     PlatformBackendResolverState backend_resolver = {0};
     RinGpuRuntime* external_runtime = NULL;
+    RinGpuRuntime* queue_route_runtime = NULL;
     RinGpuRuntime* rejected_runtime = NULL;
     RinGpuPlatformServicesV1 invalid_platform_services = {0};
     RinGpuMemoryDescV1 memory_desc = {0};
@@ -741,6 +778,10 @@ int main(void)
     RinGpuHandle headless_queue = 0u;
     RinGpuHandle headless_command_list = 0u;
     RinGpuHandle headless_fence = 0u;
+    RinGpuHandle routed_queue = 0u;
+    RinGpuHandle routed_command_list = 0u;
+    RinGpuHandle routed_fence = 0u;
+    RinGpuHandle routed_buffer = 0u;
     RinGpuHandle external_buffer = 0u;
     RinGpuHandle failed_external_buffer = UINT64_C(1);
     RinGpuHandle recovered_external_buffer = 0u;
@@ -756,6 +797,15 @@ int main(void)
     RinGpuPlatformThreadSchedulerV1 platform_scheduler = {0};
     RinGpuPlatformServicesV1 platform_services = {0};
     PlatformDiagnosticState platform_diagnostics = {0};
+    RinGpuQueueDescV2 routed_queue_desc = {0};
+    RinGpuCommandListDescV1 routed_command_desc = {0};
+    RinGpuBufferDescV1 routed_buffer_desc = {0};
+    RinGpuBufferClearV1 routed_clear = {0};
+    RinGpuSubmitInfoV1 routed_submit = {0};
+    QueueSubmitV2Fixture queue_submit_fixture = {0};
+    uint32_t routed_initial[4] = {0u, 0u, 0u, 0u};
+    uint32_t routed_readback[4] = {0u, 0u, 0u, 0u};
+    uint64_t routed_fence_value = UINT64_MAX;
     uint8_t upload_bytes[8] = {0x52u, 0x69u, 0x6eu, 0x47u,
                                0x50u, 0x55u, 0x01u, 0xa5u};
     uint8_t readback_bytes[sizeof(upload_bytes)] = {0u};
@@ -1108,6 +1158,109 @@ int main(void)
             &external_desc, &external_services, &external_runtime) !=
             RIN_GPU_OK || backend_resolver.call_count != 3u)
         return 25;
+
+    queue_route_desc.struct_size = sizeof(queue_route_desc);
+    queue_route_desc.version = RIN_GPU_RUNTIME_DESC_V2_VERSION;
+    queue_route_desc.base = external_desc;
+    queue_route_ops = *external_backend_delegate;
+    queue_route_desc.base.backend_ops = &queue_route_ops;
+    queue_route_desc.base.backend_context = external_backend;
+    queue_route_desc.base.backend_family =
+        RIN_GPU_RUNTIME_BACKEND_FAMILY_VIRTIO;
+    queue_route_desc.base.adapter.queue_capabilities |= RIN_GPU_QUEUE_COPY;
+    queue_submit_fixture.delegate_ops = external_backend_delegate;
+    queue_submit_fixture.delegate_context = external_backend;
+    queue_route_desc.submit_commands_for_queue =
+        submit_commands_for_queue_v2;
+    queue_route_desc.submit_context = &queue_submit_fixture;
+    {
+        RinGpuRuntimeDescV2 invalid_route_desc = queue_route_desc;
+        invalid_route_desc.submit_commands_for_queue = NULL;
+        if (ringpu_runtime_create_v2(&invalid_route_desc,
+                                     &rejected_runtime) !=
+                RIN_GPU_ERROR_INVALID_ARGUMENT || rejected_runtime != NULL)
+            return 71;
+    }
+    if (ringpu_runtime_create_v2(&queue_route_desc,
+                                 &queue_route_runtime) != RIN_GPU_OK)
+        return 72;
+
+    routed_queue_desc.base.abi_version = RIN_GPU_ABI_VERSION;
+    routed_queue_desc.base.struct_size = sizeof(routed_queue_desc.base);
+    routed_queue_desc.base.capabilities = RIN_GPU_QUEUE_COPY;
+    routed_queue_desc.family_index = 4u;
+    routed_queue_desc.engine_index = 2u;
+    routed_command_desc.abi_version = RIN_GPU_ABI_VERSION;
+    routed_command_desc.struct_size = sizeof(routed_command_desc);
+    routed_command_desc.capabilities = RIN_GPU_QUEUE_COPY;
+    routed_buffer_desc.abi_version = RIN_GPU_ABI_VERSION;
+    routed_buffer_desc.struct_size = sizeof(routed_buffer_desc);
+    routed_buffer_desc.size_bytes = sizeof(routed_initial);
+    routed_buffer_desc.usage = RIN_GPU_BUFFER_COPY_DESTINATION;
+    routed_buffer_desc.flags = RIN_GPU_BUFFER_CPU_VISIBLE;
+    routed_clear.abi_version = RIN_GPU_ABI_VERSION;
+    routed_clear.struct_size = sizeof(routed_clear);
+    routed_clear.size_bytes = sizeof(routed_initial);
+    routed_clear.pattern = UINT32_C(0xa1b2c3d4);
+    if (ringpu_runtime_create_queue_v2(
+            queue_route_runtime, &routed_queue_desc, &routed_queue) !=
+            RIN_GPU_OK ||
+        ringpu_runtime_create_command_list(
+            queue_route_runtime, &routed_command_desc,
+            &routed_command_list) != RIN_GPU_OK ||
+        ringpu_runtime_create_buffer(queue_route_runtime,
+                                     &routed_buffer_desc,
+                                     &routed_buffer) != RIN_GPU_OK ||
+        ringpu_runtime_upload_buffer(queue_route_runtime, routed_buffer, 0u,
+                                     routed_initial,
+                                     sizeof(routed_initial)) != RIN_GPU_OK ||
+        ringpu_runtime_command_clear_buffer(
+            queue_route_runtime, routed_command_list, routed_buffer,
+            &routed_clear) != RIN_GPU_OK ||
+        ringpu_runtime_command_list_close(queue_route_runtime,
+                                          routed_command_list) != RIN_GPU_OK ||
+        ringpu_runtime_create_fence(queue_route_runtime, 0u,
+                                    &routed_fence) != RIN_GPU_OK)
+        return 73;
+    routed_submit.abi_version = RIN_GPU_ABI_VERSION;
+    routed_submit.struct_size = sizeof(routed_submit);
+    routed_submit.command_list = routed_command_list;
+    routed_submit.signal_fence = routed_fence;
+    routed_submit.signal_value = 1u;
+    queue_submit_fixture.fail_next = 1u;
+    if (ringpu_runtime_queue_submit(queue_route_runtime, routed_queue,
+                                    &routed_submit) != RIN_GPU_ERROR_BUSY ||
+        queue_submit_fixture.calls != 1u ||
+        queue_submit_fixture.family_index != 4u ||
+        queue_submit_fixture.engine_index != 2u ||
+        queue_submit_fixture.command_count != 1u ||
+        queue_submit_fixture.first_command_type !=
+            RIN_GPU_BACKEND_COMMAND_CLEAR_BUFFER ||
+        ringpu_runtime_get_fence_value(queue_route_runtime, routed_fence,
+                                       &routed_fence_value) != RIN_GPU_OK ||
+        routed_fence_value != 0u ||
+        ringpu_runtime_readback_buffer(queue_route_runtime, routed_buffer, 0u,
+                                       routed_readback,
+                                       sizeof(routed_readback)) != RIN_GPU_OK ||
+        memcmp(routed_readback, routed_initial,
+               sizeof(routed_initial)) != 0)
+        return 74;
+    if (ringpu_runtime_queue_submit(queue_route_runtime, routed_queue,
+                                    &routed_submit) != RIN_GPU_OK ||
+        queue_submit_fixture.calls != 2u ||
+        queue_submit_fixture.family_index != 4u ||
+        queue_submit_fixture.engine_index != 2u ||
+        ringpu_runtime_wait_fence(queue_route_runtime, routed_fence, 1u,
+                                  UINT64_C(1000000000)) != RIN_GPU_OK ||
+        ringpu_runtime_readback_buffer(queue_route_runtime, routed_buffer, 0u,
+                                       routed_readback,
+                                       sizeof(routed_readback)) != RIN_GPU_OK)
+        return 75;
+    for (uint32_t index = 0u; index < 4u; ++index)
+        if (routed_readback[index] != UINT32_C(0xa1b2c3d4)) return 76;
+    ringpu_runtime_destroy(queue_route_runtime);
+    queue_route_runtime = NULL;
+
     external_ops.create_buffer = NULL;
     if (ringpu_runtime_create_buffer(external_runtime, &buffer_desc,
                                      &external_buffer) != RIN_GPU_OK ||

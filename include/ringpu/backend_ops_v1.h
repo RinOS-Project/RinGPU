@@ -92,4 +92,13 @@ RIN_GPU_DECLARE_BACKEND_OPS_V1(
     RinGpuBackendOpsV1, RinGpuBackendGraphicsPipelineDescV1,
     RinGpuBackendCommandV1, RIN_GPU_QUERY_RESULT_VALUE_COUNT);
 
+/* A queue-aware runtime V2 submitter receives the queue owner identity that
+ * was selected when the public queue was created. A zero return means the
+ * callback accepted this exact command batch; failures must mean it was not
+ * accepted. The callback owns translation/submission and is never followed
+ * by the legacy submit_commands callback. */
+typedef int (*RinGpuBackendSubmitCommandsForQueueV2Fn)(
+    void* context, uint32_t family_index, uint32_t engine_index,
+    const RinGpuBackendCommandV1* commands, uint32_t command_count);
+
 #endif /* RINGPU_PUBLIC_BACKEND_OPS_V1_H */

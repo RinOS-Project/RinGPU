@@ -7,6 +7,7 @@
 #include "ringpu.h"
 #include "platform.h"
 #include "software.h"
+#include "backend_ops_v1.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -69,11 +70,28 @@ typedef struct RinGpuRuntimeDescV1 {
     uint32_t reserved1;
 } RinGpuRuntimeDescV1;
 
+#define RIN_GPU_RUNTIME_DESC_V2_VERSION 2u
+
+/* V2 carries a required queue-aware submit owner without changing the V1
+ * runtime descriptor or backend operation-table layouts. The submit owner
+ * receives the exact family/engine pair from RinGpuQueueDescV2 and performs
+ * the submission itself; the V1 submit callback is not invoked for V2. */
+typedef struct RinGpuRuntimeDescV2 {
+    uint32_t struct_size;
+    uint32_t version;
+    RinGpuRuntimeDescV1 base;
+    RinGpuBackendSubmitCommandsForQueueV2Fn submit_commands_for_queue;
+    void* submit_context;
+    uint64_t reserved[2];
+} RinGpuRuntimeDescV2;
+
 /* Source compatibility name for the explicit software/reference path. */
 typedef RinGpuRuntimeDescV1 RinGpuRuntimeSoftwareSurfaceDescV1;
 
 int ringpu_runtime_create(const RinGpuRuntimeDescV1* desc,
                           RinGpuRuntime** runtime_out);
+int ringpu_runtime_create_v2(const RinGpuRuntimeDescV2* desc,
+                             RinGpuRuntime** runtime_out);
 
 /* Creates a runtime whose contended shared-resource lock yields through the
  * caller-owned OS-core scheduler. This is an additive entry point; the

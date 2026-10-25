@@ -320,6 +320,27 @@ int ringpu_runtime_create(const RinGpuRuntimeDescV1* desc,
                                    NULL, NULL, runtime_out);
 }
 
+int ringpu_runtime_create_v2(const RinGpuRuntimeDescV2* desc,
+                             RinGpuRuntime** runtime_out)
+{
+    int result;
+    if (runtime_out == NULL) return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    *runtime_out = NULL;
+    if (desc == NULL || desc->struct_size != sizeof(*desc) ||
+        desc->version != RIN_GPU_RUNTIME_DESC_V2_VERSION ||
+        desc->submit_commands_for_queue == NULL ||
+        desc->reserved[0] != 0u || desc->reserved[1] != 0u)
+        return RIN_GPU_ERROR_INVALID_ARGUMENT;
+
+    result = ringpu_runtime_create(&desc->base, runtime_out);
+    if (result != RIN_GPU_OK) return result;
+    (*runtime_out)->core.submit_commands_for_queue_v2 =
+        desc->submit_commands_for_queue;
+    (*runtime_out)->core.submit_commands_for_queue_context_v2 =
+        desc->submit_context;
+    return RIN_GPU_OK;
+}
+
 int ringpu_runtime_create_with_platform(
     const RinGpuRuntimeDescV1* desc,
     const RinGpuPlatformThreadSchedulerV1* scheduler,

@@ -330,6 +330,8 @@ struct RinGpuCore {
     uint32_t display_count;
     RinGpuBackendOpsV1 backend;
     void* backend_context;
+    RinGpuBackendSubmitCommandsForQueueV2Fn submit_commands_for_queue_v2;
+    void* submit_commands_for_queue_context_v2;
     RinGpuDiagnosticsRuntime* diagnostics;
     RinGpuPlatformYieldThreadCallbackV1 platform_yield_thread;
     void* platform_scheduler_context;

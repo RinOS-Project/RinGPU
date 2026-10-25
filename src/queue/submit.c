@@ -2509,9 +2509,17 @@ static int ringpu_queue_submit_internal(
         }
     }
     if (result == RIN_GPU_OK) {
-        result = core->backend.submit_commands(
-            core->backend_context, commands,
-            list->value.command_list.count);
+        if (core->submit_commands_for_queue_v2 != NULL) {
+            result = core->submit_commands_for_queue_v2(
+                core->submit_commands_for_queue_context_v2,
+                queue_slot->value.queue.family_index,
+                queue_slot->value.queue.engine_index, commands,
+                list->value.command_list.count);
+        } else {
+            result = core->backend.submit_commands(
+                core->backend_context, commands,
+                list->value.command_list.count);
+        }
     }
     if (result == RIN_GPU_OK) {
         uint64_t serial = ++core->submitted_serial;
