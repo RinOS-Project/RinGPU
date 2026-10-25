@@ -224,6 +224,14 @@ static int make_fragment_shader(uint8_t* storage, size_t storage_capacity,
     emit_spirv(words, &count, 71u, 4u, operands); /* sampler set */
     operands[0] = 61u; operands[1] = 33u; operands[2] = 5u;
     emit_spirv(words, &count, 71u, 4u, operands); /* sampler binding */
+    operands[0] = 71u; operands[1] = 34u; operands[2] = 0u;
+    emit_spirv(words, &count, 71u, 4u, operands); /* sampled-half set */
+    operands[0] = 71u; operands[1] = 33u; operands[2] = 6u;
+    emit_spirv(words, &count, 71u, 4u, operands); /* sampled-half binding */
+    operands[0] = 72u; operands[1] = 34u; operands[2] = 0u;
+    emit_spirv(words, &count, 71u, 4u, operands); /* half-sampler set */
+    operands[0] = 72u; operands[1] = 33u; operands[2] = 7u;
+    emit_spirv(words, &count, 71u, 4u, operands); /* half-sampler binding */
     operands[0] = 25u; operands[1] = 30u; operands[2] = 0u;
     emit_spirv(words, &count, 71u, 4u, operands); /* color output location */
 
@@ -285,6 +293,10 @@ static int make_fragment_shader(uint8_t* storage, size_t storage_capacity,
     emit_spirv(words, &count, 59u, 4u, operands); /* sampled image descriptor */
     operands[0] = 58u; operands[1] = 61u; operands[2] = 0u;
     emit_spirv(words, &count, 59u, 4u, operands); /* sampler descriptor */
+    operands[0] = 57u; operands[1] = 71u; operands[2] = 0u;
+    emit_spirv(words, &count, 59u, 4u, operands); /* sampled-half descriptor */
+    operands[0] = 58u; operands[1] = 72u; operands[2] = 0u;
+    emit_spirv(words, &count, 59u, 4u, operands); /* half-sampler descriptor */
     operands[0] = 24u; operands[1] = 25u; operands[2] = 3u;
     emit_spirv(words, &count, 59u, 4u, operands); /* fragment color output */
     operands[0] = 3u; operands[1] = 13u; operands[2] = 0u;
@@ -398,6 +410,18 @@ static int make_fragment_shader(uint8_t* storage, size_t storage_capacity,
     emit_spirv(words, &count, 99u, 4u, operands); /* copy half image read */
     operands[0] = 34u; operands[1] = 36u; operands[2] = 41u;
     emit_spirv(words, &count, 99u, 4u, operands); /* write edge texel */
+    operands[0] = 54u; operands[1] = 74u; operands[2] = 71u;
+    emit_spirv(words, &count, 61u, 4u, operands); /* load sampled half image */
+    operands[0] = 56u; operands[1] = 75u; operands[2] = 72u;
+    emit_spirv(words, &count, 61u, 4u, operands); /* load half sampler */
+    operands[0] = 55u; operands[1] = 76u;
+    operands[2] = 74u; operands[3] = 75u;
+    emit_spirv(words, &count, 86u, 5u, operands); /* combine sampled half */
+    operands[0] = 5u; operands[1] = 77u;
+    operands[2] = 76u; operands[3] = 65u;
+    emit_spirv(words, &count, 87u, 5u, operands); /* nearest sample RGBA16F */
+    operands[0] = 34u; operands[1] = 43u; operands[2] = 77u;
+    emit_spirv(words, &count, 99u, 4u, operands); /* store sampled half */
     operands[0] = 25u; operands[1] = 21u;
     emit_spirv(words, &count, 62u, 3u, operands); /* store color */
     emit_spirv(words, &count, 253u, 1u, operands); /* return */
@@ -426,13 +450,15 @@ static int make_fragment_shader(uint8_t* storage, size_t storage_capacity,
             RIN_SPIRV_TRANSLATE_FEATURE_RGBA16F_STORAGE_IMAGE |
             RIN_SPIRV_TRANSLATE_FEATURE_RGBA32F_STORAGE_IMAGE,
         storage, storage_capacity, &info);
-    if (result != RIN_SPIRV_OK || info.base.descriptor_count != 6u ||
+    if (result != RIN_SPIRV_OK || info.base.descriptor_count != 8u ||
         info.base.descriptors[0].binding != 0u ||
         info.base.descriptors[1].binding != 1u ||
         info.base.descriptors[2].binding != 2u ||
         info.base.descriptors[3].binding != 3u ||
         info.base.descriptors[4].binding != 4u ||
-        info.base.descriptors[5].binding != 5u) {
+        info.base.descriptors[5].binding != 5u ||
+        info.base.descriptors[6].binding != 6u ||
+        info.base.descriptors[7].binding != 7u) {
         fprintf(stderr, "storage-image SPIR-V translation=%d descriptors=%u: %s\n",
                 result, info.base.descriptor_count, info.base.diagnostic);
         return 0;
@@ -466,7 +492,7 @@ int main(void)
     RinGpuRenderPassDescV1 render_pass = {0};
     RinGpuGraphicsBarrierV2 graphics_barrier_v2 = {0};
     RinGpuGraphicsBindingV1 binding = {0};
-    RinGpuGraphicsBindingV1 bindings[6] = {{0}};
+    RinGpuGraphicsBindingV1 bindings[8] = {{0}};
     RinGpuDrawV1 draw = {0};
     RinGpuQueueDescV1 queue_desc = {0};
     RinGpuCommandListDescV1 command_desc = {0};
@@ -587,6 +613,7 @@ int main(void)
     rgba16_storage_desc = storage_desc;
     rgba16_storage_desc.format = RIN_GPU_FORMAT_RGBA16_FLOAT;
     rgba16_storage_desc.width = 3u;
+    rgba16_storage_desc.usage |= RIN_GPU_IMAGE_SAMPLED;
     rgba32_storage_desc = storage_desc;
     rgba32_storage_desc.format = RIN_GPU_FORMAT_RGBA32_FLOAT;
     rgba32_storage_desc.width = 3u;
@@ -659,12 +686,19 @@ int main(void)
     bindings[5].kind = RIN_SHADER_RESOURCE_SAMPLER;
     bindings[5].access = 0u;
     bindings[5].resource = sampler;
+    bindings[6] = binding;
+    bindings[6].binding = 6u;
+    bindings[6].kind = RIN_SHADER_RESOURCE_SAMPLED_IMAGE;
+    bindings[6].access = RIN_GPU_RESOURCE_READ;
+    bindings[6].resource = rgba16_storage_image;
+    bindings[7] = bindings[5];
+    bindings[7].binding = 7u;
     failure_stage = "bind group";
     fail_next_graphics_bind_group = 1u;
     bind_group = UINT64_MAX;
     {
         int bind_result = ringpu_create_graphics_bind_group_typed(
-            &core, pipeline, bindings, 6u, &bind_group);
+            &core, pipeline, bindings, 8u, &bind_group);
         if (bind_result != RIN_GPU_ERROR_BACKEND || bind_group != 0u ||
             destroy_graphics_bind_group_calls != 1u) {
             fprintf(stderr,
@@ -678,7 +712,7 @@ int main(void)
     bind_group = UINT64_MAX;
     {
         int bind_result = ringpu_create_graphics_bind_group_typed(
-            &core, pipeline, bindings, 6u, &bind_group);
+            &core, pipeline, bindings, 8u, &bind_group);
         if (bind_result != RIN_GPU_ERROR_BACKEND || bind_group != 0u ||
             destroy_graphics_bind_group_calls != 1u) {
             fprintf(stderr,
@@ -691,7 +725,7 @@ int main(void)
     bind_group = 0u;
     {
         int bind_result = ringpu_create_graphics_bind_group_typed(
-            &core, pipeline, bindings, 6u, &bind_group);
+            &core, pipeline, bindings, 8u, &bind_group);
         if (bind_result != RIN_GPU_OK) {
             fprintf(stderr, "bind-group create result=%d\n", bind_result);
             goto done;
@@ -902,9 +936,9 @@ int main(void)
             rgba16_value[1] != 0xb800u || rgba16_value[2] != 0x4800u ||
             rgba16_value[3] != 0x3c02u || rgba16_value[4] != 0x0001u ||
             rgba16_value[5] != 0x8000u || rgba16_value[6] != 0x7c00u ||
-            rgba16_value[7] != 0x7e00u || rgba16_value[8] != 0x3800u ||
-            rgba16_value[9] != 0xb800u || rgba16_value[10] != 0x4800u ||
-            rgba16_value[11] != 0x3c02u) {
+            rgba16_value[7] != 0x7e00u || rgba16_value[8] != 0x0001u ||
+            rgba16_value[9] != 0x8000u || rgba16_value[10] != 0x7c00u ||
+            rgba16_value[11] != 0x7e00u) {
             fprintf(stderr,
                     "RGBA16F readback error %d values %04x,%04x,%04x,%04x,%04x,%04x,%04x,%04x,%04x,%04x,%04x,%04x\n",
                     readback_result, rgba16_value[0], rgba16_value[1],

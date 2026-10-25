@@ -3780,7 +3780,7 @@ static int sw_sample_image_texel_component(const SwImage* image,
                    (uint64_t)component * sizeof(component_bits),
                sizeof(component_bits));
         *value_out = sw_f16_to_f32(component_bits);
-        return sw_f32_finite(*value_out) ? RIN_GPU_OK : RIN_GPU_ERROR_BACKEND;
+        return RIN_GPU_OK;
     }
     if (image->desc.format == RIN_GPU_FORMAT_RGBA8_UNORM ||
         image->desc.format == RIN_GPU_FORMAT_RGBA8_SRGB ||
