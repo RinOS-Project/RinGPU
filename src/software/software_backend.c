@@ -3771,7 +3771,7 @@ static int sw_sample_image_texel_component(const SwImage* image,
         memcpy(value_out, image->bytes + byte_offset +
                               (uint64_t)component * sizeof(*value_out),
                sizeof(*value_out));
-        return sw_f32_finite(*value_out) ? RIN_GPU_OK : RIN_GPU_ERROR_BACKEND;
+        return RIN_GPU_OK;
     }
     if (image->desc.format == RIN_GPU_FORMAT_RGBA16_FLOAT) {
         uint16_t component_bits;
@@ -3897,7 +3897,7 @@ static int sw_sample_image_2d_at_mip(
     sampled[0] += (sampled[1] - sampled[0]) * x_fraction;
     sampled[2] += (sampled[3] - sampled[2]) * x_fraction;
     *value_out = sampled[0] + (sampled[2] - sampled[0]) * y_fraction;
-    return sw_f32_finite(*value_out) ? RIN_GPU_OK : RIN_GPU_ERROR_BACKEND;
+    return RIN_GPU_OK;
 }
 
 static int sw_compare_float(uint32_t compare, float source, float target);
@@ -4182,7 +4182,7 @@ static int sw_sample_image_2d_at_lod(
     if (result != RIN_GPU_OK)
         return result;
     *value_out = lower_value + (*value_out - lower_value) * mip_blend;
-    return sw_f32_finite(*value_out) ? RIN_GPU_OK : RIN_GPU_ERROR_BACKEND;
+    return RIN_GPU_OK;
 }
 
 static int sw_sample_image_2d_filtered_with_bias(
@@ -4286,12 +4286,20 @@ static int sw_sample_image_2d_filtered_with_bias(
             &sampled_value);
         if (result != RIN_GPU_OK)
             return result;
+        /* Floating image samples may legally contain infinities and NaNs.
+         * Keep a single nearest sample bit-preserving instead of adding it
+         * to zero, and let IEEE arithmetic define filtered combinations. */
+        if (sample_count == 1u &&
+            sampler->desc.mip_filter == RIN_GPU_SAMPLER_MIP_FILTER_NONE &&
+            sampler->desc.min_filter == RIN_GPU_SAMPLER_FILTER_NEAREST &&
+            sampler->desc.mag_filter == RIN_GPU_SAMPLER_FILTER_NEAREST) {
+            *value_out = sampled_value;
+            return RIN_GPU_OK;
+        }
         accumulated_value += sampled_value;
-        if (!sw_f32_finite(accumulated_value))
-            return RIN_GPU_ERROR_BACKEND;
     }
     *value_out = accumulated_value / (float)sample_count;
-    return sw_f32_finite(*value_out) ? RIN_GPU_OK : RIN_GPU_ERROR_BACKEND;
+    return RIN_GPU_OK;
 }
 
 static int sw_sample_image_2d_filtered(

@@ -189,7 +189,7 @@ static int make_fragment_shader(uint8_t* storage, size_t storage_capacity,
     words[0] = RIN_SPIRV_MAGIC;
     words[1] = 0x00010300u;
     words[2] = 0u;
-    words[3] = 64u;
+    words[3] = 80u;
     words[4] = 0u;
     operands[0] = 1u;
     emit_spirv(words, &count, 17u, 2u, operands); /* Shader */
@@ -216,6 +216,14 @@ static int make_fragment_shader(uint8_t* storage, size_t storage_capacity,
     emit_spirv(words, &count, 71u, 4u, operands); /* RGBA32F set */
     operands[0] = 47u; operands[1] = 33u; operands[2] = 3u;
     emit_spirv(words, &count, 71u, 4u, operands); /* RGBA32F binding */
+    operands[0] = 60u; operands[1] = 34u; operands[2] = 0u;
+    emit_spirv(words, &count, 71u, 4u, operands); /* sampled-image set */
+    operands[0] = 60u; operands[1] = 33u; operands[2] = 4u;
+    emit_spirv(words, &count, 71u, 4u, operands); /* sampled-image binding */
+    operands[0] = 61u; operands[1] = 34u; operands[2] = 0u;
+    emit_spirv(words, &count, 71u, 4u, operands); /* sampler set */
+    operands[0] = 61u; operands[1] = 33u; operands[2] = 5u;
+    emit_spirv(words, &count, 71u, 4u, operands); /* sampler binding */
     operands[0] = 25u; operands[1] = 30u; operands[2] = 0u;
     emit_spirv(words, &count, 71u, 4u, operands); /* color output location */
 
@@ -239,6 +247,14 @@ static int make_fragment_shader(uint8_t* storage, size_t storage_capacity,
     emit_spirv(words, &count, 25u, 9u, operands); /* RGBA16F storage image */
     operands[0] = 45u; operands[7] = 1u;
     emit_spirv(words, &count, 25u, 9u, operands); /* RGBA32F storage image */
+    operands[0] = 54u; operands[1] = 2u; operands[2] = 1u;
+    operands[3] = 0u; operands[4] = 0u; operands[5] = 0u;
+    operands[6] = 1u; operands[7] = 0u;
+    emit_spirv(words, &count, 25u, 9u, operands); /* sampled RGBA32F image */
+    operands[0] = 55u; operands[1] = 54u;
+    emit_spirv(words, &count, 27u, 3u, operands); /* sampled image type */
+    operands[0] = 56u;
+    emit_spirv(words, &count, 26u, 2u, operands); /* sampler type */
     operands[0] = 8u; operands[1] = 0u; operands[2] = 6u;
     emit_spirv(words, &count, 32u, 4u, operands); /* R8 image pointer */
     operands[0] = 9u; operands[1] = 0u; operands[2] = 7u;
@@ -247,6 +263,12 @@ static int make_fragment_shader(uint8_t* storage, size_t storage_capacity,
     emit_spirv(words, &count, 32u, 4u, operands); /* RGBA16F image pointer */
     operands[0] = 46u; operands[1] = 0u; operands[2] = 45u;
     emit_spirv(words, &count, 32u, 4u, operands); /* RGBA32F image pointer */
+    operands[0] = 57u; operands[1] = 0u; operands[2] = 54u;
+    emit_spirv(words, &count, 32u, 4u, operands); /* sampled image pointer */
+    operands[0] = 58u; operands[1] = 0u; operands[2] = 56u;
+    emit_spirv(words, &count, 32u, 4u, operands); /* sampler pointer */
+    operands[0] = 59u; operands[1] = 2u; operands[2] = 2u;
+    emit_spirv(words, &count, 23u, 4u, operands); /* vec2 */
     operands[0] = 24u; operands[1] = 3u; operands[2] = 5u;
     emit_spirv(words, &count, 32u, 4u, operands); /* output pointer */
     operands[0] = 10u; operands[1] = 1u;
@@ -259,6 +281,10 @@ static int make_fragment_shader(uint8_t* storage, size_t storage_capacity,
     emit_spirv(words, &count, 59u, 4u, operands); /* RGBA16F descriptor */
     operands[0] = 46u; operands[1] = 47u; operands[2] = 0u;
     emit_spirv(words, &count, 59u, 4u, operands); /* RGBA32F descriptor */
+    operands[0] = 57u; operands[1] = 60u; operands[2] = 0u;
+    emit_spirv(words, &count, 59u, 4u, operands); /* sampled image descriptor */
+    operands[0] = 58u; operands[1] = 61u; operands[2] = 0u;
+    emit_spirv(words, &count, 59u, 4u, operands); /* sampler descriptor */
     operands[0] = 24u; operands[1] = 25u; operands[2] = 3u;
     emit_spirv(words, &count, 59u, 4u, operands); /* fragment color output */
     operands[0] = 3u; operands[1] = 13u; operands[2] = 0u;
@@ -319,10 +345,9 @@ static int make_fragment_shader(uint8_t* storage, size_t storage_capacity,
     operands[2] = 37u; operands[3] = 38u;
     operands[4] = 39u; operands[5] = 40u;
     emit_spirv(words, &count, 80u, 7u, operands); /* half-float edge values */
-    operands[0] = 5u; operands[1] = 51u;
-    operands[2] = 39u; operands[3] = 40u;
-    operands[4] = 38u; operands[5] = 53u;
-    emit_spirv(words, &count, 80u, 7u, operands); /* binary32 edge values */
+    operands[0] = 59u; operands[1] = 65u;
+    operands[2] = 14u; operands[3] = 14u;
+    emit_spirv(words, &count, 80u, 5u, operands); /* sampled texel center */
     operands[0] = 6u; operands[1] = 22u; operands[2] = 11u;
     emit_spirv(words, &count, 61u, 4u, operands); /* load R8 image */
     operands[0] = 7u; operands[1] = 23u; operands[2] = 12u;
@@ -331,6 +356,13 @@ static int make_fragment_shader(uint8_t* storage, size_t storage_capacity,
     emit_spirv(words, &count, 61u, 4u, operands); /* load RGBA16F image */
     operands[0] = 45u; operands[1] = 48u; operands[2] = 47u;
     emit_spirv(words, &count, 61u, 4u, operands); /* load RGBA32F image */
+    operands[0] = 54u; operands[1] = 62u; operands[2] = 60u;
+    emit_spirv(words, &count, 61u, 4u, operands); /* load sampled image */
+    operands[0] = 56u; operands[1] = 63u; operands[2] = 61u;
+    emit_spirv(words, &count, 61u, 4u, operands); /* load sampler */
+    operands[0] = 55u; operands[1] = 64u;
+    operands[2] = 62u; operands[3] = 63u;
+    emit_spirv(words, &count, 86u, 5u, operands); /* combine sampled image */
     operands[0] = 22u; operands[1] = 20u; operands[2] = 21u;
     emit_spirv(words, &count, 99u, 4u, operands); /* write R8 */
     operands[0] = 23u;
@@ -349,8 +381,11 @@ static int make_fragment_shader(uint8_t* storage, size_t storage_capacity,
     emit_spirv(words, &count, 98u, 5u, operands); /* read copied RGBA32F */
     operands[0] = 48u; operands[1] = 43u; operands[2] = 50u;
     emit_spirv(words, &count, 99u, 4u, operands); /* copy to final texel */
-    operands[0] = 48u; operands[1] = 43u; operands[2] = 51u;
-    emit_spirv(words, &count, 99u, 4u, operands); /* write binary32 edges */
+    operands[0] = 5u; operands[1] = 66u;
+    operands[2] = 64u; operands[3] = 65u;
+    emit_spirv(words, &count, 87u, 5u, operands); /* nearest sample RGBA32F */
+    operands[0] = 48u; operands[1] = 43u; operands[2] = 66u;
+    emit_spirv(words, &count, 99u, 4u, operands); /* store sampled values */
     operands[0] = 5u; operands[1] = 52u; operands[2] = 48u;
     operands[3] = 43u;
     emit_spirv(words, &count, 98u, 5u, operands); /* read binary32 edges */
@@ -391,11 +426,13 @@ static int make_fragment_shader(uint8_t* storage, size_t storage_capacity,
             RIN_SPIRV_TRANSLATE_FEATURE_RGBA16F_STORAGE_IMAGE |
             RIN_SPIRV_TRANSLATE_FEATURE_RGBA32F_STORAGE_IMAGE,
         storage, storage_capacity, &info);
-    if (result != RIN_SPIRV_OK || info.base.descriptor_count != 4u ||
+    if (result != RIN_SPIRV_OK || info.base.descriptor_count != 6u ||
         info.base.descriptors[0].binding != 0u ||
         info.base.descriptors[1].binding != 1u ||
         info.base.descriptors[2].binding != 2u ||
-        info.base.descriptors[3].binding != 3u) {
+        info.base.descriptors[3].binding != 3u ||
+        info.base.descriptors[4].binding != 4u ||
+        info.base.descriptors[5].binding != 5u) {
         fprintf(stderr, "storage-image SPIR-V translation=%d descriptors=%u: %s\n",
                 result, info.base.descriptor_count, info.base.diagnostic);
         return 0;
@@ -421,12 +458,15 @@ int main(void)
     RinGpuImageDescV1 storage_desc = {0};
     RinGpuImageDescV1 rgba16_storage_desc = {0};
     RinGpuImageDescV1 rgba32_storage_desc = {0};
+    RinGpuImageDescV1 rgba32_sampled_desc = {0};
     RinGpuImageDescV1 color_desc = {0};
+    RinGpuImageUploadV1 sampled_upload = {0};
+    RinGpuSamplerDescV1 sampler_desc = {0};
     RinGpuImageTransitionV1 transition = {0};
     RinGpuRenderPassDescV1 render_pass = {0};
     RinGpuGraphicsBarrierV2 graphics_barrier_v2 = {0};
     RinGpuGraphicsBindingV1 binding = {0};
-    RinGpuGraphicsBindingV1 bindings[4] = {{0}};
+    RinGpuGraphicsBindingV1 bindings[6] = {{0}};
     RinGpuDrawV1 draw = {0};
     RinGpuQueueDescV1 queue_desc = {0};
     RinGpuCommandListDescV1 command_desc = {0};
@@ -437,6 +477,8 @@ int main(void)
     RinGpuHandle storage_image = 0u, rgba_storage_image = 0u;
     RinGpuHandle rgba16_storage_image = 0u;
     RinGpuHandle rgba32_storage_image = 0u;
+    RinGpuHandle rgba32_sampled_image = 0u;
+    RinGpuHandle sampler = 0u;
     RinGpuHandle color_image = 0u;
     RinGpuHandle bind_group = 0u, queue = 0u, command_list = 0u, fence = 0u;
     uint8_t value = 0u;
@@ -446,6 +488,9 @@ int main(void)
     };
     float rgba32_value[12] = {0.0f};
     uint32_t rgba32_bits[12] = {0u};
+    const uint32_t sampled_edge_bits[4] = {
+        UINT32_C(0x7f800000), UINT32_C(0x7fc00000),
+        UINT32_C(0x80000000), UINT32_C(0x00000001)};
     const char* failure_stage = "initialization";
     int result = 1;
 
@@ -545,6 +590,11 @@ int main(void)
     rgba32_storage_desc = storage_desc;
     rgba32_storage_desc.format = RIN_GPU_FORMAT_RGBA32_FLOAT;
     rgba32_storage_desc.width = 3u;
+    rgba32_sampled_desc = rgba32_storage_desc;
+    rgba32_sampled_desc.width = 1u;
+    rgba32_sampled_desc.usage = RIN_GPU_IMAGE_SAMPLED |
+                                RIN_GPU_IMAGE_COPY_DESTINATION;
+    rgba32_sampled_desc.flags = RIN_GPU_IMAGE_CPU_VISIBLE;
     color_desc = storage_desc;
     color_desc.format = RIN_GPU_FORMAT_BGRA8_UNORM;
     color_desc.usage = RIN_GPU_IMAGE_COLOR_TARGET | RIN_GPU_IMAGE_COPY_SOURCE;
@@ -556,7 +606,30 @@ int main(void)
                             &rgba16_storage_image) != RIN_GPU_OK ||
         ringpu_create_image(&core, &rgba32_storage_desc,
                             &rgba32_storage_image) != RIN_GPU_OK ||
+        ringpu_create_image(&core, &rgba32_sampled_desc,
+                            &rgba32_sampled_image) != RIN_GPU_OK ||
         ringpu_create_image(&core, &color_desc, &color_image) != RIN_GPU_OK)
+        goto done;
+    sampled_upload.abi_version = RIN_GPU_ABI_VERSION;
+    sampled_upload.struct_size = sizeof(sampled_upload);
+    sampled_upload.width = 1u;
+    sampled_upload.height = 1u;
+    sampled_upload.depth = 1u;
+    failure_stage = "sampled image upload";
+    if (ringpu_upload_image(&core, rgba32_sampled_image, &sampled_upload,
+                            sampled_edge_bits,
+                            sizeof(sampled_edge_bits)) != RIN_GPU_OK)
+        goto done;
+    sampler_desc.abi_version = RIN_GPU_ABI_VERSION;
+    sampler_desc.struct_size = sizeof(sampler_desc);
+    sampler_desc.min_filter = RIN_GPU_SAMPLER_FILTER_NEAREST;
+    sampler_desc.mag_filter = RIN_GPU_SAMPLER_FILTER_NEAREST;
+    sampler_desc.mip_filter = RIN_GPU_SAMPLER_MIP_FILTER_NONE;
+    sampler_desc.address_u = RIN_GPU_SAMPLER_ADDRESS_CLAMP_TO_EDGE;
+    sampler_desc.address_v = RIN_GPU_SAMPLER_ADDRESS_CLAMP_TO_EDGE;
+    sampler_desc.address_w = RIN_GPU_SAMPLER_ADDRESS_CLAMP_TO_EDGE;
+    sampler_desc.max_anisotropy = 1u;
+    if (ringpu_create_sampler(&core, &sampler_desc, &sampler) != RIN_GPU_OK)
         goto done;
     binding.abi_version = RIN_GPU_ABI_VERSION;
     binding.struct_size = sizeof(binding);
@@ -576,12 +649,22 @@ int main(void)
     bindings[3].binding = 3u;
     bindings[3].resource = rgba32_storage_image;
     bindings[3].access = RIN_GPU_RESOURCE_READ | RIN_GPU_RESOURCE_WRITE;
+    bindings[4] = binding;
+    bindings[4].binding = 4u;
+    bindings[4].kind = RIN_SHADER_RESOURCE_SAMPLED_IMAGE;
+    bindings[4].access = RIN_GPU_RESOURCE_READ;
+    bindings[4].resource = rgba32_sampled_image;
+    bindings[5] = binding;
+    bindings[5].binding = 5u;
+    bindings[5].kind = RIN_SHADER_RESOURCE_SAMPLER;
+    bindings[5].access = 0u;
+    bindings[5].resource = sampler;
     failure_stage = "bind group";
     fail_next_graphics_bind_group = 1u;
     bind_group = UINT64_MAX;
     {
         int bind_result = ringpu_create_graphics_bind_group_typed(
-            &core, pipeline, bindings, 4u, &bind_group);
+            &core, pipeline, bindings, 6u, &bind_group);
         if (bind_result != RIN_GPU_ERROR_BACKEND || bind_group != 0u ||
             destroy_graphics_bind_group_calls != 1u) {
             fprintf(stderr,
@@ -595,7 +678,7 @@ int main(void)
     bind_group = UINT64_MAX;
     {
         int bind_result = ringpu_create_graphics_bind_group_typed(
-            &core, pipeline, bindings, 4u, &bind_group);
+            &core, pipeline, bindings, 6u, &bind_group);
         if (bind_result != RIN_GPU_ERROR_BACKEND || bind_group != 0u ||
             destroy_graphics_bind_group_calls != 1u) {
             fprintf(stderr,
@@ -608,7 +691,7 @@ int main(void)
     bind_group = 0u;
     {
         int bind_result = ringpu_create_graphics_bind_group_typed(
-            &core, pipeline, bindings, 4u, &bind_group);
+            &core, pipeline, bindings, 6u, &bind_group);
         if (bind_result != RIN_GPU_OK) {
             fprintf(stderr, "bind-group create result=%d\n", bind_result);
             goto done;
@@ -644,6 +727,12 @@ int main(void)
                                         rgba32_storage_image,
                                         &transition) != RIN_GPU_OK)
         goto done;
+    transition.before_state = RIN_GPU_IMAGE_STATE_COPY_DESTINATION;
+    if (ringpu_command_transition_image(&core, command_list,
+                                        rgba32_sampled_image,
+                                        &transition) != RIN_GPU_OK)
+        goto done;
+    transition.before_state = RIN_GPU_IMAGE_STATE_UNDEFINED;
     transition.after_state = RIN_GPU_IMAGE_STATE_COLOR_TARGET;
     failure_stage = "color transition";
     if (ringpu_command_transition_image(&core, command_list, color_image,
@@ -722,9 +811,19 @@ int main(void)
     draw.vertex_count = 1u;
     draw.instance_count = 1u;
     failure_stage = "draw";
-    if (ringpu_command_draw(&core, command_list, &draw) != RIN_GPU_OK ||
-        ringpu_command_end_render_pass(&core, command_list) != RIN_GPU_OK)
-        goto done;
+    {
+        const int draw_result = ringpu_command_draw(&core, command_list, &draw);
+        if (draw_result != RIN_GPU_OK) {
+            fprintf(stderr, "draw command error %d\n", draw_result);
+            goto done;
+        }
+        const int end_result = ringpu_command_end_render_pass(
+            &core, command_list);
+        if (end_result != RIN_GPU_OK) {
+            fprintf(stderr, "end render pass error %d\n", end_result);
+            goto done;
+        }
+    }
     transition.before_state = RIN_GPU_IMAGE_STATE_SHADER_READ;
     transition.after_state = RIN_GPU_IMAGE_STATE_COPY_SOURCE;
     failure_stage = "storage readback transition";
