@@ -14,6 +14,15 @@
 #define RIN_SPIRV_MAX_SPECIALIZATIONS 64u
 #define RIN_SPIRV_NAME_MAX 64u
 
+/* Exact-format authorization for R8 storage images. This is intentionally
+ * narrower than Vulkan's shaderStorageImageExtendedFormats feature: it only
+ * enables the R8_UNORM format implemented by a selected RinGPU backend. The
+ * caller derives this bit from its API/device contract; V1/V2 never enable it
+ * implicitly. */
+#define RIN_SPIRV_TRANSLATE_FEATURE_R8_STORAGE_IMAGE UINT32_C(0x00000001)
+#define RIN_SPIRV_TRANSLATE_FEATURE_KNOWN \
+    RIN_SPIRV_TRANSLATE_FEATURE_R8_STORAGE_IMAGE
+
 typedef enum RinSpirvResult {
     RIN_SPIRV_OK = 0,
     RIN_SPIRV_ERROR_INVALID_ARGUMENT = -1,
@@ -130,5 +139,16 @@ int ringpu_spirv_translate_v2(const uint32_t* words, size_t word_count,
                               void* rin_shader_out,
                               size_t rin_shader_capacity,
                               RinSpirvTranslationInfoV2* info);
+
+/* V3 adds exact-format storage-image feature authorization while preserving
+ * V2 interpolation metadata. A module declaring StorageImageExtendedFormats
+ * is accepted only with explicit R8 authorization; other extended image
+ * formats remain unsupported. */
+int ringpu_spirv_translate_v3(
+    const uint32_t* words, size_t word_count, uint32_t expected_stage,
+    const RinSpirvSpecializationValueV1* overrides,
+    uint32_t override_count, uint32_t feature_flags,
+    void* rin_shader_out, size_t rin_shader_capacity,
+    RinSpirvTranslationInfoV2* info);
 
 #endif /* RINGPU_PUBLIC_SPIRV_FRONTEND_H */

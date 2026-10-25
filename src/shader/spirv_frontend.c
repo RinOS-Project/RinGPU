@@ -100,7 +100,10 @@ enum {
     SPV_ADDRESSING_LOGICAL = 0,
     SPV_MEMORY_GLSL450 = 1,
     SPV_MEMORY_VULKAN = 3,
-    SPV_CAPABILITY_SHADER = 1
+    SPV_CAPABILITY_SHADER = 1,
+    SPV_CAPABILITY_STORAGE_IMAGE_EXTENDED_FORMATS = 49,
+    SPV_IMAGE_FORMAT_RGBA8 = 4,
+    SPV_IMAGE_FORMAT_R8 = 15
 };
 
 enum {
@@ -362,8 +365,22 @@ static uint32_t type_size(const SpvType* types, uint32_t bound, uint32_t id)
     return size == 0u || size > UINT32_MAX ? 0u : (uint32_t)size;
 }
 
+static int storage_image_format_supported(const SpvType* type,
+                                         uint32_t feature_flags)
+{
+    if (!type || type->kind != SPV_TYPE_IMAGE_KIND ||
+        type->image_sampled != 2u)
+        return 0;
+    if (type->image_format == SPV_IMAGE_FORMAT_RGBA8)
+        return 1;
+    return type->image_format == SPV_IMAGE_FORMAT_R8 &&
+           (feature_flags &
+            RIN_SPIRV_TRANSLATE_FEATURE_R8_STORAGE_IMAGE) != 0u;
+}
+
 static int descriptor_type(const SpvType* types, uint32_t bound,
-                           uint32_t type_id, uint32_t* kind)
+                           uint32_t type_id, uint32_t feature_flags,
+                           uint32_t* kind)
 {
     const SpvType* type;
 
@@ -371,13 +388,13 @@ static int descriptor_type(const SpvType* types, uint32_t bound,
         return 0;
     type = &types[type_id];
     if (type->kind == SPV_TYPE_POINTER_KIND)
-        return descriptor_type(types, bound, type->element, kind);
+        return descriptor_type(types, bound, type->element, feature_flags,
+                               kind);
     if (type->kind == SPV_TYPE_SAMPLER_KIND) {
         *kind = RIN_SHADER_RESOURCE_SAMPLER;
         return 1;
     }
-    if (type->kind == SPV_TYPE_IMAGE_KIND &&
-        type->image_sampled == 2u && type->image_format == 4u) {
+    if (storage_image_format_supported(type, feature_flags)) {
         *kind = RIN_SHADER_RESOURCE_STORAGE_IMAGE;
         return 1;
     }
@@ -555,7 +572,8 @@ static int find_io_location(const RinSpirvTranslationInfoV1* info,
 static int collect_descriptor(RinSpirvTranslationInfoV1* info,
                               const SpvDecorations* decorations,
                               const SpvType* types, uint32_t bound, uint32_t id,
-                              const SpvVariable* variable, const char* name)
+                              const SpvVariable* variable, const char* name,
+                              uint32_t feature_flags)
 {
     uint32_t kind = RIN_SHADER_RESOURCE_NONE;
     RinSpirvDescriptorV1* descriptor;
@@ -563,7 +581,8 @@ static int collect_descriptor(RinSpirvTranslationInfoV1* info,
     if (!info || !decorations || !variable || !variable->defined)
         return 0;
     if (variable->storage_class == SPV_STORAGE_UNIFORM_CONSTANT) {
-        if (!descriptor_type(types, bound, variable->type_id, &kind))
+        if (!descriptor_type(types, bound, variable->type_id, feature_flags,
+                             &kind))
             return 0;
     } else if (variable->storage_class == SPV_STORAGE_UNIFORM ||
                variable->storage_class == SPV_STORAGE_STORAGE_BUFFER) {
@@ -783,7 +802,8 @@ static int translate_function_instruction(
     SpvBuilder* builder, RinSpirvTranslationInfoV1* info,
     const SpvType* types, const SpvDecorations* decorations,
     SpvValue* values, const SpvVariable* variables, uint32_t bound,
-    const SpvInstruction* current, int* saw_return)
+    const SpvInstruction* current, uint32_t feature_flags,
+    int* saw_return)
 {
     const uint32_t* words = current->words;
     uint16_t opcode = current->opcode;
@@ -1017,7 +1037,7 @@ static int translate_function_instruction(
             image_type->image_arrayed != 0u ||
             image_type->image_multisampled != 0u ||
             image_type->image_sampled != 2u ||
-            image_type->image_format != 4u ||
+            !storage_image_format_supported(image_type, feature_flags) ||
             !id_valid(image_type->element, bound) ||
             types[image_type->element].kind != SPV_TYPE_FLOAT_KIND ||
             types[image_type->element].width != 32u ||
@@ -1038,15 +1058,39 @@ static int translate_function_instruction(
             types[words[1]].kind != SPV_TYPE_VECTOR_KIND ||
             types[words[1]].element != image_type->element)
             return 0;
-        for (uint32_t component = 0u; component < 4u; ++component) {
+        if (image_type->image_format == SPV_IMAGE_FORMAT_R8) {
+            static const uint32_t default_components[3] = {
+                0u, 0u, UINT32_C(0x3f800000)
+            };
             if (!alloc_temporary_register(builder, &dst)) return 0;
             emitted = instruction(RIN_SHADER_OP_LOAD_IMAGE_2D_F32, dst,
                                   coordinate->component_registers[0],
                                   coordinate->component_registers[1], 0u);
             emitted.resource = (uint16_t)image->image_resource_index;
-            emitted.flags = (uint16_t)component;
+            emitted.flags = 0u;
             if (!append_instruction(builder, emitted)) return 0;
-            values[words[2]].component_registers[component] = dst;
+            values[words[2]].component_registers[0] = dst;
+            for (uint32_t component = 1u; component < 4u; ++component) {
+                if (!alloc_temporary_register(builder, &dst) ||
+                    !append_instruction(
+                        builder,
+                        instruction(RIN_SHADER_OP_CONST_F32, dst,
+                                    RIN_SHADER_UNUSED, RIN_SHADER_UNUSED,
+                                    default_components[component - 1u])))
+                    return 0;
+                values[words[2]].component_registers[component] = dst;
+            }
+        } else {
+            for (uint32_t component = 0u; component < 4u; ++component) {
+                if (!alloc_temporary_register(builder, &dst)) return 0;
+                emitted = instruction(RIN_SHADER_OP_LOAD_IMAGE_2D_F32, dst,
+                                      coordinate->component_registers[0],
+                                      coordinate->component_registers[1], 0u);
+                emitted.resource = (uint16_t)image->image_resource_index;
+                emitted.flags = (uint16_t)component;
+                if (!append_instruction(builder, emitted)) return 0;
+                values[words[2]].component_registers[component] = dst;
+            }
         }
         values[words[2]].type_id = words[1];
         values[words[2]].component_count = 4u;
@@ -1082,7 +1126,7 @@ static int translate_function_instruction(
             image_type->image_arrayed != 0u ||
             image_type->image_multisampled != 0u ||
             image_type->image_sampled != 2u ||
-            image_type->image_format != 4u ||
+            !storage_image_format_supported(image_type, feature_flags) ||
             !id_valid(image_type->element, bound) ||
             types[image_type->element].kind != SPV_TYPE_FLOAT_KIND ||
             !id_valid(coordinate->type_id, bound) ||
@@ -1102,7 +1146,10 @@ static int translate_function_instruction(
             types[texel->type_id].kind != SPV_TYPE_VECTOR_KIND ||
             types[texel->type_id].element != image_type->element)
             return 0;
-        for (uint32_t component = 0u; component < 4u; ++component) {
+        for (uint32_t component = 0u;
+             component < (image_type->image_format == SPV_IMAGE_FORMAT_R8
+                              ? 1u : 4u);
+             ++component) {
             emitted = instruction(
                 RIN_SHADER_OP_STORE_IMAGE_2D_F32,
                 texel->component_registers[component],
@@ -1448,6 +1495,7 @@ static int spirv_translate_impl(
                            uint32_t expected_stage,
                            const RinSpirvSpecializationValueV1* overrides,
                            uint32_t override_count,
+                           uint32_t feature_flags,
                            void* rin_shader_out, size_t rin_shader_capacity,
                            RinSpirvTranslationInfoV1* info,
                            uint32_t* input_interpolation,
@@ -1470,6 +1518,8 @@ static int spirv_translate_impl(
     uint32_t memory_model = UINT32_MAX;
     uint32_t addressing_model = UINT32_MAX;
     uint32_t capability_shader = 0u;
+    uint32_t capability_storage_image_extended_formats = 0u;
+    uint32_t active_feature_flags = 0u;
     uint32_t execution_mode_entry = 0u;
     uint32_t workgroup_x = 0u;
     uint32_t workgroup_y = 0u;
@@ -1494,7 +1544,8 @@ static int spirv_translate_impl(
         info->struct_size = sizeof(*info);
         info->api_version = 1u;
     }
-    if (!words || word_count < 5u || !rin_shader_out || !info)
+    if (!words || word_count < 5u || !rin_shader_out || !info ||
+        (feature_flags & ~RIN_SPIRV_TRANSLATE_FEATURE_KNOWN) != 0u)
         return RIN_SPIRV_ERROR_INVALID_ARGUMENT;
     if (words[0] != RIN_SPIRV_MAGIC || words[1] < 0x00010000u ||
         words[1] > 0x00010600u || words[3] == 0u || words[4] != 0u)
@@ -1549,13 +1600,23 @@ static int spirv_translate_impl(
                 values[instruction_words[2]].specialization = 1u;
                 break;
             case SPV_OP_CAPABILITY:
-                if (word_count_instruction != 2u ||
-                    instruction_words[1] != SPV_CAPABILITY_SHADER) {
+                if (word_count_instruction != 2u) {
                     diag(info, "SPIR-V capability is outside the bounded profile");
                     result = RIN_SPIRV_ERROR_UNSUPPORTED;
                     goto done;
                 }
-                capability_shader = 1u;
+                if (instruction_words[1] == SPV_CAPABILITY_SHADER) {
+                    capability_shader = 1u;
+                } else if (instruction_words[1] ==
+                               SPV_CAPABILITY_STORAGE_IMAGE_EXTENDED_FORMATS &&
+                           (feature_flags &
+                            RIN_SPIRV_TRANSLATE_FEATURE_R8_STORAGE_IMAGE) != 0u) {
+                    capability_storage_image_extended_formats = 1u;
+                } else {
+                    diag(info, "SPIR-V capability is outside the bounded profile");
+                    result = RIN_SPIRV_ERROR_UNSUPPORTED;
+                    goto done;
+                }
                 break;
             case SPV_OP_MEMORY_MODEL:
                 if (word_count_instruction != 3u ||
@@ -1970,6 +2031,8 @@ bad_type:
              execution_model, entry_id, selected_function, function_count);
         goto done;
     }
+    if (capability_storage_image_extended_formats != 0u)
+        active_feature_flags = feature_flags;
     stage = stage_from_execution_model(execution_model);
     if (stage == 0u || (expected_stage != 0u && expected_stage != stage)) {
         diag(info, "SPIR-V execution model does not match requested stage");
@@ -2037,7 +2100,8 @@ bad_type:
                 goto bad_interface;
         }
         if (!collect_descriptor(info, &decorations[index], types, bound, index,
-                                &variables[index], names[index]) ||
+                                &variables[index], names[index],
+                                active_feature_flags) ||
             !collect_push_constant(info, types, bound, index, &variables[index],
                                    names[index]))
             goto bad_interface;
@@ -2129,7 +2193,7 @@ metadata_done:
         } else if (in_selected_function) {
             if (!translate_function_instruction(
                     &builder, info, types, decorations, values, variables,
-                    bound, &current, &saw_return)) {
+                    bound, &current, active_feature_flags, &saw_return)) {
                 if (info->diagnostic[0] == '\0')
                     diag(info,
                          "SPIR-V instruction %u cannot be lowered to RSH1",
@@ -2210,7 +2274,7 @@ int ringpu_spirv_translate(const uint32_t* words, size_t word_count,
                            RinSpirvTranslationInfoV1* info)
 {
     return spirv_translate_impl(words, word_count, expected_stage, overrides,
-                                override_count, rin_shader_out,
+                                override_count, 0u, rin_shader_out,
                                 rin_shader_capacity, info, NULL, NULL, 0);
 }
 
@@ -2229,7 +2293,28 @@ int ringpu_spirv_translate_v2(
     info->api_version = 2u;
     result = spirv_translate_impl(
         words, word_count, expected_stage, overrides, override_count,
-        rin_shader_out, rin_shader_capacity, &info->base,
+        0u, rin_shader_out, rin_shader_capacity, &info->base,
+        info->input_interpolation, info->output_interpolation, 1);
+    return result;
+}
+
+int ringpu_spirv_translate_v3(
+        const uint32_t* words, size_t word_count, uint32_t expected_stage,
+        const RinSpirvSpecializationValueV1* overrides,
+        uint32_t override_count, uint32_t feature_flags,
+        void* rin_shader_out, size_t rin_shader_capacity,
+        RinSpirvTranslationInfoV2* info)
+{
+    int result;
+
+    if (!info)
+        return RIN_SPIRV_ERROR_INVALID_ARGUMENT;
+    memset(info, 0, sizeof(*info));
+    info->struct_size = sizeof(*info);
+    info->api_version = 2u;
+    result = spirv_translate_impl(
+        words, word_count, expected_stage, overrides, override_count,
+        feature_flags, rin_shader_out, rin_shader_capacity, &info->base,
         info->input_interpolation, info->output_interpolation, 1);
     return result;
 }

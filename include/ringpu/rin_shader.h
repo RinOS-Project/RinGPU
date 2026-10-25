@@ -107,8 +107,8 @@ typedef enum RinShaderResourceKind {
     RIN_SHADER_RESOURCE_SAMPLER = 3,
     RIN_SHADER_RESOURCE_SAMPLED_DEPTH_IMAGE = 4,
     RIN_SHADER_RESOURCE_COMPARISON_SAMPLER = 5,
-    /* Bounded fragment storage-image profile.  The software backend accepts
-     * only a 2D single-sample R8_UNORM view; other formats stay fail-closed. */
+    /* Bounded fragment storage-image profile. Component indices are explicit
+     * in instruction flags; format support belongs to the selected backend. */
     RIN_SHADER_RESOURCE_STORAGE_IMAGE = 6
 } RinShaderResourceKind;
 
