@@ -413,7 +413,11 @@ int ringpu_shader_validate(const void* shader, size_t shader_size,
                 instruction->opcode == RIN_SHADER_OP_SAMPLE_IMAGE_2D_LOD_F32 ||
                 instruction->opcode == RIN_SHADER_OP_SAMPLE_IMAGE_2D_BIAS_F32 ||
                 instruction->opcode == RIN_SHADER_OP_SAMPLE_IMAGE_2D_GRAD_F32 ||
-                instruction->opcode == RIN_SHADER_OP_SAMPLE_IMAGE_CUBE_F32) &&
+                instruction->opcode == RIN_SHADER_OP_SAMPLE_IMAGE_CUBE_F32 ||
+                instruction->opcode == RIN_SHADER_OP_LOAD_IMAGE_2D_I32 ||
+                instruction->opcode == RIN_SHADER_OP_LOAD_IMAGE_2D_F32 ||
+                instruction->opcode == RIN_SHADER_OP_STORE_IMAGE_2D_I32 ||
+                instruction->opcode == RIN_SHADER_OP_STORE_IMAGE_2D_F32) &&
                instruction->flags <= RIN_SHADER_SAMPLE_COMPONENT_MASK))) {
             result = RIN_SHADER_ERROR_INVALID_INSTRUCTION;
             goto done;
@@ -737,7 +741,7 @@ int ringpu_shader_validate(const void* shader, size_t shader_size,
                     !shader_register(instruction->source1,
                                      header.register_count) ||
                     instruction->resource >= header.resource_count ||
-                    instruction->immediate != 0u || instruction->flags != 0u ||
+                    instruction->immediate != 0u || instruction->flags > 3u ||
                     !shader_has_type(i32_state, f32_state,
                                      instruction->source0, SHADER_VALUE_I32) ||
                     !shader_has_type(i32_state, f32_state,
@@ -765,7 +769,7 @@ int ringpu_shader_validate(const void* shader, size_t shader_size,
                     !shader_register(instruction->source1,
                                      header.register_count) ||
                     instruction->resource >= header.resource_count ||
-                    instruction->immediate != 0u || instruction->flags != 0u ||
+                    instruction->immediate != 0u || instruction->flags > 3u ||
                     !shader_has_type(i32_state, f32_state,
                                      instruction->destination, type) ||
                     !shader_has_type(i32_state, f32_state,

@@ -425,7 +425,8 @@ int ringpu_image_state_allowed(const RinGpuImageDescV1* desc, uint32_t state)
                   ringpu_depth_stencil_format(desc->format))) ||
                 ((desc->usage & RIN_GPU_IMAGE_STORAGE) != 0u &&
                  desc->dimension == RIN_GPU_IMAGE_DIMENSION_2D &&
-                 desc->format == RIN_GPU_FORMAT_R8_UNORM));
+                 (desc->format == RIN_GPU_FORMAT_R8_UNORM ||
+                  desc->format == RIN_GPU_FORMAT_RGBA8_UNORM)));
     return 0;
 }
 

@@ -172,36 +172,44 @@ static void make_fragment_shader(uint8_t* storage)
     RinShaderHeaderV1* header = (RinShaderHeaderV1*)storage;
     RinShaderInstructionV1* instructions =
         (RinShaderInstructionV1*)(storage + sizeof(*header));
-    static const uint32_t bits[] = {
-        UINT32_C(0), UINT32_C(0), UINT32_C(123),
-        UINT32_C(0x3f800000), UINT32_C(0), UINT32_C(0), UINT32_C(0x3f800000)};
+    static const uint32_t integer_bits[] = {
+        UINT32_C(0), UINT32_C(0), UINT32_C(123), UINT32_C(45),
+        UINT32_C(67), UINT32_C(89)};
+    static const uint32_t color_bits[] = {
+        UINT32_C(0), UINT32_C(0), UINT32_C(0), UINT32_C(0x3f800000)};
     memset(storage, 0, sizeof(RinShaderHeaderV1) +
-           13u * sizeof(RinShaderInstructionV1));
+           20u * sizeof(RinShaderInstructionV1));
     header->magic = RIN_SHADER_MAGIC;
     header->version = RIN_SHADER_IR_VERSION;
     header->header_size = sizeof(*header);
     header->total_size = sizeof(RinShaderHeaderV1) +
-                         13u * sizeof(RinShaderInstructionV1);
+                         20u * sizeof(RinShaderInstructionV1);
     header->stage = RIN_SHADER_STAGE_FRAGMENT;
-    header->instruction_count = 13u;
-    header->register_count = 7u;
+    header->instruction_count = 20u;
+    header->register_count = 10u;
     header->output_count = 4u;
-    header->resource_count = 1u;
-    for (uint16_t index = 0u; index < 3u; ++index)
-        set_instruction(&instructions[index], RIN_SHADER_OP_CONST_I32, index,
+    header->resource_count = 2u;
+    for (uint16_t index = 0u; index < 6u; ++index)
+        set_instruction(&instructions[index], RIN_SHADER_OP_CONST_I32,
+                        index,
                         RIN_SHADER_UNUSED, RIN_SHADER_UNUSED,
-                        RIN_SHADER_UNUSED, bits[index]);
-    set_instruction(&instructions[3], RIN_SHADER_OP_STORE_IMAGE_2D_I32, 2u,
-                    0u, 1u, 0u, 0u);
+                        RIN_SHADER_UNUSED, integer_bits[index]);
+    set_instruction(&instructions[6], RIN_SHADER_OP_STORE_IMAGE_2D_I32,
+                    2u, 0u, 1u, 0u, 0u);
     for (uint16_t index = 0u; index < 4u; ++index) {
-        set_instruction(&instructions[index + 4u], RIN_SHADER_OP_CONST_F32,
-                        index + 3u, RIN_SHADER_UNUSED, RIN_SHADER_UNUSED,
-                        RIN_SHADER_UNUSED, bits[index + 3u]);
-        set_instruction(&instructions[index + 8u],
+        set_instruction(&instructions[index + 7u],
+                        RIN_SHADER_OP_STORE_IMAGE_2D_I32, index + 2u,
+                        0u, 1u, 1u, 0u);
+        instructions[index + 7u].flags = index;
+        set_instruction(&instructions[index + 11u], RIN_SHADER_OP_CONST_F32,
+                        index + 6u, RIN_SHADER_UNUSED, RIN_SHADER_UNUSED,
+                        RIN_SHADER_UNUSED, color_bits[index]);
+        set_instruction(&instructions[index + 15u],
                         RIN_SHADER_OP_STORE_OUTPUT_F32, RIN_SHADER_UNUSED,
-                        index + 3u, RIN_SHADER_UNUSED, RIN_SHADER_UNUSED, index);
+                        index + 6u, RIN_SHADER_UNUSED, RIN_SHADER_UNUSED,
+                        index);
     }
-    set_instruction(&instructions[12], RIN_SHADER_OP_RETURN, RIN_SHADER_UNUSED,
+    set_instruction(&instructions[19], RIN_SHADER_OP_RETURN, RIN_SHADER_UNUSED,
                     RIN_SHADER_UNUSED, RIN_SHADER_UNUSED, RIN_SHADER_UNUSED, 0u);
 }
 
@@ -210,7 +218,7 @@ int main(void)
     uint8_t vertex_shader[sizeof(RinShaderHeaderV1) +
                          9u * sizeof(RinShaderInstructionV1)];
     uint8_t fragment_shader[sizeof(RinShaderHeaderV1) +
-                           13u * sizeof(RinShaderInstructionV1)];
+                           20u * sizeof(RinShaderInstructionV1)];
     RinGpuCore core;
     RinGpuSoftwareBackend* backend = NULL;
     RinGpuGraphicsPipelineNativeDescV2 pipeline_desc = {0};
@@ -220,6 +228,7 @@ int main(void)
     RinGpuRenderPassDescV1 render_pass = {0};
     RinGpuGraphicsBarrierV2 graphics_barrier_v2 = {0};
     RinGpuGraphicsBindingV1 binding = {0};
+    RinGpuGraphicsBindingV1 bindings[2] = {{0}};
     RinGpuDrawV1 draw = {0};
     RinGpuQueueDescV1 queue_desc = {0};
     RinGpuCommandListDescV1 command_desc = {0};
@@ -227,9 +236,11 @@ int main(void)
     RinGpuImageReadbackV1 readback = {0};
     RinGpuHandle vertex_module = 0u, fragment_module = 0u;
     RinGpuHandle pipeline = 0u, pipeline_alias = 0u, variant_pipeline = 0u;
-    RinGpuHandle storage_image = 0u, color_image = 0u;
+    RinGpuHandle storage_image = 0u, rgba_storage_image = 0u;
+    RinGpuHandle color_image = 0u;
     RinGpuHandle bind_group = 0u, queue = 0u, command_list = 0u, fence = 0u;
     uint8_t value = 0u;
+    uint8_t rgba_value[4] = {0u, 0u, 0u, 0u};
     const char* failure_stage = "initialization";
     int result = 1;
 
@@ -317,11 +328,17 @@ int main(void)
     storage_desc.sample_count = 1u;
     storage_desc.usage = RIN_GPU_IMAGE_STORAGE | RIN_GPU_IMAGE_COPY_SOURCE;
     storage_desc.flags = RIN_GPU_IMAGE_CPU_READABLE;
+    RinGpuImageDescV1 rgba_storage_desc = storage_desc;
+    rgba_storage_desc.format = RIN_GPU_FORMAT_RGBA8_UNORM;
+    rgba_storage_desc.width = 32u;
+    rgba_storage_desc.height = 4u;
     color_desc = storage_desc;
     color_desc.format = RIN_GPU_FORMAT_BGRA8_UNORM;
     color_desc.usage = RIN_GPU_IMAGE_COLOR_TARGET | RIN_GPU_IMAGE_COPY_SOURCE;
     failure_stage = "images";
     if (ringpu_create_image(&core, &storage_desc, &storage_image) != RIN_GPU_OK ||
+        ringpu_create_image(&core, &rgba_storage_desc,
+                            &rgba_storage_image) != RIN_GPU_OK ||
         ringpu_create_image(&core, &color_desc, &color_image) != RIN_GPU_OK)
         goto done;
     binding.abi_version = RIN_GPU_ABI_VERSION;
@@ -330,23 +347,27 @@ int main(void)
     binding.kind = RIN_SHADER_RESOURCE_STORAGE_IMAGE;
     binding.access = RIN_GPU_RESOURCE_WRITE;
     binding.resource = storage_image;
+    bindings[0] = binding;
+    bindings[1] = binding;
+    bindings[1].binding = 1u;
+    bindings[1].resource = rgba_storage_image;
     failure_stage = "bind group";
     fail_next_graphics_bind_group = 1u;
     bind_group = UINT64_MAX;
     if (ringpu_create_graphics_bind_group_typed(
-            &core, pipeline, &binding, 1u, &bind_group) !=
+            &core, pipeline, bindings, 2u, &bind_group) !=
             RIN_GPU_ERROR_BACKEND ||
         bind_group != 0u || destroy_graphics_bind_group_calls != 1u)
         goto done;
     empty_success_next_graphics_bind_group = 1u;
     bind_group = UINT64_MAX;
     if (ringpu_create_graphics_bind_group_typed(
-            &core, pipeline, &binding, 1u, &bind_group) !=
+            &core, pipeline, bindings, 2u, &bind_group) !=
             RIN_GPU_ERROR_BACKEND ||
         bind_group != 0u || destroy_graphics_bind_group_calls != 1u)
         goto done;
     bind_group = 0u;
-    if (ringpu_create_graphics_bind_group_typed(&core, pipeline, &binding, 1u,
+    if (ringpu_create_graphics_bind_group_typed(&core, pipeline, bindings, 2u,
                                                 &bind_group) != RIN_GPU_OK)
         goto done;
     queue_desc.abi_version = RIN_GPU_ABI_VERSION;
@@ -368,6 +389,9 @@ int main(void)
     transition.after_state = RIN_GPU_IMAGE_STATE_SHADER_READ;
     failure_stage = "storage transition";
     if (ringpu_command_transition_image(&core, command_list, storage_image,
+                                        &transition) != RIN_GPU_OK ||
+        ringpu_command_transition_image(&core, command_list,
+                                        rgba_storage_image,
                                         &transition) != RIN_GPU_OK)
         goto done;
     transition.after_state = RIN_GPU_IMAGE_STATE_COLOR_TARGET;
@@ -457,6 +481,10 @@ int main(void)
     if (ringpu_command_transition_image(&core, command_list, storage_image,
                                         &transition) != RIN_GPU_OK)
         goto done;
+    if (ringpu_command_transition_image(&core, command_list,
+                                        rgba_storage_image,
+                                        &transition) != RIN_GPU_OK)
+        goto done;
     transition.before_state = RIN_GPU_IMAGE_STATE_COLOR_TARGET;
     transition.after_state = RIN_GPU_IMAGE_STATE_COPY_SOURCE;
     failure_stage = "close";
@@ -492,8 +520,21 @@ int main(void)
         int readback_result = ringpu_readback_image(
             &core, storage_image, &readback, &value, sizeof(value));
         if (readback_result != RIN_GPU_OK || value != 123u) {
-            fprintf(stderr, "readback error %d value %u\n", readback_result,
-                    (unsigned)value);
+            fprintf(stderr, "R8 readback error %d value %u\n",
+                    readback_result, (unsigned)value);
+            goto done;
+        }
+        readback_result = ringpu_readback_image(
+            &core, rgba_storage_image, &readback, rgba_value,
+            sizeof(rgba_value));
+        if (readback_result != RIN_GPU_OK || rgba_value[0] != 123u ||
+            rgba_value[1] != 45u || rgba_value[2] != 67u ||
+            rgba_value[3] != 89u) {
+            fprintf(stderr,
+                    "RGBA8 readback error %d value %u,%u,%u,%u\n",
+                    readback_result, (unsigned)rgba_value[0],
+                    (unsigned)rgba_value[1], (unsigned)rgba_value[2],
+                    (unsigned)rgba_value[3]);
             goto done;
         }
     }

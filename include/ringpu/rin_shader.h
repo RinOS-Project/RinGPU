@@ -226,9 +226,10 @@ typedef enum RinShaderOpcode {
     RIN_SHADER_OP_LOAD_SHARED_I32 = 80,
     RIN_SHADER_OP_STORE_SHARED_I32 = 81,
     RIN_SHADER_OP_WORKGROUP_BARRIER = 82,
-    /* Storage-image coordinates are I32 x/y registers.  LOAD writes the
+    /* Storage-image coordinates are I32 x/y registers. LOAD writes the
      * destination register; STORE uses destination as the value register.
-     * `resource` names the image and immediate/flags must be zero. */
+     * flags selects a byte component: 0 for R8_UNORM, 0..3 for RGBA8_UNORM.
+     * `resource` names the image and immediate must be zero. */
     RIN_SHADER_OP_LOAD_IMAGE_2D_I32 = 83,
     RIN_SHADER_OP_STORE_IMAGE_2D_I32 = 84,
     RIN_SHADER_OP_LOAD_IMAGE_2D_F32 = 85,

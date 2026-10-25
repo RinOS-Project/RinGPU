@@ -50,6 +50,8 @@ enum {
     SPV_OP_SAMPLED_IMAGE = 86,
     SPV_OP_CONVERT_S_TO_F = 111,
     SPV_OP_IMAGE_SAMPLE_IMPLICIT_LOD = 87,
+    SPV_OP_IMAGE_READ = 98,
+    SPV_OP_IMAGE_WRITE = 99,
     SPV_OP_F_NEGATE = 127,
     SPV_OP_I_ADD = 128,
     SPV_OP_F_ADD = 129,
@@ -374,7 +376,13 @@ static int descriptor_type(const SpvType* types, uint32_t bound,
         *kind = RIN_SHADER_RESOURCE_SAMPLER;
         return 1;
     }
-    if (type->kind == SPV_TYPE_IMAGE_KIND ||
+    if (type->kind == SPV_TYPE_IMAGE_KIND &&
+        type->image_sampled == 2u && type->image_format == 4u) {
+        *kind = RIN_SHADER_RESOURCE_STORAGE_IMAGE;
+        return 1;
+    }
+    if ((type->kind == SPV_TYPE_IMAGE_KIND &&
+         type->image_sampled == 1u) ||
         type->kind == SPV_TYPE_SAMPLED_IMAGE_KIND) {
         *kind = RIN_SHADER_RESOURCE_SAMPLED_IMAGE;
         return 1;
@@ -980,6 +988,134 @@ static int translate_function_instruction(
                 sampled_image->sampler_resource_index + 1u;
         return 1;
     }
+    if (opcode == SPV_OP_IMAGE_READ) {
+        const SpvValue* image;
+        const SpvValue* coordinate;
+        const SpvType* image_type;
+        uint32_t coordinate_base;
+        uint32_t coordinate_width;
+        uint32_t result_base;
+        uint32_t result_width;
+        if (current->word_count != 5u || !id_valid(words[1], bound) ||
+            !id_valid(words[2], bound) || !id_valid(words[3], bound) ||
+            !id_valid(words[4], bound) ||
+            values[words[2]].type_id != 0u ||
+            values[words[2]].component_count != 0u ||
+            values[words[2]].opaque_kind != SPV_VALUE_OPAQUE_NONE)
+            return 0;
+        image = &values[words[3]];
+        coordinate = &values[words[4]];
+        if (image->opaque_kind != SPV_VALUE_OPAQUE_IMAGE ||
+            image->image_resource_index >= RIN_SHADER_MAX_RESOURCES ||
+            coordinate->component_count != 2u ||
+            !id_valid(image->type_id, bound))
+            return 0;
+        image_type = &types[image->type_id];
+        if (image_type->kind != SPV_TYPE_IMAGE_KIND ||
+            image_type->image_dimension != 1u ||
+            image_type->image_depth != 0u ||
+            image_type->image_arrayed != 0u ||
+            image_type->image_multisampled != 0u ||
+            image_type->image_sampled != 2u ||
+            image_type->image_format != 4u ||
+            !id_valid(image_type->element, bound) ||
+            types[image_type->element].kind != SPV_TYPE_FLOAT_KIND ||
+            types[image_type->element].width != 32u ||
+            !id_valid(coordinate->type_id, bound) ||
+            types[coordinate->type_id].kind != SPV_TYPE_VECTOR_KIND ||
+            types[coordinate->type_id].length != 2u ||
+            !type_scalar_or_vector(types, bound, coordinate->type_id,
+                                   &coordinate_base, &coordinate_width) ||
+            coordinate_base != 1u || coordinate_width != 2u ||
+            !id_valid(types[coordinate->type_id].element, bound) ||
+            types[types[coordinate->type_id].element].kind !=
+                SPV_TYPE_INT_KIND ||
+            types[types[coordinate->type_id].element].signedness != 1u ||
+            !type_scalar_or_vector(types, bound, words[1], &result_base,
+                                   &result_width) ||
+            result_base != 2u || result_width != 4u ||
+            !id_valid(words[1], bound) ||
+            types[words[1]].kind != SPV_TYPE_VECTOR_KIND ||
+            types[words[1]].element != image_type->element)
+            return 0;
+        for (uint32_t component = 0u; component < 4u; ++component) {
+            if (!alloc_temporary_register(builder, &dst)) return 0;
+            emitted = instruction(RIN_SHADER_OP_LOAD_IMAGE_2D_F32, dst,
+                                  coordinate->component_registers[0],
+                                  coordinate->component_registers[1], 0u);
+            emitted.resource = (uint16_t)image->image_resource_index;
+            emitted.flags = (uint16_t)component;
+            if (!append_instruction(builder, emitted)) return 0;
+            values[words[2]].component_registers[component] = dst;
+        }
+        values[words[2]].type_id = words[1];
+        values[words[2]].component_count = 4u;
+        if (builder->resource_count <= image->image_resource_index)
+            builder->resource_count = image->image_resource_index + 1u;
+        return 1;
+    }
+    if (opcode == SPV_OP_IMAGE_WRITE) {
+        const SpvValue* image;
+        const SpvValue* coordinate;
+        const SpvValue* texel;
+        const SpvType* image_type;
+        uint32_t coordinate_base;
+        uint32_t coordinate_width;
+        uint32_t texel_base;
+        uint32_t texel_width;
+        if (current->word_count != 4u || !id_valid(words[1], bound) ||
+            !id_valid(words[2], bound) || !id_valid(words[3], bound))
+            return 0;
+        image = &values[words[1]];
+        coordinate = &values[words[2]];
+        texel = &values[words[3]];
+        if (image->opaque_kind != SPV_VALUE_OPAQUE_IMAGE ||
+            image->image_resource_index >= RIN_SHADER_MAX_RESOURCES ||
+            coordinate->component_count != 2u ||
+            texel->component_count != 4u ||
+            !id_valid(image->type_id, bound))
+            return 0;
+        image_type = &types[image->type_id];
+        if (image_type->kind != SPV_TYPE_IMAGE_KIND ||
+            image_type->image_dimension != 1u ||
+            image_type->image_depth != 0u ||
+            image_type->image_arrayed != 0u ||
+            image_type->image_multisampled != 0u ||
+            image_type->image_sampled != 2u ||
+            image_type->image_format != 4u ||
+            !id_valid(image_type->element, bound) ||
+            types[image_type->element].kind != SPV_TYPE_FLOAT_KIND ||
+            !id_valid(coordinate->type_id, bound) ||
+            types[coordinate->type_id].kind != SPV_TYPE_VECTOR_KIND ||
+            types[coordinate->type_id].length != 2u ||
+            !type_scalar_or_vector(types, bound, coordinate->type_id,
+                                   &coordinate_base, &coordinate_width) ||
+            coordinate_base != 1u || coordinate_width != 2u ||
+            !id_valid(types[coordinate->type_id].element, bound) ||
+            types[types[coordinate->type_id].element].kind !=
+                SPV_TYPE_INT_KIND ||
+            types[types[coordinate->type_id].element].signedness != 1u ||
+            !type_scalar_or_vector(types, bound, texel->type_id,
+                                   &texel_base, &texel_width) ||
+            texel_base != 2u || texel_width != 4u ||
+            !id_valid(texel->type_id, bound) ||
+            types[texel->type_id].kind != SPV_TYPE_VECTOR_KIND ||
+            types[texel->type_id].element != image_type->element)
+            return 0;
+        for (uint32_t component = 0u; component < 4u; ++component) {
+            emitted = instruction(
+                RIN_SHADER_OP_STORE_IMAGE_2D_F32,
+                texel->component_registers[component],
+                coordinate->component_registers[0],
+                coordinate->component_registers[1], 0u);
+            emitted.resource = (uint16_t)image->image_resource_index;
+            emitted.flags = (uint16_t)component;
+            if (!append_instruction(builder, emitted)) return 0;
+        }
+        if (builder->resource_count <= image->image_resource_index)
+            builder->resource_count = image->image_resource_index + 1u;
+        return 1;
+    }
     if (opcode == SPV_OP_COPY_OBJECT) {
         if (current->word_count != 4u || !id_valid(words[1], bound) ||
             !id_valid(words[2], bound) ||
@@ -1017,7 +1153,9 @@ static int translate_function_instruction(
             uint32_t resource_index;
             uint32_t opaque_kind;
             if (types[words[1]].kind == SPV_TYPE_IMAGE_KIND) {
-                expected_kind = RIN_SHADER_RESOURCE_SAMPLED_IMAGE;
+                expected_kind = types[words[1]].image_sampled == 2u
+                    ? RIN_SHADER_RESOURCE_STORAGE_IMAGE
+                    : RIN_SHADER_RESOURCE_SAMPLED_IMAGE;
                 opaque_kind = SPV_VALUE_OPAQUE_IMAGE;
             } else if (types[words[1]].kind == SPV_TYPE_SAMPLER_KIND) {
                 expected_kind = RIN_SHADER_RESOURCE_SAMPLER;
@@ -1594,8 +1732,7 @@ bad_decor:
                 types[instruction_words[1]].columns = instruction_words[3];
                 break;
             case SPV_OP_TYPE_IMAGE:
-                if ((word_count_instruction != 9u &&
-                     word_count_instruction != 10u) ||
+                if (word_count_instruction != 9u ||
                     !id_valid(instruction_words[1], bound) ||
                     !id_valid(instruction_words[2], bound)) goto bad_type;
                 types[instruction_words[1]].kind = SPV_TYPE_IMAGE_KIND;
