@@ -317,6 +317,10 @@ static int make_fragment_shader(uint8_t* storage, size_t storage_capacity,
     operands[2] = 37u; operands[3] = 38u;
     operands[4] = 39u; operands[5] = 40u;
     emit_spirv(words, &count, 80u, 7u, operands); /* half-float edge values */
+    operands[0] = 5u; operands[1] = 51u;
+    operands[2] = 39u; operands[3] = 40u;
+    operands[4] = 38u; operands[5] = 37u;
+    emit_spirv(words, &count, 80u, 7u, operands); /* binary32 edge values */
     operands[0] = 6u; operands[1] = 22u; operands[2] = 11u;
     emit_spirv(words, &count, 61u, 4u, operands); /* load R8 image */
     operands[0] = 7u; operands[1] = 23u; operands[2] = 12u;
@@ -343,6 +347,13 @@ static int make_fragment_shader(uint8_t* storage, size_t storage_capacity,
     emit_spirv(words, &count, 98u, 5u, operands); /* read copied RGBA32F */
     operands[0] = 48u; operands[1] = 43u; operands[2] = 50u;
     emit_spirv(words, &count, 99u, 4u, operands); /* copy to final texel */
+    operands[0] = 48u; operands[1] = 43u; operands[2] = 51u;
+    emit_spirv(words, &count, 99u, 4u, operands); /* write binary32 edges */
+    operands[0] = 5u; operands[1] = 52u; operands[2] = 48u;
+    operands[3] = 43u;
+    emit_spirv(words, &count, 98u, 5u, operands); /* read binary32 edges */
+    operands[0] = 48u; operands[1] = 36u; operands[2] = 52u;
+    emit_spirv(words, &count, 99u, 4u, operands); /* preserve edge bits */
     operands[0] = 5u; operands[1] = 44u;
     operands[2] = 34u; operands[3] = 20u;
     emit_spirv(words, &count, 98u, 5u, operands); /* read written RGBA16F */
@@ -432,6 +443,7 @@ int main(void)
         0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u
     };
     float rgba32_value[12] = {0.0f};
+    uint32_t rgba32_bits[12] = {0u};
     const char* failure_stage = "initialization";
     int result = 1;
 
@@ -806,13 +818,20 @@ int main(void)
         const int rgba32_readback_result = ringpu_readback_image(
             &core, rgba32_storage_image, &readback, rgba32_value,
             sizeof(rgba32_value));
+        memcpy(rgba32_bits, rgba32_value, sizeof(rgba32_bits));
         if (rgba32_readback_result != RIN_GPU_OK ||
-            rgba32_value[0] != 0.5f || rgba32_value[1] != 0.25f ||
-            rgba32_value[2] != 0.75f || rgba32_value[3] != 1.0f ||
-            rgba32_value[4] != 0.5f || rgba32_value[5] != 0.25f ||
-            rgba32_value[6] != 0.75f || rgba32_value[7] != 1.0f ||
-            rgba32_value[8] != 0.5f || rgba32_value[9] != 0.25f ||
-            rgba32_value[10] != 0.75f || rgba32_value[11] != 1.0f) {
+            rgba32_bits[0] != 0x3f000000u ||
+            rgba32_bits[1] != 0x3e800000u ||
+            rgba32_bits[2] != 0x3f400000u ||
+            rgba32_bits[3] != 0x3f800000u ||
+            rgba32_bits[4] != 0x7f800000u ||
+            rgba32_bits[5] != 0x7fc00000u ||
+            rgba32_bits[6] != 0x80000000u ||
+            rgba32_bits[7] != 0x33800000u ||
+            rgba32_bits[8] != 0x7f800000u ||
+            rgba32_bits[9] != 0x7fc00000u ||
+            rgba32_bits[10] != 0x80000000u ||
+            rgba32_bits[11] != 0x33800000u) {
             fprintf(stderr,
                     "RGBA32F readback error %d values %g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g\n",
                     rgba32_readback_result, rgba32_value[0], rgba32_value[1],

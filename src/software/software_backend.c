@@ -4918,8 +4918,6 @@ static int sw_run_shader_typed(const SwShader* shader, const SwShaderIo* io)
                 } else if (component_bytes == sizeof(float)) {
                     memcpy(&f32_registers[in->destination], address,
                            sizeof(float));
-                    if (!sw_f32_finite(f32_registers[in->destination]))
-                        return RIN_GPU_ERROR_BACKEND;
                 } else {
                     f32_registers[in->destination] =
                         (float)*address / 255.0f;
@@ -4963,8 +4961,6 @@ static int sw_run_shader_typed(const SwShader* shader, const SwShaderIo* io)
                         f32_registers[in->destination]);
                     memcpy(address, &half, sizeof(half));
                 } else if (component_bytes == sizeof(float)) {
-                    if (!sw_f32_finite(f32_registers[in->destination]))
-                        return RIN_GPU_ERROR_BACKEND;
                     memcpy(address, &f32_registers[in->destination],
                            sizeof(float));
                 } else {
