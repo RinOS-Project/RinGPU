@@ -291,6 +291,8 @@ static int make_fragment_shader(uint8_t* storage, size_t storage_capacity,
     emit_spirv(words, &count, 43u, 4u, operands); /* quiet NaN */
     operands[0] = 3u; operands[1] = 42u; operands[2] = 2u;
     emit_spirv(words, &count, 43u, 4u, operands); /* integer two */
+    operands[0] = 2u; operands[1] = 53u; operands[2] = 0x00000001u;
+    emit_spirv(words, &count, 43u, 4u, operands); /* binary32 subnormal */
 
     operands[0] = 1u; operands[1] = 18u; operands[2] = 0u; operands[3] = 10u;
     emit_spirv(words, &count, 54u, 5u, operands); /* function */
@@ -319,7 +321,7 @@ static int make_fragment_shader(uint8_t* storage, size_t storage_capacity,
     emit_spirv(words, &count, 80u, 7u, operands); /* half-float edge values */
     operands[0] = 5u; operands[1] = 51u;
     operands[2] = 39u; operands[3] = 40u;
-    operands[4] = 38u; operands[5] = 37u;
+    operands[4] = 38u; operands[5] = 53u;
     emit_spirv(words, &count, 80u, 7u, operands); /* binary32 edge values */
     operands[0] = 6u; operands[1] = 22u; operands[2] = 11u;
     emit_spirv(words, &count, 61u, 4u, operands); /* load R8 image */
@@ -827,11 +829,11 @@ int main(void)
             rgba32_bits[4] != 0x7f800000u ||
             rgba32_bits[5] != 0x7fc00000u ||
             rgba32_bits[6] != 0x80000000u ||
-            rgba32_bits[7] != 0x33800000u ||
+            rgba32_bits[7] != 0x00000001u ||
             rgba32_bits[8] != 0x7f800000u ||
             rgba32_bits[9] != 0x7fc00000u ||
             rgba32_bits[10] != 0x80000000u ||
-            rgba32_bits[11] != 0x33800000u) {
+            rgba32_bits[11] != 0x00000001u) {
             fprintf(stderr,
                     "RGBA32F readback error %d values %g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g\n",
                     rgba32_readback_result, rgba32_value[0], rgba32_value[1],
