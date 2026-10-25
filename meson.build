@@ -89,6 +89,10 @@ else
     test('ringpu-shader-resource',
          executable('ringpu-shader-resource-test',
                     'tests/ringpu_shader_resource_test.c', dependencies: ringpu_dep))
+    test('ringpu-storage-image',
+         executable('ringpu-storage-image-test',
+                    'tests/ringpu_storage_image_test.c',
+                    include_directories: inc, dependencies: ringpu_dep))
     test('ringpu-runtime', executable('ringpu-runtime-test', 'tests/ringpu_runtime_test.c',
                                      dependencies: ringpu_dep))
     test('ringpu-result-mapping',

@@ -1124,7 +1124,8 @@ int ringpu_create_graphics_bind_group_typed(
                 desc->dimension != RIN_GPU_IMAGE_DIMENSION_2D ||
                 (desc->format != RIN_GPU_FORMAT_R8_UNORM &&
                  desc->format != RIN_GPU_FORMAT_RGBA8_UNORM &&
-                 desc->format != RIN_GPU_FORMAT_RGBA16_FLOAT) ||
+                 desc->format != RIN_GPU_FORMAT_RGBA16_FLOAT &&
+                 desc->format != RIN_GPU_FORMAT_RGBA32_FLOAT) ||
                 desc->sample_count != 1u ||
                 (desc->usage & RIN_GPU_IMAGE_STORAGE) == 0u) {
                 result = RIN_GPU_ERROR_STATE;
@@ -1332,7 +1333,8 @@ int ringpu_validate_graphics_bind_group(
                 desc->dimension != RIN_GPU_IMAGE_DIMENSION_2D ||
                 (desc->format != RIN_GPU_FORMAT_R8_UNORM &&
                  desc->format != RIN_GPU_FORMAT_RGBA8_UNORM &&
-                 desc->format != RIN_GPU_FORMAT_RGBA16_FLOAT) ||
+                 desc->format != RIN_GPU_FORMAT_RGBA16_FLOAT &&
+                 desc->format != RIN_GPU_FORMAT_RGBA32_FLOAT) ||
                 desc->sample_count != 1u ||
                 (desc->usage & RIN_GPU_IMAGE_STORAGE) == 0u ||
                 binding->mip_level >= desc->mip_levels ||

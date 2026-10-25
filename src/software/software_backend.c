@@ -3256,7 +3256,8 @@ static int sw_create_graphics_bind_group(
                 image_view.desc.dimension != RIN_GPU_IMAGE_DIMENSION_2D ||
                 (image_view.desc.format != RIN_GPU_FORMAT_R8_UNORM &&
                  image_view.desc.format != RIN_GPU_FORMAT_RGBA8_UNORM &&
-                 image_view.desc.format != RIN_GPU_FORMAT_RGBA16_FLOAT) ||
+                 image_view.desc.format != RIN_GPU_FORMAT_RGBA16_FLOAT &&
+                 image_view.desc.format != RIN_GPU_FORMAT_RGBA32_FLOAT) ||
                 image_view.desc.sample_count != 1u ||
                 (image_view.desc.usage & RIN_GPU_IMAGE_STORAGE) == 0u) {
                 sw_free(backend, group, sizeof(*group));
@@ -4573,6 +4574,9 @@ static int sw_storage_image_address(const SwShaderIo* io, uint16_t resource,
     if (view.desc.format == RIN_GPU_FORMAT_RGBA16_FLOAT) {
         component_bytes = sizeof(uint16_t);
         component_count = 4u;
+    } else if (view.desc.format == RIN_GPU_FORMAT_RGBA32_FLOAT) {
+        component_bytes = sizeof(float);
+        component_count = 4u;
     } else if (view.desc.format == RIN_GPU_FORMAT_RGBA8_UNORM) {
         component_bytes = sizeof(uint8_t);
         component_count = 4u;
@@ -4911,6 +4915,11 @@ static int sw_run_shader_typed(const SwShader* shader, const SwShaderIo* io)
                     uint16_t half;
                     memcpy(&half, address, sizeof(half));
                     f32_registers[in->destination] = sw_f16_to_f32(half);
+                } else if (component_bytes == sizeof(float)) {
+                    memcpy(&f32_registers[in->destination], address,
+                           sizeof(float));
+                    if (!sw_f32_finite(f32_registers[in->destination]))
+                        return RIN_GPU_ERROR_BACKEND;
                 } else {
                     f32_registers[in->destination] =
                         (float)*address / 255.0f;
@@ -4953,6 +4962,11 @@ static int sw_run_shader_typed(const SwShader* shader, const SwShaderIo* io)
                     uint16_t half = sw_f32_to_f16_ieee(
                         f32_registers[in->destination]);
                     memcpy(address, &half, sizeof(half));
+                } else if (component_bytes == sizeof(float)) {
+                    if (!sw_f32_finite(f32_registers[in->destination]))
+                        return RIN_GPU_ERROR_BACKEND;
+                    memcpy(address, &f32_registers[in->destination],
+                           sizeof(float));
                 } else {
                     float value;
                     if (!sw_f32_finite(f32_registers[in->destination]) ||
