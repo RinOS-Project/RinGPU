@@ -1828,6 +1828,7 @@ static int sw_image_select_mip(SwImage* image, uint32_t mip_level)
 static int sw_f32_finite(float value);
 static float sw_f16_to_f32(uint16_t half);
 static uint16_t sw_f32_to_f16(float value);
+static uint16_t sw_f32_to_f16_ieee(float value);
 static int sw_srgb_decode(float encoded, float* linear_out);
 static int sw_srgb_encode(float linear, float* encoded_out);
 
@@ -3254,7 +3255,8 @@ static int sw_create_graphics_bind_group(
             if (result != RIN_GPU_OK ||
                 image_view.desc.dimension != RIN_GPU_IMAGE_DIMENSION_2D ||
                 (image_view.desc.format != RIN_GPU_FORMAT_R8_UNORM &&
-                 image_view.desc.format != RIN_GPU_FORMAT_RGBA8_UNORM) ||
+                 image_view.desc.format != RIN_GPU_FORMAT_RGBA8_UNORM &&
+                 image_view.desc.format != RIN_GPU_FORMAT_RGBA16_FLOAT) ||
                 image_view.desc.sample_count != 1u ||
                 (image_view.desc.usage & RIN_GPU_IMAGE_STORAGE) == 0u) {
                 sw_free(backend, group, sizeof(*group));
@@ -4536,16 +4538,21 @@ static int sw_compute_shared_address(const SwShaderIo* io, int32_t byte_offset,
 static int sw_storage_image_address(const SwShaderIo* io, uint16_t resource,
                                     int32_t x, int32_t y, uint32_t component,
                                     uint32_t access,
-                                    uint8_t** address_out)
+                                    uint8_t** address_out,
+                                    uint32_t* component_bytes_out)
 {
     const SwGraphicsBindGroup* group;
     const SwImage* image;
     SwImage view;
     uint64_t offset;
+    uint64_t component_offset;
     uint32_t bytes_per_pixel;
+    uint32_t component_bytes;
+    uint32_t component_count;
     int result;
 
-    if (!io || !address_out || x < 0 || y < 0 || !io->graphics_bind_group)
+    if (!io || !address_out || !component_bytes_out || x < 0 || y < 0 ||
+        !io->graphics_bind_group)
         return RIN_GPU_ERROR_BOUNDS;
     group = io->graphics_bind_group;
     if (resource >= group->binding_count ||
@@ -4561,20 +4568,35 @@ static int sw_storage_image_address(const SwShaderIo* io, uint16_t resource,
         &view, group->image_base_mip_levels[resource],
         group->image_array_layers[resource]);
     bytes_per_pixel = ringpu_image_format_bytes(view.desc.format);
-    if (result != RIN_GPU_OK ||
-        view.desc.dimension != RIN_GPU_IMAGE_DIMENSION_2D ||
-        (view.desc.format != RIN_GPU_FORMAT_R8_UNORM &&
-         view.desc.format != RIN_GPU_FORMAT_RGBA8_UNORM) ||
-        component >= bytes_per_pixel ||
-        (view.desc.format == RIN_GPU_FORMAT_R8_UNORM && component != 0u) ||
+    if (result != RIN_GPU_OK)
+        return result;
+    if (view.desc.format == RIN_GPU_FORMAT_RGBA16_FLOAT) {
+        component_bytes = sizeof(uint16_t);
+        component_count = 4u;
+    } else if (view.desc.format == RIN_GPU_FORMAT_RGBA8_UNORM) {
+        component_bytes = sizeof(uint8_t);
+        component_count = 4u;
+    } else if (view.desc.format == RIN_GPU_FORMAT_R8_UNORM) {
+        component_bytes = sizeof(uint8_t);
+        component_count = 1u;
+    } else {
+        return RIN_GPU_ERROR_UNSUPPORTED;
+    }
+    if (view.desc.dimension != RIN_GPU_IMAGE_DIMENSION_2D ||
+        component >= component_count ||
         view.desc.sample_count != 1u ||
         (view.desc.usage & RIN_GPU_IMAGE_STORAGE) == 0u ||
         (uint32_t)x >= view.desc.width || (uint32_t)y >= view.desc.height ||
         !sw_image_pixel_offset(&view, (uint32_t)x, (uint32_t)y,
                                bytes_per_pixel, &offset) ||
-        offset > view.size_bytes || component >= view.size_bytes - offset)
-        return result != RIN_GPU_OK ? result : RIN_GPU_ERROR_BOUNDS;
-    *address_out = view.bytes + offset + component;
+        offset > view.size_bytes)
+        return RIN_GPU_ERROR_BOUNDS;
+    component_offset = offset + (uint64_t)component * component_bytes;
+    if (component_offset > view.size_bytes ||
+        component_bytes > view.size_bytes - component_offset)
+        return RIN_GPU_ERROR_BOUNDS;
+    *address_out = view.bytes + component_offset;
+    *component_bytes_out = component_bytes;
     return RIN_GPU_OK;
 }
 
@@ -4865,6 +4887,7 @@ static int sw_run_shader_typed(const SwShader* shader, const SwShaderIo* io)
         case RIN_SHADER_OP_LOAD_IMAGE_2D_I32:
         case RIN_SHADER_OP_LOAD_IMAGE_2D_F32: {
             uint8_t* address;
+            uint32_t component_bytes;
             if (in->destination == RIN_SHADER_UNUSED ||
                 in->source0 == RIN_SHADER_UNUSED ||
                 in->source1 == RIN_SHADER_UNUSED ||
@@ -4876,13 +4899,22 @@ static int sw_run_shader_typed(const SwShader* shader, const SwShaderIo* io)
             result = sw_storage_image_address(
                 io, in->resource, i32_registers[in->source0],
                 i32_registers[in->source1], in->flags,
-                RIN_GPU_RESOURCE_READ, &address);
+                RIN_GPU_RESOURCE_READ, &address, &component_bytes);
             if (result != RIN_GPU_OK) return result;
             if (in->opcode == RIN_SHADER_OP_LOAD_IMAGE_2D_I32) {
+                if (component_bytes != sizeof(uint8_t))
+                    return RIN_GPU_ERROR_UNSUPPORTED;
                 i32_registers[in->destination] = (int32_t)*address;
                 register_types[in->destination] = SW_SHADER_VALUE_I32;
             } else {
-                f32_registers[in->destination] = (float)*address / 255.0f;
+                if (component_bytes == sizeof(uint16_t)) {
+                    uint16_t half;
+                    memcpy(&half, address, sizeof(half));
+                    f32_registers[in->destination] = sw_f16_to_f32(half);
+                } else {
+                    f32_registers[in->destination] =
+                        (float)*address / 255.0f;
+                }
                 f32_register_dx[in->destination] = 0.0f;
                 f32_register_dy[in->destination] = 0.0f;
                 register_types[in->destination] = SW_SHADER_VALUE_F32;
@@ -4892,6 +4924,7 @@ static int sw_run_shader_typed(const SwShader* shader, const SwShaderIo* io)
         case RIN_SHADER_OP_STORE_IMAGE_2D_I32:
         case RIN_SHADER_OP_STORE_IMAGE_2D_F32: {
             uint8_t* address;
+            uint32_t component_bytes;
             if (in->destination == RIN_SHADER_UNUSED ||
                 in->source0 == RIN_SHADER_UNUSED ||
                 in->source1 == RIN_SHADER_UNUSED ||
@@ -4903,24 +4936,33 @@ static int sw_run_shader_typed(const SwShader* shader, const SwShaderIo* io)
             result = sw_storage_image_address(
                 io, in->resource, i32_registers[in->source0],
                 i32_registers[in->source1], in->flags,
-                RIN_GPU_RESOURCE_WRITE, &address);
+                RIN_GPU_RESOURCE_WRITE, &address, &component_bytes);
             if (result != RIN_GPU_OK) return result;
             if (in->opcode == RIN_SHADER_OP_STORE_IMAGE_2D_I32) {
+                if (component_bytes != sizeof(uint8_t))
+                    return RIN_GPU_ERROR_UNSUPPORTED;
                 if (register_types[in->destination] != SW_SHADER_VALUE_I32 ||
                     i32_registers[in->destination] < 0 ||
                     i32_registers[in->destination] > 255)
                     return RIN_GPU_ERROR_BOUNDS;
                 *address = (uint8_t)i32_registers[in->destination];
             } else {
-                float value;
-                if (register_types[in->destination] != SW_SHADER_VALUE_F32 ||
-                    !sw_f32_finite(f32_registers[in->destination]) ||
-                    f32_registers[in->destination] < 0.0f ||
-                    f32_registers[in->destination] > 1.0f)
+                if (register_types[in->destination] != SW_SHADER_VALUE_F32)
                     return RIN_GPU_ERROR_BOUNDS;
-                value = f32_registers[in->destination] * 255.0f + 0.5f;
-                if (value > 255.0f) value = 255.0f;
-                *address = (uint8_t)value;
+                if (component_bytes == sizeof(uint16_t)) {
+                    uint16_t half = sw_f32_to_f16_ieee(
+                        f32_registers[in->destination]);
+                    memcpy(address, &half, sizeof(half));
+                } else {
+                    float value;
+                    if (!sw_f32_finite(f32_registers[in->destination]) ||
+                        f32_registers[in->destination] < 0.0f ||
+                        f32_registers[in->destination] > 1.0f)
+                        return RIN_GPU_ERROR_BOUNDS;
+                    value = f32_registers[in->destination] * 255.0f + 0.5f;
+                    if (value > 255.0f) value = 255.0f;
+                    *address = (uint8_t)value;
+                }
             }
             break;
         }
@@ -6105,6 +6147,71 @@ static uint16_t sw_f32_to_f16(float value)
     }
     return (uint16_t)(sign | ((uint32_t)half_exponent << 10u) |
                       (mantissa >> 13u));
+}
+
+/* Storage-image conversion follows IEEE binary16 round-to-nearest-even,
+ * including signed zero, subnormals, infinities, and quiet NaNs. The color
+ * attachment helper above intentionally has a different finite-saturation
+ * policy and must not be reused for typed storage writes. */
+static uint16_t sw_f32_to_f16_ieee(float value)
+{
+    uint32_t bits;
+    uint32_t sign;
+    uint32_t exponent;
+    uint32_t mantissa;
+    int32_t half_exponent;
+
+    memcpy(&bits, &value, sizeof(bits));
+    sign = (bits >> 16u) & UINT32_C(0x8000);
+    exponent = (bits >> 23u) & UINT32_C(0xff);
+    mantissa = bits & UINT32_C(0x007fffff);
+    if (exponent == UINT32_C(0xff)) {
+        if (mantissa == 0u)
+            return (uint16_t)(sign | UINT32_C(0x7c00));
+        return (uint16_t)(sign | UINT32_C(0x7e00) |
+                          ((mantissa >> 13u) & UINT32_C(0x01ff)));
+    }
+
+    half_exponent = (int32_t)exponent - 127 + 15;
+    if (half_exponent >= 31)
+        return (uint16_t)(sign | UINT32_C(0x7c00));
+    if (half_exponent <= 0) {
+        uint32_t significand;
+        uint32_t shift;
+        uint32_t rounded;
+        uint32_t remainder;
+        uint32_t halfway;
+
+        if (half_exponent < -10)
+            return (uint16_t)sign;
+        significand = mantissa | UINT32_C(0x00800000);
+        shift = (uint32_t)(14 - half_exponent);
+        rounded = significand >> shift;
+        remainder = significand & ((UINT32_C(1) << shift) - 1u);
+        halfway = UINT32_C(1) << (shift - 1u);
+        if (remainder > halfway ||
+            (remainder == halfway && (rounded & 1u) != 0u))
+            ++rounded;
+        return (uint16_t)(sign | rounded);
+    }
+
+    {
+        uint32_t rounded = mantissa >> 13u;
+        uint32_t remainder = mantissa & UINT32_C(0x1fff);
+
+        if (remainder > UINT32_C(0x1000) ||
+            (remainder == UINT32_C(0x1000) && (rounded & 1u) != 0u)) {
+            ++rounded;
+            if (rounded == UINT32_C(0x400)) {
+                rounded = 0u;
+                ++half_exponent;
+                if (half_exponent >= 31)
+                    return (uint16_t)(sign | UINT32_C(0x7c00));
+            }
+        }
+        return (uint16_t)(sign | ((uint32_t)half_exponent << 10u) |
+                          rounded);
+    }
 }
 
 static uint8_t sw_color_byte(float value)

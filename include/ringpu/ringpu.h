@@ -94,9 +94,10 @@ typedef enum RinGpuImageFormat {
      * they are never presentable or storage images in the portable profile. */
     RIN_GPU_FORMAT_RGBA32_FLOAT = 10,
     /* CPU upload/readback storage is four native-endian IEEE-754 binary16
-     * components in RGBA order. Like RGBA32_FLOAT, half-float images are
-     * sampled/offscreen color targets only in the portable profile; they are
-     * neither presentable nor storage images. */
+     * components in RGBA order. Half-float images may be sampled, rendered
+     * offscreen, and used as storage images only when the selected backend
+     * implements that usage and the shader translator explicitly authorizes
+     * the exact storage format. They are not presentable. */
     RIN_GPU_FORMAT_RGBA16_FLOAT = 11,
     /* CPU upload/readback is four bytes in RGBA/BGRA order. RGB bytes use
      * the IEC 61966-2-1 sRGB transfer function; alpha remains linear. These

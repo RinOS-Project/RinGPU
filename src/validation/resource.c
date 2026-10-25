@@ -191,8 +191,14 @@ int ringpu_image_allocation_size(const RinGpuCore* core,
              (desc->usage & RIN_GPU_IMAGE_SAMPLED) != 0u)) {
             return RIN_GPU_ERROR_INVALID_ARGUMENT;
         }
-    } else if (desc->format == RIN_GPU_FORMAT_RGBA16_FLOAT ||
-               desc->format == RIN_GPU_FORMAT_RGBA32_FLOAT) {
+    } else if (desc->format == RIN_GPU_FORMAT_RGBA16_FLOAT) {
+        forbidden_usage = ~(RIN_GPU_IMAGE_COPY_DESTINATION |
+            RIN_GPU_IMAGE_SAMPLED | RIN_GPU_IMAGE_COLOR_TARGET |
+            RIN_GPU_IMAGE_COPY_SOURCE | RIN_GPU_IMAGE_STORAGE) &
+            RIN_GPU_IMAGE_KNOWN_USAGE;
+        if ((desc->usage & forbidden_usage) != 0u)
+            return RIN_GPU_ERROR_INVALID_ARGUMENT;
+    } else if (desc->format == RIN_GPU_FORMAT_RGBA32_FLOAT) {
         forbidden_usage = ~(RIN_GPU_IMAGE_COPY_DESTINATION |
             RIN_GPU_IMAGE_SAMPLED | RIN_GPU_IMAGE_COLOR_TARGET |
             RIN_GPU_IMAGE_COPY_SOURCE) & RIN_GPU_IMAGE_KNOWN_USAGE;
@@ -426,7 +432,8 @@ int ringpu_image_state_allowed(const RinGpuImageDescV1* desc, uint32_t state)
                 ((desc->usage & RIN_GPU_IMAGE_STORAGE) != 0u &&
                  desc->dimension == RIN_GPU_IMAGE_DIMENSION_2D &&
                  (desc->format == RIN_GPU_FORMAT_R8_UNORM ||
-                  desc->format == RIN_GPU_FORMAT_RGBA8_UNORM)));
+                  desc->format == RIN_GPU_FORMAT_RGBA8_UNORM ||
+                  desc->format == RIN_GPU_FORMAT_RGBA16_FLOAT)));
     return 0;
 }
 

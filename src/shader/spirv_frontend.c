@@ -102,6 +102,7 @@ enum {
     SPV_MEMORY_VULKAN = 3,
     SPV_CAPABILITY_SHADER = 1,
     SPV_CAPABILITY_STORAGE_IMAGE_EXTENDED_FORMATS = 49,
+    SPV_IMAGE_FORMAT_RGBA16F = 2,
     SPV_IMAGE_FORMAT_RGBA8 = 4,
     SPV_IMAGE_FORMAT_R8 = 15
 };
@@ -373,9 +374,12 @@ static int storage_image_format_supported(const SpvType* type,
         return 0;
     if (type->image_format == SPV_IMAGE_FORMAT_RGBA8)
         return 1;
-    return type->image_format == SPV_IMAGE_FORMAT_R8 &&
+    if (type->image_format == SPV_IMAGE_FORMAT_R8)
+        return (feature_flags &
+                RIN_SPIRV_TRANSLATE_FEATURE_R8_STORAGE_IMAGE) != 0u;
+    return type->image_format == SPV_IMAGE_FORMAT_RGBA16F &&
            (feature_flags &
-            RIN_SPIRV_TRANSLATE_FEATURE_R8_STORAGE_IMAGE) != 0u;
+            RIN_SPIRV_TRANSLATE_FEATURE_RGBA16F_STORAGE_IMAGE) != 0u;
 }
 
 static int descriptor_type(const SpvType* types, uint32_t bound,
@@ -1610,7 +1614,9 @@ static int spirv_translate_impl(
                 } else if (instruction_words[1] ==
                                SPV_CAPABILITY_STORAGE_IMAGE_EXTENDED_FORMATS &&
                            (feature_flags &
-                            RIN_SPIRV_TRANSLATE_FEATURE_R8_STORAGE_IMAGE) != 0u) {
+                            (RIN_SPIRV_TRANSLATE_FEATURE_R8_STORAGE_IMAGE |
+                             RIN_SPIRV_TRANSLATE_FEATURE_RGBA16F_STORAGE_IMAGE)) !=
+                               0u) {
                     capability_storage_image_extended_formats = 1u;
                 } else {
                     diag(info, "SPIR-V capability is outside the bounded profile");

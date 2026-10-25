@@ -14,14 +14,16 @@
 #define RIN_SPIRV_MAX_SPECIALIZATIONS 64u
 #define RIN_SPIRV_NAME_MAX 64u
 
-/* Exact-format authorization for R8 storage images. This is intentionally
- * narrower than Vulkan's shaderStorageImageExtendedFormats feature: it only
- * enables the R8_UNORM format implemented by a selected RinGPU backend. The
- * caller derives this bit from its API/device contract; V1/V2 never enable it
+/* Exact-format authorization for extended storage-image formats. These bits
+ * are narrower than Vulkan's shaderStorageImageExtendedFormats feature: each
+ * enables only a format implemented by the selected RinGPU backend. The
+ * caller derives them from its API/device contract; V1/V2 never enable them
  * implicitly. */
 #define RIN_SPIRV_TRANSLATE_FEATURE_R8_STORAGE_IMAGE UINT32_C(0x00000001)
+#define RIN_SPIRV_TRANSLATE_FEATURE_RGBA16F_STORAGE_IMAGE UINT32_C(0x00000002)
 #define RIN_SPIRV_TRANSLATE_FEATURE_KNOWN \
-    RIN_SPIRV_TRANSLATE_FEATURE_R8_STORAGE_IMAGE
+    (RIN_SPIRV_TRANSLATE_FEATURE_R8_STORAGE_IMAGE | \
+     RIN_SPIRV_TRANSLATE_FEATURE_RGBA16F_STORAGE_IMAGE)
 
 typedef enum RinSpirvResult {
     RIN_SPIRV_OK = 0,
@@ -142,8 +144,8 @@ int ringpu_spirv_translate_v2(const uint32_t* words, size_t word_count,
 
 /* V3 adds exact-format storage-image feature authorization while preserving
  * V2 interpolation metadata. A module declaring StorageImageExtendedFormats
- * is accepted only with explicit R8 authorization; other extended image
- * formats remain unsupported. */
+ * is accepted only for explicitly authorized formats; every other extended
+ * image format remains unsupported. */
 int ringpu_spirv_translate_v3(
     const uint32_t* words, size_t word_count, uint32_t expected_stage,
     const RinSpirvSpecializationValueV1* overrides,
