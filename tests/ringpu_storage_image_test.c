@@ -5,6 +5,7 @@
 
 #include "../src/core/core.h"
 #include <ringpu/software.h>
+#include <ringpu/spirv_frontend.h>
 
 static RinGpuBackendOpsV1 delegated_ops;
 static uint32_t fail_next_graphics_pipeline;
@@ -167,50 +168,131 @@ static void make_vertex_shader(uint8_t* storage)
                     RIN_SHADER_UNUSED, RIN_SHADER_UNUSED, RIN_SHADER_UNUSED, 0u);
 }
 
-static void make_fragment_shader(uint8_t* storage)
+static void emit_spirv(uint32_t* words, size_t* count, uint16_t opcode,
+                       uint16_t word_count, const uint32_t* operands)
 {
-    RinShaderHeaderV1* header = (RinShaderHeaderV1*)storage;
-    RinShaderInstructionV1* instructions =
-        (RinShaderInstructionV1*)(storage + sizeof(*header));
-    static const uint32_t integer_bits[] = {
-        UINT32_C(0), UINT32_C(0), UINT32_C(123), UINT32_C(45),
-        UINT32_C(67), UINT32_C(89)};
-    static const uint32_t color_bits[] = {
-        UINT32_C(0), UINT32_C(0), UINT32_C(0), UINT32_C(0x3f800000)};
-    memset(storage, 0, sizeof(RinShaderHeaderV1) +
-           20u * sizeof(RinShaderInstructionV1));
-    header->magic = RIN_SHADER_MAGIC;
-    header->version = RIN_SHADER_IR_VERSION;
-    header->header_size = sizeof(*header);
-    header->total_size = sizeof(RinShaderHeaderV1) +
-                         20u * sizeof(RinShaderInstructionV1);
-    header->stage = RIN_SHADER_STAGE_FRAGMENT;
-    header->instruction_count = 20u;
-    header->register_count = 10u;
-    header->output_count = 4u;
-    header->resource_count = 2u;
-    for (uint16_t index = 0u; index < 6u; ++index)
-        set_instruction(&instructions[index], RIN_SHADER_OP_CONST_I32,
-                        index,
-                        RIN_SHADER_UNUSED, RIN_SHADER_UNUSED,
-                        RIN_SHADER_UNUSED, integer_bits[index]);
-    set_instruction(&instructions[6], RIN_SHADER_OP_STORE_IMAGE_2D_I32,
-                    2u, 0u, 1u, 0u, 0u);
-    for (uint16_t index = 0u; index < 4u; ++index) {
-        set_instruction(&instructions[index + 7u],
-                        RIN_SHADER_OP_STORE_IMAGE_2D_I32, index + 2u,
-                        0u, 1u, 1u, 0u);
-        instructions[index + 7u].flags = index;
-        set_instruction(&instructions[index + 11u], RIN_SHADER_OP_CONST_F32,
-                        index + 6u, RIN_SHADER_UNUSED, RIN_SHADER_UNUSED,
-                        RIN_SHADER_UNUSED, color_bits[index]);
-        set_instruction(&instructions[index + 15u],
-                        RIN_SHADER_OP_STORE_OUTPUT_F32, RIN_SHADER_UNUSED,
-                        index + 6u, RIN_SHADER_UNUSED, RIN_SHADER_UNUSED,
-                        index);
+    words[(*count)++] = ((uint32_t)word_count << 16u) | opcode;
+    for (uint16_t index = 0u; index + 1u < word_count; ++index)
+        words[(*count)++] = operands[index];
+}
+
+static int make_fragment_shader(uint8_t* storage, size_t storage_capacity,
+                                size_t* shader_size_out)
+{
+    uint32_t words[256] = {0};
+    uint32_t operands[8] = {0};
+    size_t count = 5u;
+    RinSpirvTranslationInfoV2 info;
+    RinShaderHeaderV1* header;
+    int result;
+
+    words[0] = RIN_SPIRV_MAGIC;
+    words[1] = 0x00010300u;
+    words[2] = 0u;
+    words[3] = 26u;
+    words[4] = 0u;
+    operands[0] = 1u;
+    emit_spirv(words, &count, 17u, 2u, operands); /* Shader */
+    operands[0] = 49u;
+    emit_spirv(words, &count, 17u, 2u, operands); /* StorageImageExtendedFormats */
+    operands[0] = 0u; operands[1] = 3u;
+    emit_spirv(words, &count, 14u, 3u, operands); /* Vulkan memory */
+    operands[0] = 4u; operands[1] = 18u;
+    operands[2] = 0x6e69616du; operands[3] = 0u; operands[4] = 25u;
+    emit_spirv(words, &count, 15u, 6u, operands); /* Fragment main/output */
+    operands[0] = 11u; operands[1] = 34u; operands[2] = 0u;
+    emit_spirv(words, &count, 71u, 4u, operands); /* R8 set */
+    operands[0] = 11u; operands[1] = 33u; operands[2] = 0u;
+    emit_spirv(words, &count, 71u, 4u, operands); /* R8 binding */
+    operands[0] = 12u; operands[1] = 34u; operands[2] = 0u;
+    emit_spirv(words, &count, 71u, 4u, operands); /* RGBA8 set */
+    operands[0] = 12u; operands[1] = 33u; operands[2] = 1u;
+    emit_spirv(words, &count, 71u, 4u, operands); /* RGBA8 binding */
+    operands[0] = 25u; operands[1] = 30u; operands[2] = 0u;
+    emit_spirv(words, &count, 71u, 4u, operands); /* color output location */
+
+    operands[0] = 1u;
+    emit_spirv(words, &count, 19u, 2u, operands); /* void */
+    operands[0] = 2u; operands[1] = 32u;
+    emit_spirv(words, &count, 22u, 3u, operands); /* float */
+    operands[0] = 3u; operands[1] = 32u; operands[2] = 1u;
+    emit_spirv(words, &count, 21u, 4u, operands); /* signed int */
+    operands[0] = 4u; operands[1] = 3u; operands[2] = 2u;
+    emit_spirv(words, &count, 23u, 4u, operands); /* ivec2 */
+    operands[0] = 5u; operands[1] = 2u; operands[2] = 4u;
+    emit_spirv(words, &count, 23u, 4u, operands); /* vec4 */
+    operands[0] = 6u; operands[1] = 2u; operands[2] = 1u;
+    operands[3] = 0u; operands[4] = 0u; operands[5] = 0u;
+    operands[6] = 2u; operands[7] = 15u;
+    emit_spirv(words, &count, 25u, 9u, operands); /* R8 storage image */
+    operands[0] = 7u; operands[7] = 4u;
+    emit_spirv(words, &count, 25u, 9u, operands); /* RGBA8 storage image */
+    operands[0] = 8u; operands[1] = 0u; operands[2] = 6u;
+    emit_spirv(words, &count, 32u, 4u, operands); /* R8 image pointer */
+    operands[0] = 9u; operands[1] = 0u; operands[2] = 7u;
+    emit_spirv(words, &count, 32u, 4u, operands); /* RGBA8 image pointer */
+    operands[0] = 24u; operands[1] = 3u; operands[2] = 5u;
+    emit_spirv(words, &count, 32u, 4u, operands); /* output pointer */
+    operands[0] = 10u; operands[1] = 1u;
+    emit_spirv(words, &count, 33u, 3u, operands); /* function type */
+    operands[0] = 8u; operands[1] = 11u; operands[2] = 0u;
+    emit_spirv(words, &count, 59u, 4u, operands); /* R8 descriptor */
+    operands[0] = 9u; operands[1] = 12u; operands[2] = 0u;
+    emit_spirv(words, &count, 59u, 4u, operands); /* RGBA8 descriptor */
+    operands[0] = 24u; operands[1] = 25u; operands[2] = 3u;
+    emit_spirv(words, &count, 59u, 4u, operands); /* fragment color output */
+    operands[0] = 3u; operands[1] = 13u; operands[2] = 0u;
+    emit_spirv(words, &count, 43u, 4u, operands); /* integer zero */
+    operands[0] = 2u; operands[1] = 14u; operands[2] = 0x3f000000u;
+    emit_spirv(words, &count, 43u, 4u, operands); /* 0.5 */
+    operands[0] = 2u; operands[1] = 15u; operands[2] = 0x3e800000u;
+    emit_spirv(words, &count, 43u, 4u, operands); /* 0.25 */
+    operands[0] = 2u; operands[1] = 16u; operands[2] = 0x3f400000u;
+    emit_spirv(words, &count, 43u, 4u, operands); /* 0.75 */
+    operands[0] = 2u; operands[1] = 17u; operands[2] = 0x3f800000u;
+    emit_spirv(words, &count, 43u, 4u, operands); /* 1.0 */
+
+    operands[0] = 1u; operands[1] = 18u; operands[2] = 0u; operands[3] = 10u;
+    emit_spirv(words, &count, 54u, 5u, operands); /* function */
+    operands[0] = 19u;
+    emit_spirv(words, &count, 248u, 2u, operands); /* label */
+    operands[0] = 4u; operands[1] = 20u;
+    operands[2] = 13u; operands[3] = 13u;
+    emit_spirv(words, &count, 80u, 5u, operands); /* ivec2 coordinate */
+    operands[0] = 5u; operands[1] = 21u;
+    operands[2] = 14u; operands[3] = 15u;
+    operands[4] = 16u; operands[5] = 17u;
+    emit_spirv(words, &count, 80u, 7u, operands); /* vec4 value */
+    operands[0] = 6u; operands[1] = 22u; operands[2] = 11u;
+    emit_spirv(words, &count, 61u, 4u, operands); /* load R8 image */
+    operands[0] = 7u; operands[1] = 23u; operands[2] = 12u;
+    emit_spirv(words, &count, 61u, 4u, operands); /* load RGBA8 image */
+    operands[0] = 22u; operands[1] = 20u; operands[2] = 21u;
+    emit_spirv(words, &count, 99u, 4u, operands); /* write R8 */
+    operands[0] = 23u;
+    emit_spirv(words, &count, 99u, 4u, operands); /* write RGBA8 */
+    operands[0] = 25u; operands[1] = 21u;
+    emit_spirv(words, &count, 62u, 3u, operands); /* store color */
+    emit_spirv(words, &count, 253u, 1u, operands); /* return */
+    emit_spirv(words, &count, 56u, 1u, operands); /* function end */
+
+    result = ringpu_spirv_translate_v3(
+        words, count, RIN_SHADER_STAGE_FRAGMENT, NULL, 0u,
+        RIN_SPIRV_TRANSLATE_FEATURE_R8_STORAGE_IMAGE,
+        storage, storage_capacity, &info);
+    if (result != RIN_SPIRV_OK || info.base.descriptor_count != 2u ||
+        info.base.descriptors[0].binding != 0u ||
+        info.base.descriptors[1].binding != 1u) {
+        fprintf(stderr, "storage-image SPIR-V translation=%d descriptors=%u: %s\n",
+                result, info.base.descriptor_count, info.base.diagnostic);
+        return 0;
     }
-    set_instruction(&instructions[19], RIN_SHADER_OP_RETURN, RIN_SHADER_UNUSED,
-                    RIN_SHADER_UNUSED, RIN_SHADER_UNUSED, RIN_SHADER_UNUSED, 0u);
+    header = (RinShaderHeaderV1*)storage;
+    if (header->total_size < sizeof(*header) ||
+        header->total_size > storage_capacity)
+        return 0;
+    *shader_size_out = header->total_size;
+    return 1;
 }
 
 int main(void)
@@ -219,6 +301,7 @@ int main(void)
                          9u * sizeof(RinShaderInstructionV1)];
     uint8_t fragment_shader[sizeof(RinShaderHeaderV1) +
                            20u * sizeof(RinShaderInstructionV1)];
+    size_t fragment_shader_size = 0u;
     RinGpuCore core;
     RinGpuSoftwareBackend* backend = NULL;
     RinGpuGraphicsPipelineNativeDescV2 pipeline_desc = {0};
@@ -245,7 +328,9 @@ int main(void)
     int result = 1;
 
     make_vertex_shader(vertex_shader);
-    make_fragment_shader(fragment_shader);
+    if (!make_fragment_shader(fragment_shader, sizeof(fragment_shader),
+                              &fragment_shader_size))
+        return 1;
     if (!make_core(&core, &backend)) return 1;
     delegated_ops = core.backend;
     core.backend.create_graphics_pipeline =
@@ -260,7 +345,7 @@ int main(void)
     if (ringpu_create_shader_module(&core, vertex_shader, sizeof(vertex_shader),
                                     &vertex_module) != RIN_GPU_OK ||
         ringpu_create_shader_module(&core, fragment_shader,
-                                    sizeof(fragment_shader), &fragment_module) !=
+                                    fragment_shader_size, &fragment_module) !=
             RIN_GPU_OK)
         goto done;
     pipeline_desc.base.abi_version = RIN_GPU_ABI_VERSION;
@@ -519,7 +604,7 @@ int main(void)
     {
         int readback_result = ringpu_readback_image(
             &core, storage_image, &readback, &value, sizeof(value));
-        if (readback_result != RIN_GPU_OK || value != 123u) {
+        if (readback_result != RIN_GPU_OK || value != 128u) {
             fprintf(stderr, "R8 readback error %d value %u\n",
                     readback_result, (unsigned)value);
             goto done;
@@ -527,9 +612,9 @@ int main(void)
         readback_result = ringpu_readback_image(
             &core, rgba_storage_image, &readback, rgba_value,
             sizeof(rgba_value));
-        if (readback_result != RIN_GPU_OK || rgba_value[0] != 123u ||
-            rgba_value[1] != 45u || rgba_value[2] != 67u ||
-            rgba_value[3] != 89u) {
+        if (readback_result != RIN_GPU_OK || rgba_value[0] != 128u ||
+            rgba_value[1] != 64u || rgba_value[2] != 191u ||
+            rgba_value[3] != 255u) {
             fprintf(stderr,
                     "RGBA8 readback error %d value %u,%u,%u,%u\n",
                     readback_result, (unsigned)rgba_value[0],

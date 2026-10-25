@@ -4919,8 +4919,7 @@ static int sw_run_shader_typed(const SwShader* shader, const SwShaderIo* io)
                     f32_registers[in->destination] > 1.0f)
                     return RIN_GPU_ERROR_BOUNDS;
                 value = f32_registers[in->destination] * 255.0f + 0.5f;
-                if (value < 0.0f || value > 255.0f)
-                    return RIN_GPU_ERROR_BOUNDS;
+                if (value > 255.0f) value = 255.0f;
                 *address = (uint8_t)value;
             }
             break;
