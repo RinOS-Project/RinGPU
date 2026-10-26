@@ -6,3 +6,4 @@
 #include "../../include/ringpu/diagnostics.h"
 
 #endif /* RIN_SUBSYSTEMS_RINGPU_DIAGNOSTICS_H */
+
