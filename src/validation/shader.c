@@ -290,6 +290,9 @@ static int shader_builtin_type(uint32_t stage, uint32_t builtin,
         case RIN_SHADER_BUILTIN_WORKGROUP_X:
         case RIN_SHADER_BUILTIN_WORKGROUP_Y:
         case RIN_SHADER_BUILTIN_WORKGROUP_Z:
+        case RIN_SHADER_BUILTIN_LOCAL_SIZE_X:
+        case RIN_SHADER_BUILTIN_LOCAL_SIZE_Y:
+        case RIN_SHADER_BUILTIN_LOCAL_SIZE_Z:
             if (stage != RIN_SHADER_STAGE_COMPUTE) return 0;
             *type = SHADER_VALUE_I32;
             return 1;

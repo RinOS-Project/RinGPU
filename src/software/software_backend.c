@@ -118,6 +118,9 @@ typedef struct SwComputeExecution {
     uint32_t workgroup_x;
     uint32_t workgroup_y;
     uint32_t workgroup_z;
+    uint32_t local_size_x;
+    uint32_t local_size_y;
+    uint32_t local_size_z;
     uint8_t* shared_memory;
     uint32_t shared_memory_size;
     uint32_t shared_epoch;
@@ -4769,6 +4772,18 @@ static int sw_run_shader_typed(const SwShader* shader, const SwShaderIo* io)
             case RIN_SHADER_BUILTIN_WORKGROUP_Z:
                 i32_registers[in->destination] =
                     (int32_t)io->compute_execution->workgroup_z;
+                break;
+            case RIN_SHADER_BUILTIN_LOCAL_SIZE_X:
+                i32_registers[in->destination] =
+                    (int32_t)io->compute_execution->local_size_x;
+                break;
+            case RIN_SHADER_BUILTIN_LOCAL_SIZE_Y:
+                i32_registers[in->destination] =
+                    (int32_t)io->compute_execution->local_size_y;
+                break;
+            case RIN_SHADER_BUILTIN_LOCAL_SIZE_Z:
+                i32_registers[in->destination] =
+                    (int32_t)io->compute_execution->local_size_z;
                 break;
             default:
                 return RIN_GPU_ERROR_UNSUPPORTED;
@@ -10962,6 +10977,9 @@ static int sw_dispatch_compute(RinGpuSoftwareBackend* backend,
                             execution.workgroup_x = workgroup_x;
                             execution.workgroup_y = workgroup_y;
                             execution.workgroup_z = workgroup_z;
+                            execution.local_size_x = header->workgroup_x;
+                            execution.local_size_y = header->workgroup_y;
+                            execution.local_size_z = header->workgroup_z;
                             io.f32_outputs = f32_outputs;
                             io.i32_outputs = i32_outputs;
                             io.output_types = output_types;

@@ -107,5 +107,21 @@ int main(void) {
     if (ringpu_shader_validate(&shared_shader, sizeof(shared_shader), &info) ==
         RIN_SHADER_OK)
         return 5;
+
+    /* Local-size builtin values are legal only in compute shaders and remain
+     * explicit RSH1 builtin IDs, independent of execution backend. */
+    atomic_shader.instructions[0].opcode = RIN_SHADER_OP_LOAD_BUILTIN_I32;
+    atomic_shader.instructions[0].destination = 0u;
+    atomic_shader.instructions[0].source0 = RIN_SHADER_UNUSED;
+    atomic_shader.instructions[0].source1 = RIN_SHADER_UNUSED;
+    atomic_shader.instructions[0].resource = RIN_SHADER_UNUSED;
+    atomic_shader.instructions[0].immediate = RIN_SHADER_BUILTIN_LOCAL_SIZE_X;
+    if (ringpu_shader_validate(&atomic_shader, sizeof(atomic_shader), &info) !=
+        RIN_SHADER_OK)
+        return 6;
+    atomic_shader.header.stage = RIN_SHADER_STAGE_VERTEX;
+    if (ringpu_shader_validate(&atomic_shader, sizeof(atomic_shader), &info) ==
+        RIN_SHADER_OK)
+        return 7;
     return 0;
 }

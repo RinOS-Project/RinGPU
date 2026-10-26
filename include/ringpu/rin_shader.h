@@ -260,7 +260,10 @@ typedef enum RinShaderBuiltin {
      * follow the existing values so older RSH1 bytecode remains unchanged. */
     RIN_SHADER_BUILTIN_POINT_COORD_X = 16,
     RIN_SHADER_BUILTIN_POINT_COORD_Y = 17,
-    RIN_SHADER_BUILTIN_LAST = RIN_SHADER_BUILTIN_POINT_COORD_Y
+    RIN_SHADER_BUILTIN_LOCAL_SIZE_X = 18,
+    RIN_SHADER_BUILTIN_LOCAL_SIZE_Y = 19,
+    RIN_SHADER_BUILTIN_LOCAL_SIZE_Z = 20,
+    RIN_SHADER_BUILTIN_LAST = RIN_SHADER_BUILTIN_LOCAL_SIZE_Z
 } RinShaderBuiltin;
 
 /* The RSH1 wire structs are byte-packed. GCC/Clang accept the attribute on
