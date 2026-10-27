@@ -9,6 +9,7 @@ ringpu_kernel32 = static_library(
     '../../src/memory/memory_runtime.c',
     '../../src/presentation/presentation.c',
     '../../src/validation/diagnostics.c',
+    '../../src/validation/shader.c',
   ),
   c_args: ringpu_kernel32_c_args,
   pic: false,
