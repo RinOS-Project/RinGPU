@@ -1,0 +1,6 @@
+@PACKAGE_INIT@
+
+if(NOT TARGET RinGPU::RinGPU)
+  include("${CMAKE_CURRENT_LIST_DIR}/RinGPUTargets.cmake")
+endif()
+check_required_components(RinGPU)

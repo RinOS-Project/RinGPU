@@ -73,6 +73,11 @@ else
                                 install: true)
     ringpu_ipc_dep = declare_dependency(link_with: [ringpu_ipc, ringpu],
                                         include_directories: inc)
+    pkgconfig.generate(ringpu_ipc,
+                       name: 'RinGPU IPC',
+                       filebase: 'ringpu-ipc',
+                       description: 'RinGPU RinOS cross-process IPC adapter',
+                       requires: 'ringpu')
   endif
 
   if get_option('buildtype') != 'plain'

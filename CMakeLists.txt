@@ -11,6 +11,7 @@ option(RINGPU_BUILD_PRESENTATION "Build the RinGPU presentation runtime" ON)
 option(RINGPU_BUILD_SOFTWARE_BACKEND
        "Build the generic CPU software backend in the RinGPU archive" ON)
 include(GNUInstallDirs)
+include(CMakePackageConfigHelpers)
 
 set(RINGPU_SOURCES
     src/command/commands.c
@@ -120,6 +121,19 @@ install(DIRECTORY ../rinresource/include/rinresource
 install(EXPORT RinGPUTargets
         FILE RinGPUTargets.cmake
         NAMESPACE RinGPU::
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/RinGPU)
+
+configure_package_config_file(
+    cmake/RinGPUConfig.cmake.in
+    ${CMAKE_CURRENT_BINARY_DIR}/RinGPUConfig.cmake
+    INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/RinGPU)
+write_basic_package_version_file(
+    ${CMAKE_CURRENT_BINARY_DIR}/RinGPUConfigVersion.cmake
+    VERSION ${PROJECT_VERSION}
+    COMPATIBILITY SameMajorVersion)
+install(FILES
+        ${CMAKE_CURRENT_BINARY_DIR}/RinGPUConfig.cmake
+        ${CMAKE_CURRENT_BINARY_DIR}/RinGPUConfigVersion.cmake
         DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/RinGPU)
 
 configure_file(ringpu.pc.in ringpu.pc @ONLY)
