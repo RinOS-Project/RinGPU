@@ -493,7 +493,8 @@ static_assert(sizeof(RinGpuMemoryCpuReadbackOpsV1) == 40u,
 #endif
 static_assert(offsetof(RinGpuMemoryBackendV2, cpu_readback_ops) == 200u,
               "RinGPU memory backend V2 extension offset drift");
-#if UINTPTR_MAX == UINT32_MAX
+#if UINTPTR_MAX == UINT32_MAX && !defined(_MSC_VER) && \
+    !defined(__MINGW32__)
 static_assert(sizeof(RinGpuMemoryBackendV2) == 220u,
               "RinGPU memory backend V2 drift");
 #else
@@ -529,7 +530,8 @@ _Static_assert(sizeof(RinGpuMemoryCpuReadbackOpsV1) == 40u,
 #endif
 _Static_assert(offsetof(RinGpuMemoryBackendV2, cpu_readback_ops) == 200u,
                "RinGPU memory backend V2 extension offset drift");
-#if UINTPTR_MAX == UINT32_MAX
+#if UINTPTR_MAX == UINT32_MAX && !defined(_MSC_VER) && \
+    !defined(__MINGW32__)
 _Static_assert(sizeof(RinGpuMemoryBackendV2) == 220u,
                "RinGPU memory backend V2 drift");
 #else

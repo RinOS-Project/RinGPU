@@ -393,9 +393,9 @@ _Static_assert(sizeof(RinGpuBackendDrawV1) == 56u,
                "RinGPU backend draw drift");
 _Static_assert(sizeof(RinGpuBackendRenderPassBeginV1) == 80u,
                "RinGPU backend render-pass begin drift");
-/* Keep the backend's pointer-free uint64_t payloads aligned with the public
- * ABI on MinGW i686, whose uint64_t alignment is eight bytes. */
-#if UINTPTR_MAX == UINT64_MAX || defined(__MINGW32__)
+/* Keep pointer-free uint64_t payloads aligned with the public ABI on MinGW
+ * i686 and MSVC x86, whose uint64_t alignment is eight bytes. */
+#if UINTPTR_MAX == UINT64_MAX || defined(__MINGW32__) || defined(_MSC_VER)
 _Static_assert(sizeof(RinGpuBackendRenderPassMrtBeginV1) == 200u,
                "RinGPU backend MRT render-pass begin drift");
 #else
@@ -419,21 +419,21 @@ _Static_assert(sizeof(RinGpuBackendDrawIndirectV1) == 832u,
 /* SysV i386 aligns uint64_t to four bytes, so the vertex-binding array starts
  * four bytes earlier than on x86_64 and MinGW i686. The enclosing public
  * command record reserves the canonical payload size independently. */
-#if UINTPTR_MAX == UINT64_MAX || defined(__MINGW32__)
+#if UINTPTR_MAX == UINT64_MAX || defined(__MINGW32__) || defined(_MSC_VER)
 _Static_assert(sizeof(RinGpuBackendDrawIndexedIndirectV1) == 864u,
                "RinGPU backend indirect indexed draw drift");
 #else
 _Static_assert(sizeof(RinGpuBackendDrawIndexedIndirectV1) == 860u,
                "RinGPU backend indirect indexed draw drift");
 #endif
-#if UINTPTR_MAX == UINT64_MAX || defined(__MINGW32__)
+#if UINTPTR_MAX == UINT64_MAX || defined(__MINGW32__) || defined(_MSC_VER)
 _Static_assert(sizeof(RinGpuBackendRenderPassDepthBeginV1) == 136u,
                "RinGPU backend depth render-pass begin drift");
 #else
 _Static_assert(sizeof(RinGpuBackendRenderPassDepthBeginV1) == 132u,
                "RinGPU backend depth render-pass begin drift");
 #endif
-#if UINTPTR_MAX == UINT64_MAX || defined(__MINGW32__)
+#if UINTPTR_MAX == UINT64_MAX || defined(__MINGW32__) || defined(_MSC_VER)
 _Static_assert(sizeof(RinGpuBackendRenderPassDepthStencilBeginV1) == 152u,
                "RinGPU backend separate depth/stencil render-pass begin drift");
 #else

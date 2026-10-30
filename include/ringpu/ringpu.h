@@ -1822,11 +1822,11 @@ _Static_assert(sizeof(RinGpuVertexBufferBindingV1) == 24u,
                "RinGPU vertex-buffer binding ABI drift");
 _Static_assert(sizeof(RinGpuGraphicsPipelineDepthDescV1) == 56u,
                "RinGPU depth graphics pipeline ABI drift");
-/* MinGW's i686 ABI aligns uint64_t to eight bytes.  These pointer-free
+/* MinGW i686 and MSVC x86 align uint64_t to eight bytes.  These pointer-free
  * records therefore retain their 64-bit layout there; other 32-bit ABIs use
  * their established four-byte uint64_t alignment until a packed wire ABI is
  * explicitly introduced. */
-#if UINTPTR_MAX == UINT64_MAX || defined(__MINGW32__)
+#if UINTPTR_MAX == UINT64_MAX || defined(__MINGW32__) || defined(_MSC_VER)
 _Static_assert(sizeof(RinGpuGraphicsPipelineBlendDescV1) == 88u,
                "RinGPU blend graphics pipeline ABI drift");
 _Static_assert(sizeof(RinGpuGraphicsPipelineNativeDescV1) == 168u,
@@ -1905,21 +1905,21 @@ _Static_assert(sizeof(RinGpuRenderPassDescV1) == 88u,
                "RinGPU render-pass ABI drift");
 _Static_assert(sizeof(RinGpuColorAttachmentV1) == 16u,
                "RinGPU color attachment ABI drift");
-#if UINTPTR_MAX == UINT64_MAX || defined(__MINGW32__)
+#if UINTPTR_MAX == UINT64_MAX || defined(__MINGW32__) || defined(_MSC_VER)
 _Static_assert(sizeof(RinGpuRenderPassMrtDescV1) == 208u,
                "RinGPU MRT render-pass ABI drift");
 #else
 _Static_assert(sizeof(RinGpuRenderPassMrtDescV1) == 204u,
                "RinGPU MRT render-pass ABI drift");
 #endif
-#if UINTPTR_MAX == UINT64_MAX || defined(__MINGW32__)
+#if UINTPTR_MAX == UINT64_MAX || defined(__MINGW32__) || defined(_MSC_VER)
 _Static_assert(sizeof(RinGpuRenderPassDepthDescV1) == 144u,
                "RinGPU depth render-pass ABI drift");
 #else
 _Static_assert(sizeof(RinGpuRenderPassDepthDescV1) == 140u,
                "RinGPU depth render-pass ABI drift");
 #endif
-#if UINTPTR_MAX == UINT64_MAX || defined(__MINGW32__)
+#if UINTPTR_MAX == UINT64_MAX || defined(__MINGW32__) || defined(_MSC_VER)
 _Static_assert(sizeof(RinGpuRenderPassDepthStencilDescV1) == 160u,
                "RinGPU separate depth/stencil render-pass ABI drift");
 #else
