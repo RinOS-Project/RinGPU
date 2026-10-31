@@ -11,6 +11,8 @@ ringpu_kernel32 = static_library(
     '../../src/validation/diagnostics.c',
     '../../src/validation/shader.c',
   ),
+  include_directories: include_directories('../../include',
+                                            '../../../rinresource/include'),
   c_args: ringpu_kernel32_c_args,
   pic: false,
   install: false,
