@@ -505,6 +505,9 @@ static int bridge_canonicalize_command(
     BRIDGE_COPY_COMMAND_PAYLOAD(RIN_GPU_BACKEND_COMMAND_DRAW_INDEXED_V2,
                                 draw_indexed_v2);
     BRIDGE_COPY_COMMAND_PAYLOAD(
+        RIN_GPU_BACKEND_COMMAND_DRAW_INDEXED_V2_BASE_VERTEX,
+        draw_indexed_v2_base_vertex);
+    BRIDGE_COPY_COMMAND_PAYLOAD(
         RIN_GPU_BACKEND_COMMAND_BEGIN_RENDER_PASS_DEPTH_STENCIL,
         render_pass_depth_stencil_begin);
     BRIDGE_COPY_COMMAND_PAYLOAD(RIN_GPU_BACKEND_COMMAND_BEGIN_RENDER_PASS_MRT,

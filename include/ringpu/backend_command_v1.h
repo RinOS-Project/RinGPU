@@ -559,6 +559,26 @@ typedef struct RinGpuBackendDrawIndexedV2 {
         vertex_buffers[RIN_GPU_MAX_VERTEX_BUFFER_BINDINGS];
 } RinGpuBackendDrawIndexedV2;
 
+typedef struct RinGpuBackendDrawIndexedV2BaseVertexV1 {
+    uint64_t pipeline_cookie;
+    uint64_t color_target_cookie;
+    uint64_t bind_group_cookie;
+    uint64_t index_buffer_cookie;
+    uint64_t index_offset;
+    uint32_t index_format;
+    uint32_t mip_level;
+    uint32_t array_layer;
+    uint32_t index_count;
+    uint32_t instance_count;
+    uint32_t first_index;
+    uint32_t vertex_count;
+    uint32_t first_instance;
+    uint32_t vertex_binding_count;
+    int32_t base_vertex;
+    RinGpuBackendVertexBufferBindingV1
+        vertex_buffers[RIN_GPU_MAX_VERTEX_BUFFER_BINDINGS];
+} RinGpuBackendDrawIndexedV2BaseVertexV1;
+
 typedef struct RinGpuBackendDrawIndexedBaseVertexV1 {
     uint64_t pipeline_cookie;
     uint64_t color_target_cookie;
@@ -699,6 +719,8 @@ typedef struct RinGpuBackendRenderPassDepthStencilBeginV1 {
     RinGpuBackendDrawVerticesV2 draw_vertices_v2;                            \
     RinGpuBackendDrawIndexedV1 draw_indexed;                                 \
     RinGpuBackendDrawIndexedV2 draw_indexed_v2;                              \
+    RinGpuBackendDrawIndexedV2BaseVertexV1                                  \
+        draw_indexed_v2_base_vertex;                                        \
     RinGpuBackendDrawIndexedBaseVertexV1 draw_indexed_base_vertex;           \
     RinGpuBackendRenderPassDepthBeginV1 render_pass_depth_begin;             \
     RinGpuBackendRenderPassDepthStencilBeginV1                              \
