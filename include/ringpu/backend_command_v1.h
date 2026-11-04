@@ -91,6 +91,38 @@ typedef struct RinGpuBackendBufferToImageCopyV1 {
     uint32_t reserved;
 } RinGpuBackendBufferToImageCopyV1;
 
+/* V2 carries the destination storage layout needed by physical copy engines.
+ * V1 remains unchanged; V2 currently defines an explicitly byte-linear image
+ * plane and never infers a pitch or tiling mode from dimensions. */
+typedef struct RinGpuBackendBufferToImageCopyV2 {
+    uint32_t abi_version;
+    uint32_t struct_size;
+    uint64_t buffer_cookie;
+    uint64_t buffer_offset;
+    uint64_t buffer_size_bytes;
+    uint64_t buffer_row_pitch_bytes;
+    uint64_t image_cookie;
+    uint64_t image_offset_bytes;
+    uint64_t image_size_bytes;
+    uint64_t image_row_pitch_bytes;
+    uint32_t image_mip_level;
+    uint32_t image_array_layer;
+    uint32_t image_width;
+    uint32_t image_height;
+    uint32_t image_offset_x;
+    uint32_t image_offset_y;
+    uint32_t copy_width;
+    uint32_t copy_height;
+    uint32_t buffer_image_height_texels;
+    uint32_t bytes_per_texel;
+    uint32_t storage_layout;
+    uint32_t flags;
+    uint32_t reserved;
+} RinGpuBackendBufferToImageCopyV2;
+
+#define RIN_GPU_BACKEND_BUFFER_TO_IMAGE_COPY_V2_VERSION UINT32_C(2)
+#define RIN_GPU_BACKEND_IMAGE_STORAGE_LINEAR_V1 UINT32_C(1)
+
 /* The bridge transition record is independent of the API-specific transition
  * type. aspect_mask is meaningful in the common contract; OS-Core-generated
  * transitions use zero because the core transition API has no aspect selector. */
@@ -654,6 +686,7 @@ typedef struct RinGpuBackendRenderPassDepthStencilBeginV1 {
     RinGpuBackendImageCopyV1 image_copy;                                     \
     RinGpuBackendImageToBufferCopyV1 image_to_buffer_copy;                   \
     RinGpuBackendBufferToImageCopyV1 buffer_to_image_copy;                   \
+    RinGpuBackendBufferToImageCopyV2 buffer_to_image_copy_v2;                 \
     transition_type image_transition;                                        \
     RinGpuBackendDispatchV1 dispatch;                                        \
     RinGpuBackendComputeBarrierV1 compute_barrier;                           \
